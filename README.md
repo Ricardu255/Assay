@@ -8,13 +8,6 @@
 
 零运行时依赖：核心只用 JDK，构建只需 Maven。
 
-## 许可证
-
-[PolyForm Noncommercial License 1.0.0](LICENSE)。**仅限非商业用途**，商业使用须取得明确的书面授权。
-
-```text
-Required Notice: Copyright © 2026 Lin-chpin. Commercial licensing: linandchpin.2033@gmail.com
-```
 
 ## 快速开始
 
