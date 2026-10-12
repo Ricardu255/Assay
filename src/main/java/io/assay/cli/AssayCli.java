@@ -24,6 +24,7 @@ import io.assay.selection.TestSelectionService;
 import io.assay.store.ResultStore;
 import io.assay.support.AtomicFiles;
 import io.assay.workspace.TextArtifactWorkspace;
+import io.assay.web.DashboardServer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -53,6 +54,7 @@ public final class AssayCli {
     /** Runs the CLI and returns the process exit code; exposed for tests. */
     public static int run(String[] argv) {
         List<CommandLine.Spec> commands = List.of(
+                new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard"),
                 new CommandLine.Spec("run", "run one externally supplied suite"),
                 new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff"),
                 new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task"),
@@ -81,6 +83,7 @@ public final class AssayCli {
             }
             CommandLine.Namespace args = CommandLine.parse(spec, rest);
             return switch (command) {
+                case "serve" -> serve(args);
                 case "run" -> runSuite(args);
                 case "select-tests" -> selectTests(args);
                 case "audit-scope" -> auditScope(args);
@@ -105,6 +108,9 @@ public final class AssayCli {
 
     private static CommandLine.Spec specFor(String command, List<CommandLine.Spec> commands) {
         return switch (command) {
+            case "serve" -> new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
+                    .option("output", CommandLine.Kind.STRING, ".assay/runs")
+                    .option("port", CommandLine.Kind.INTEGER, "8080");
             case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                     .required("adapter", CommandLine.Kind.STRING)
                     .option("adapter-class", CommandLine.Kind.STRING, null)
@@ -199,6 +205,31 @@ public final class AssayCli {
                     .option("reviewed-at", CommandLine.Kind.STRING, null);
             default -> null;
         };
+    }
+
+    private static int serve(CommandLine.Namespace args) {
+        try (DashboardServer server = new DashboardServer(args.path("output"), args.integer("port"))) {
+            Thread shutdown = new Thread(server::close, "assay-dashboard-shutdown");
+            Runtime.getRuntime().addShutdownHook(shutdown);
+            try {
+                System.out.println("dashboard: " + server.uri());
+                System.out.println("reports: " + server.output());
+                System.out.println("Read-only local viewer. Press Ctrl+C to stop.");
+                server.await();
+                return 0;
+            } finally {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdown);
+                } catch (IllegalStateException shuttingDown) {
+                    // The hook owns shutdown when the JVM is already stopping.
+                }
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return 0;
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("cannot start dashboard: " + error.getMessage(), error);
+        }
     }
 
     private static CommandLine.Spec runtime(CommandLine.Spec spec) {
