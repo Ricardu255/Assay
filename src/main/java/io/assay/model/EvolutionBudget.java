@@ -13,8 +13,8 @@ public record EvolutionBudget(
         if (maxRounds < 1 || maxCandidatesPerRound < 1) {
             throw new IllegalArgumentException("evolution budget values must be positive");
         }
-        if (maxElapsedSeconds != null && maxElapsedSeconds <= 0) {
-            throw new IllegalArgumentException("max_elapsed_seconds must be positive");
+        if (maxElapsedSeconds != null && (!Double.isFinite(maxElapsedSeconds) || maxElapsedSeconds <= 0)) {
+            throw new IllegalArgumentException("max_elapsed_seconds must be finite and positive");
         }
         if (maxEvolverCalls != null && maxEvolverCalls < 1) {
             throw new IllegalArgumentException("max_evolver_calls must be positive");

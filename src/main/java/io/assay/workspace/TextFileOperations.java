@@ -25,6 +25,9 @@ public final class TextFileOperations {
     }
 
     public static String safeRelativeFile(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("candidate file must be a safe relative path");
+        }
         try {
             SafePath.require("candidate file", value);
         } catch (IllegalArgumentException error) {
@@ -88,8 +91,15 @@ public final class TextFileOperations {
     }
 
     public static void apply(java.nio.file.Path root, List<Validated> operations) {
+        // Validate public Validated records too; callers can construct them without validate().
         for (Validated validated : operations) {
-            java.nio.file.Path source = root.resolve(validated.relativePath());
+            resolveFile(root, validated.relativePath());
+            if (validated.destination() != null) {
+                resolveFile(root, validated.destination());
+            }
+        }
+        for (Validated validated : operations) {
+            java.nio.file.Path source = resolveFile(root, validated.relativePath());
             switch (validated.operation().operation()) {
                 case "write" -> {
                     createParents(source);
@@ -103,7 +113,7 @@ public final class TextFileOperations {
                     }
                 }
                 default -> {
-                    java.nio.file.Path moved = root.resolve(validated.destination());
+                    java.nio.file.Path moved = resolveFile(root, validated.destination());
                     createParents(moved);
                     try {
                         java.nio.file.Files.move(
@@ -117,6 +127,20 @@ public final class TextFileOperations {
                 }
             }
         }
+    }
+
+    private static java.nio.file.Path resolveFile(java.nio.file.Path root, String value) {
+        java.nio.file.Path base = root.toAbsolutePath().normalize();
+        java.nio.file.Path target = base.resolve(safeRelativeFile(value)).normalize();
+        if (target.equals(base) || !target.startsWith(base)) {
+            throw new IllegalArgumentException("candidate file escapes its workspace: " + value);
+        }
+        for (java.nio.file.Path item = target; item != null && item.startsWith(base); item = item.getParent()) {
+            if (java.nio.file.Files.isSymbolicLink(item)) {
+                throw new IllegalArgumentException("symbolic links are not supported: " + item);
+            }
+        }
+        return target;
     }
 
     private static void createParents(java.nio.file.Path path) {

@@ -31,13 +31,20 @@ public final class SafePath {
         if (value == null) {
             return;
         }
-        if (value.isBlank() || value.contains("\\")) {
+        // Colons also exclude Windows drive paths and alternate data streams on every platform.
+        if (value.isBlank() || value.contains("\\") || value.contains(":")) {
             throw new IllegalArgumentException(field + " must be a safe forward-slash relative file path");
         }
         if (value.startsWith("/")) {
             throw new IllegalArgumentException(field + " must be a safe forward-slash relative file path");
         }
         List<String> segments = segments(value);
+        for (String segment : segments) {
+            if (segment.chars().anyMatch(character -> character < 32)
+                    || segment.endsWith(" ") || segment.endsWith(".")) {
+                throw new IllegalArgumentException(field + " must be a safe forward-slash relative file path");
+            }
+        }
         if (segments.contains("..")) {
             throw new IllegalArgumentException(field + " must be a safe forward-slash relative file path");
         }

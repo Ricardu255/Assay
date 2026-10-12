@@ -212,7 +212,9 @@ public final class CommandLine {
             if (integer) {
                 Integer.parseInt(value);
             } else {
-                Double.parseDouble(value);
+                if (!Double.isFinite(Double.parseDouble(value))) {
+                    throw new NumberFormatException("non-finite value");
+                }
             }
         } catch (NumberFormatException error) {
             throw new UsageException("argument --" + name + ": invalid value: '" + value + "'", 2, true);

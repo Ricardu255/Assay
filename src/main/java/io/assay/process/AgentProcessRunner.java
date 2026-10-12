@@ -50,8 +50,8 @@ public final class AgentProcessRunner {
         if (!Files.isDirectory(cwd)) {
             throw new IllegalArgumentException("agent working directory does not exist: " + cwd);
         }
-        if (timeoutSeconds <= 0) {
-            throw new IllegalArgumentException("agent timeout must be positive");
+        if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+            throw new IllegalArgumentException("agent timeout must be finite and positive");
         }
         if (maxOutputBytes <= 0) {
             throw new IllegalArgumentException("agent output limit must be positive");

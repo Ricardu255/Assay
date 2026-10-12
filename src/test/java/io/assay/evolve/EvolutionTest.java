@@ -144,6 +144,84 @@ class EvolutionTest {
     }
 
     @Test
+    void absentTraceDoesNotBecomeZeroLatencyOrZeroModelCalls() {
+        Map<String, Object> summary = Map.of("results", List.of(Map.of("hard_pass", false)),
+                "hard_failures", 1, "soft_warnings", 0);
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary,
+                List.of(new MetricObjective("latency", "latency_ms"), new MetricObjective("calls", "llm_calls")));
+
+        assertNull(metrics.get("mean_latency_ms"));
+        assertNull(metrics.get("mean_steps"));
+        assertNull(Fixtures.asMap(metrics.get("objectives")).get("latency"));
+        assertNull(Fixtures.asMap(metrics.get("objectives")).get("calls"));
+        assertEquals(Map.of("sample_count", 0, "missing_count", 1, "case_count", 1),
+                Fixtures.asMap(metrics.get("objective_coverage")).get("latency"));
+    }
+
+    @Test
+    void measuredZeroRemainsDifferentFromMissingData() {
+        Map<String, Object> summary = Map.of("results", List.of(Map.of("hard_pass", true,
+                "trace", Map.of("fields", Map.of("cost_usd", 0), "events", List.of()))),
+                "hard_failures", 0, "soft_warnings", 0);
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary,
+                List.of(new MetricObjective("latency", "latency_ms"), new MetricObjective("cost", "cost_usd")));
+
+        assertEquals(0.0, metrics.get("mean_latency_ms"));
+        assertEquals(0.0, Fixtures.asMap(metrics.get("objectives")).get("cost"));
+        assertEquals(0.0, Fixtures.asMap(metrics.get("objectives")).get("latency"));
+        assertEquals(Map.of("sample_count", 1, "missing_count", 0, "case_count", 1),
+                Fixtures.asMap(metrics.get("metric_coverage")).get("latency_ms"));
+    }
+
+    @Test
+    void latencyMeanUsesObservedSamplesAndRequiredObjectiveStillRejectsGaps() {
+        Map<String, Object> summary = Map.of("results", List.of(
+                Map.of("hard_pass", true, "trace", Map.of("events", List.of(Map.of("duration_ms", 100)))),
+                Map.of("hard_pass", false)), "hard_failures", 1, "soft_warnings", 0);
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary,
+                List.of(new MetricObjective("latency", "latency_ms")));
+
+        assertEquals(100.0, metrics.get("mean_latency_ms"));
+        assertNull(Fixtures.asMap(metrics.get("objectives")).get("latency"));
+        assertEquals(Map.of("sample_count", 1, "missing_count", 1, "case_count", 2),
+                Fixtures.asMap(metrics.get("metric_coverage")).get("latency_ms"));
+    }
+
+    @Test
+    void overflowingAggregatesAreMissingRatherThanInfinite() {
+        Map<String, Object> result = Map.of("hard_pass", true, "trace", Map.of("fields", Map.of("cost_usd", 1e308)));
+        Map<String, Object> summary = Map.of("results", List.of(result, result), "hard_failures", 0, "soft_warnings", 0);
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary,
+                List.of(new MetricObjective("cost", "cost_usd", "minimize", "sum", 0)));
+        assertNull(Fixtures.asMap(metrics.get("objectives")).get("cost"));
+    }
+
+    @Test
+    void missingRequiredLatencyBlocksEvolutionAndAppearsInReport(@TempDir Path root) {
+        ProjectAdapter normalCandidate = adapter("2", true, false);
+        ProjectAdapter failingCandidate = new ProjectAdapter("failing-candidate", (evalCase, context) -> {
+            if ("HOLDOUT".equals(evalCase.caseId())) {
+                throw new IllegalStateException("no trace available");
+            }
+            return normalCandidate.callAgent().call(evalCase, context);
+        }, normalCandidate.readTrace(), normalCandidate.hardGates(), normalCandidate.softQuality());
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result = new EvolutionEngine(new EvaluationEngine(adapter("1", false, false), store),
+                    new EvaluationEngine(failingCandidate, store),
+                    new EvolutionPolicy(false, List.of(new MetricObjective("latency", "latency_ms", "minimize", "mean", 0))))
+                    .run(change(), evolutionCases(), "online", "missing-latency", false);
+        }
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons")).contains("holdout/latency: required metric is missing"));
+        assertNull(Fixtures.asMap(Fixtures.asMap(result.get("comparisons")).get("holdout")).get("mean_latency_ms_delta"));
+        Reporting.writeEvolutionArtifacts(result, root.resolve("out"));
+        String report = AtomicFiles.readText(root.resolve("out/evolution_report.md"));
+        assertTrue(report.contains("missing"));
+        assertTrue(report.contains("0/1"));
+    }
+
+    @Test
     void acceptsImprovementWithoutRegression(@TempDir Path root) {
         Map<String, Object> result;
         Map<String, Object> stored;

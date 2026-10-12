@@ -20,8 +20,17 @@ public record EvolutionPolicy(
         implements Jsonable {
 
     public EvolutionPolicy {
+        Values.nonNegative("max_regression_soft_warning_increase", maxRegressionSoftWarningIncrease);
+        Values.rate("max_holdout_hard_pass_drop", maxHoldoutHardPassDrop);
+        Values.nonNegative("max_holdout_soft_warning_increase", maxHoldoutSoftWarningIncrease);
         objectives = objectives == null ? List.of() : Immutable.list(objectives);
         scenarioGates = scenarioGates == null ? List.of() : Immutable.list(scenarioGates);
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (MetricObjective objective : objectives) {
+            if (!names.add(objective.name())) {
+                throw new IllegalArgumentException("duplicate objective name: " + objective.name());
+            }
+        }
     }
 
     public EvolutionPolicy() {
@@ -39,24 +48,30 @@ public record EvolutionPolicy(
 
     public static EvolutionPolicy fromDict(Map<String, Object> value) {
         List<MetricObjective> objectives = new ArrayList<>();
+        if (value.containsKey("objectives") && !(value.get("objectives") instanceof List<?>)) {
+            throw new IllegalArgumentException("objectives must be an array");
+        }
         if (value.get("objectives") instanceof List<?> items) {
             for (Object item : items) {
                 objectives.add(MetricObjective.fromDict(EvalCase.asMap(item)));
             }
         }
         List<ScenarioGate> gates = new ArrayList<>();
+        if (value.containsKey("scenario_gates") && !(value.get("scenario_gates") instanceof List<?>)) {
+            throw new IllegalArgumentException("scenario_gates must be an array");
+        }
         if (value.get("scenario_gates") instanceof List<?> items) {
             for (Object item : items) {
                 gates.add(ScenarioGate.fromDict(EvalCase.asMap(item)));
             }
         }
         return new EvolutionPolicy(
-                !Boolean.FALSE.equals(value.get("require_regression_pass")),
-                Boolean.TRUE.equals(value.get("require_holdout_pass")),
-                Values.toInt(value.get("max_regression_soft_warning_increase"), 0),
-                Values.toDouble(value.get("max_holdout_hard_pass_drop"), 0),
-                Values.toInt(value.get("max_holdout_soft_warning_increase"), 0),
-                !Boolean.FALSE.equals(value.get("require_improvement")),
+                Values.booleanField(value, "require_regression_pass", true),
+                Values.booleanField(value, "require_holdout_pass", false),
+                Values.intField(value, "max_regression_soft_warning_increase", 0),
+                Values.doubleField(value, "max_holdout_hard_pass_drop", 0),
+                Values.intField(value, "max_holdout_soft_warning_increase", 0),
+                Values.booleanField(value, "require_improvement", true),
                 objectives,
                 gates);
     }

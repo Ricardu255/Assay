@@ -105,12 +105,10 @@ public final class EvolutionEngine {
                             - intValue(baselineMetrics.get("soft_warning_count")));
             comparison.put(
                     "mean_latency_ms_delta",
-                    doubleValue(candidateMetrics.get("mean_latency_ms"))
-                            - doubleValue(baselineMetrics.get("mean_latency_ms")));
+                    difference(candidateMetrics.get("mean_latency_ms"), baselineMetrics.get("mean_latency_ms")));
             comparison.put(
                     "mean_steps_delta",
-                    doubleValue(candidateMetrics.get("mean_steps"))
-                            - doubleValue(baselineMetrics.get("mean_steps")));
+                    difference(candidateMetrics.get("mean_steps"), baselineMetrics.get("mean_steps")));
             comparison.put("scenarios", compareScenarios(baselineSummary, candidateSummary));
             comparisons.put(role, comparison);
         }
@@ -280,31 +278,40 @@ public final class EvolutionEngine {
         List<Double> latencies = new ArrayList<>();
         List<Double> steps = new ArrayList<>();
         for (Object rawResult : results) {
-            List<Object> events = asList(asMap(asMap(rawResult).get("trace")).get("events"));
-            double latency = 0;
-            for (Object rawEvent : events) {
-                latency += doubleValue(asMap(rawEvent).get("duration_ms"));
+            Map<String, Object> trace = asMap(asMap(rawResult).get("trace"));
+            Double latency = traceMetric(trace, "latency_ms");
+            Double stepCount = traceMetric(trace, "steps");
+            if (latency != null && Double.isFinite(latency)) {
+                latencies.add(latency);
             }
-            latencies.add(latency);
-            steps.add((double) events.size());
+            if (stepCount != null && Double.isFinite(stepCount)) {
+                steps.add(stepCount);
+            }
         }
 
+        Map<String, Object> coverage = new LinkedHashMap<>();
+        coverage.put("latency_ms", coverage(latencies.size(), caseCount));
+        coverage.put("steps", coverage(steps.size(), caseCount));
         Map<String, Object> efficiency = new LinkedHashMap<>();
         for (String metric : List.of("llm_calls", "input_tokens", "output_tokens", "total_tokens", "cost_usd")) {
             List<Double> values = new ArrayList<>();
             for (Object rawResult : results) {
                 Object trace = asMap(rawResult).get("trace");
                 Double value = traceMetric(trace instanceof Map ? asMap(trace) : Map.of(), metric);
-                if (value != null) {
+                if (value != null && Double.isFinite(value)) {
                     values.add(value);
                 }
             }
             efficiency.put("mean_" + metric, aggregate(values, "mean"));
+            coverage.put(metric, coverage(values.size(), caseCount));
         }
 
         Map<String, Object> objectiveValues = new LinkedHashMap<>();
+        Map<String, Object> objectiveCoverage = new LinkedHashMap<>();
         for (MetricObjective objective : objectives) {
-            objectiveValues.put(objective.name(), objectiveValue(summary, objective));
+            List<Double> samples = objectiveSamples(summary, objective);
+            objectiveValues.put(objective.name(), samples.size() == caseCount ? aggregate(samples, objective.aggregation()) : null);
+            objectiveCoverage.put(objective.name(), coverage(samples.size(), caseCount));
         }
 
         Map<String, Object> metrics = new LinkedHashMap<>();
@@ -314,12 +321,12 @@ public final class EvolutionEngine {
                 "hard_pass_rate",
                 caseCount == 0 ? 0.0 : (double) (caseCount - intValue(summary.get("hard_failures"))) / caseCount);
         metrics.put("soft_warning_count", summary.get("soft_warnings"));
-        Double meanLatency = aggregate(latencies, "mean");
-        metrics.put("mean_latency_ms", meanLatency == null || meanLatency == 0 ? 0 : meanLatency);
-        Double meanSteps = aggregate(steps, "mean");
-        metrics.put("mean_steps", meanSteps == null || meanSteps == 0 ? 0 : meanSteps);
+        metrics.put("mean_latency_ms", aggregate(latencies, "mean"));
+        metrics.put("mean_steps", aggregate(steps, "mean"));
         metrics.put("efficiency", efficiency);
         metrics.put("objectives", objectiveValues);
+        metrics.put("metric_coverage", coverage);
+        metrics.put("objective_coverage", objectiveCoverage);
         return metrics;
     }
 
@@ -390,16 +397,23 @@ public final class EvolutionEngine {
                 "tokens", "total_tokens");
         String fieldName = aliases.getOrDefault(metric, metric);
         Object value = fields.get(fieldName);
-        if (value instanceof Number number && !(value instanceof Boolean)) {
-            return number.doubleValue();
+        if (fields.containsKey(fieldName)) {
+            return value instanceof Number number && Double.isFinite(number.doubleValue()) ? number.doubleValue() : null;
+        }
+        if (!(trace.get("events") instanceof List<?>)) {
+            return null;
         }
         List<Object> events = asList(trace.get("events"));
         if (List.of("latency_ms", "duration_ms").contains(metric)) {
             double total = 0;
             for (Object rawEvent : events) {
-                total += doubleValue(asMap(rawEvent).get("duration_ms"));
+                Object duration = asMap(rawEvent).get("duration_ms");
+                if (!(duration instanceof Number number) || !Double.isFinite(number.doubleValue())) {
+                    return null;
+                }
+                total += number.doubleValue();
             }
-            return total;
+            return Double.isFinite(total) ? total : null;
         }
         if ("steps".equals(metric)) {
             return (double) events.size();
@@ -418,6 +432,11 @@ public final class EvolutionEngine {
     }
 
     static Double objectiveValue(Map<String, Object> summary, MetricObjective objective) {
+        List<Double> values = objectiveSamples(summary, objective);
+        return values.size() == asList(summary.get("results")).size() ? aggregate(values, objective.aggregation()) : null;
+    }
+
+    private static List<Double> objectiveSamples(Map<String, Object> summary, MetricObjective objective) {
         List<Object> results = asList(summary.get("results"));
         List<Double> values = new ArrayList<>();
         for (Object rawResult : results) {
@@ -455,22 +474,32 @@ public final class EvolutionEngine {
                 values.add(number.doubleValue());
             }
         }
-        if (values.size() != results.size()) {
-            return null;
-        }
-        return aggregate(values, objective.aggregation());
+        return values;
     }
 
     static Double aggregate(List<Double> values, String aggregation) {
         if (values.isEmpty()) {
             return null;
         }
-        return switch (aggregation) {
+        double result = switch (aggregation) {
             case "sum" -> values.stream().mapToDouble(Double::doubleValue).sum();
             case "min" -> values.stream().mapToDouble(Double::doubleValue).min().orElse(0);
             case "max" -> values.stream().mapToDouble(Double::doubleValue).max().orElse(0);
             default -> values.stream().mapToDouble(Double::doubleValue).average().orElse(0);
         };
+        return Double.isFinite(result) ? result : null;
+    }
+
+    private static Map<String, Integer> coverage(int observed, int total) {
+        return Map.of("sample_count", observed, "missing_count", total - observed, "case_count", total);
+    }
+
+    private static Double difference(Object candidate, Object baseline) {
+        if (!(candidate instanceof Number right) || !(baseline instanceof Number left)) {
+            return null;
+        }
+        double delta = right.doubleValue() - left.doubleValue();
+        return Double.isFinite(delta) ? delta : null;
     }
 
     private static String shortId() {

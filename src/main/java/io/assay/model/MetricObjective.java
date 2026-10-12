@@ -17,8 +17,19 @@ public record MetricObjective(
         implements Jsonable {
 
     public MetricObjective {
+        if (name == null || name.isBlank() || metric == null || metric.isBlank()) {
+            throw new IllegalArgumentException("objective requires name and metric");
+        }
         direction = direction == null ? "maximize" : direction;
         aggregation = aggregation == null ? "mean" : aggregation;
+        if (!List.of("maximize", "minimize").contains(direction)) {
+            throw new IllegalArgumentException("unsupported objective direction: " + direction);
+        }
+        if (!List.of("mean", "sum", "min", "max").contains(aggregation)) {
+            throw new IllegalArgumentException("unsupported objective aggregation: " + aggregation);
+        }
+        Values.nonNegative("minimum_improvement", minimumImprovement);
+        Values.nonNegative("maximum_regression", maximumRegression);
     }
 
     public MetricObjective(
@@ -42,20 +53,14 @@ public record MetricObjective(
         }
         String direction = String.valueOf(value.getOrDefault("direction", "maximize"));
         String aggregation = String.valueOf(value.getOrDefault("aggregation", "mean"));
-        if (!List.of("maximize", "minimize").contains(direction)) {
-            throw new IllegalArgumentException("unsupported objective direction: " + direction);
-        }
-        if (!List.of("mean", "sum", "min", "max").contains(aggregation)) {
-            throw new IllegalArgumentException("unsupported objective aggregation: " + aggregation);
-        }
         return new MetricObjective(
                 name,
                 metric,
                 direction,
                 aggregation,
-                Values.toDouble(value.get("minimum_improvement"), 0),
-                Values.toDouble(value.get("maximum_regression"), 0),
-                !Boolean.FALSE.equals(value.get("required")));
+                Values.doubleField(value, "minimum_improvement", 0),
+                Values.doubleField(value, "maximum_regression", 0),
+                Values.booleanField(value, "required", true));
     }
 
     @Override

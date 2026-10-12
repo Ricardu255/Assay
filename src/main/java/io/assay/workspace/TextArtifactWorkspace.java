@@ -3,6 +3,7 @@ package io.assay.workspace;
 import io.assay.json.Json;
 import io.assay.model.TextCandidate;
 import io.assay.model.TextFileOperation;
+import io.assay.model.SafePath;
 import io.assay.support.AtomicFiles;
 import io.assay.support.ExclusiveFileLock;
 import io.assay.support.Names;
@@ -10,6 +11,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
@@ -29,6 +32,8 @@ import java.util.stream.Stream;
  * workspace — promoting it to production is outside this loop.
  */
 public final class TextArtifactWorkspace {
+
+    private static final String STAGING_DIRECTORY = ".assay-staging";
 
     private final Path root;
 
@@ -113,12 +118,18 @@ public final class TextArtifactWorkspace {
             String name,
             Path currentArtifact) {
         String candidateId = Names.safeName(candidate.candidateId(), "candidate_id");
+        if (STAGING_DIRECTORY.equalsIgnoreCase(candidateId)) {
+            throw new IllegalArgumentException("candidate_id is reserved for staging: " + candidateId);
+        }
+        name = Names.safeName(name, "artifact name");
+        SafePath.require("artifact name", name);
         Path target =
                 root.resolve(Names.safeName(loopId, "loop_id"))
                         .resolve("candidates")
                         .resolve("round-" + roundNumber)
                         .resolve(candidateId)
                         .resolve(name);
+        requireWorkspacePath(target);
 
         if (!candidate.operations().isEmpty() || !candidate.files().isEmpty()) {
             if (!candidate.operations().isEmpty() && !candidate.files().isEmpty()) {
@@ -155,9 +166,9 @@ public final class TextArtifactWorkspace {
             List<TextFileOperations.Validated> validated = TextFileOperations.validate(asStringMap(current), operations);
 
             Path manifestPath = target.getParent().resolve("artifact-manifest.json");
-            if (Files.exists(target)) {
-                if (!Files.isRegularFile(manifestPath)) {
-                    throw new IllegalArgumentException("candidate directory exists without manifest: " + target);
+            if (Files.exists(manifestPath, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isSymbolicLink(manifestPath) || !Files.isRegularFile(manifestPath)) {
+                    throw new IllegalArgumentException("invalid candidate manifest: " + manifestPath);
                 }
                 Map<String, Object> manifest = Json.parseObject(AtomicFiles.readText(manifestPath));
                 for (Map.Entry<String, Object> entry : manifestContent.entrySet()) {
@@ -167,21 +178,32 @@ public final class TextArtifactWorkspace {
                                 "candidate artifact already exists with different content: " + target);
                     }
                 }
-                if (!java.util.Objects.equals(manifest.get("tree_sha256"), treeSha256(target))) {
+                if (!Files.isDirectory(target)
+                        || !java.util.Objects.equals(manifest.get("tree_sha256"), treeSha256(target))) {
                     throw new IllegalArgumentException(
                             "candidate artifact already exists with different content: " + target);
                 }
                 return target;
             }
-            AtomicFiles.createDirectories(target.getParent());
+            Path candidateRoot = target.getParent();
+            Path stagingRoot = candidateRoot.getParent().resolve(STAGING_DIRECTORY).resolve(candidateId);
+            Path stagingTarget = stagingRoot.resolve(name);
             try {
-                copyTree(currentArtifact, target);
+                // Uncommitted directories from older versions and interrupted staging can be rebuilt.
+                removeUncommittedTree(candidateRoot);
+                removeUncommittedTree(stagingRoot);
+                copyTree(currentArtifact, stagingTarget);
+                TextFileOperations.apply(stagingTarget, validated);
+                manifestContent.put("tree_sha256", treeSha256(stagingTarget));
+                AtomicFiles.writeText(stagingRoot.resolve("artifact-manifest.json"), Json.write(manifestContent, 2));
+                try {
+                    Files.move(stagingRoot, candidateRoot, StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException unsupported) {
+                    Files.move(stagingRoot, candidateRoot);
+                }
             } catch (IOException error) {
                 throw new UncheckedIOException(error);
             }
-            TextFileOperations.apply(target, validated);
-            manifestContent.put("tree_sha256", treeSha256(target));
-            AtomicFiles.writeText(manifestPath, Json.write(manifestContent, 2));
             return target;
         }
 
@@ -194,6 +216,34 @@ public final class TextArtifactWorkspace {
         AtomicFiles.createDirectories(target.getParent());
         AtomicFiles.writeText(target, candidate.content());
         return target;
+    }
+
+    private void removeUncommittedTree(Path path) throws IOException {
+        Path target = path.toAbsolutePath().normalize();
+        if (target.equals(root) || !target.startsWith(root)) {
+            throw new IllegalArgumentException("staging cleanup escapes its workspace: " + path);
+        }
+        requireWorkspacePath(target);
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(target)) {
+            for (Path item : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(item);
+            }
+        }
+    }
+
+    private void requireWorkspacePath(Path path) {
+        Path target = path.toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new IllegalArgumentException("candidate path escapes its workspace: " + path);
+        }
+        for (Path item = target; item != null && item.startsWith(root); item = item.getParent()) {
+            if (Files.isSymbolicLink(item)) {
+                throw new IllegalArgumentException("symbolic links are not supported: " + item);
+            }
+        }
     }
 
     public Path saveCheckpoint(String loopId, Map<String, Object> state) {
@@ -247,10 +297,10 @@ public final class TextArtifactWorkspace {
         Files.createDirectories(target);
         for (Path item : listRecursively(source)) {
             Path destination = target.resolve(source.relativize(item).toString());
-            if (Files.isDirectory(item)) {
-                Files.createDirectories(destination);
-            } else if (Files.isSymbolicLink(item)) {
+            if (Files.isSymbolicLink(item)) {
                 throw new IllegalArgumentException("symbolic links are not supported: " + item);
+            } else if (Files.isDirectory(item)) {
+                Files.createDirectories(destination);
             } else {
                 Files.createDirectories(destination.getParent());
                 Files.copy(item, destination, StandardCopyOption.COPY_ATTRIBUTES);

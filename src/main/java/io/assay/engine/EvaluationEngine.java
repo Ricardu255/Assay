@@ -61,16 +61,22 @@ public final class EvaluationEngine {
             double timeoutSeconds,
             boolean collectFewShot,
             String runIdentity) {
+        if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
+            throw new IllegalArgumentException("workers must be positive and bounded; retries must be non-negative");
+        }
+        if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+            throw new IllegalArgumentException("timeout_seconds must be finite and positive");
+        }
         this.adapter = adapter;
         this.store = store;
         this.reviewer = reviewer;
-        this.requestedWorkers = Math.max(1, workers);
+        this.requestedWorkers = workers;
         this.workers =
                 adapter.maxConcurrency() != null
                         ? Math.min(this.requestedWorkers, adapter.maxConcurrency())
                         : this.requestedWorkers;
         this.maxInFlight = this.workers * 2;
-        this.retries = Math.max(0, retries);
+        this.retries = retries;
         this.timeoutSeconds = timeoutSeconds;
         this.collectFewShot = collectFewShot;
         this.runIdentity = runIdentity;

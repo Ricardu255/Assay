@@ -1,14 +1,20 @@
 package io.assay.store;
 
 import io.assay.json.Json;
+import io.assay.json.JsonException;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
 import io.assay.support.AtomicFiles;
 import io.assay.support.ExclusiveFileLock;
 import io.assay.support.Names;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -34,6 +40,10 @@ public final class ResultStore implements Results {
     private final Path root;
     private final Object lock = new Object();
     private final Map<String, LinkedHashMap<String, Map<String, Object>>> caseIndex = new LinkedHashMap<>();
+    private final Map<String, LogTail> logTails = new LinkedHashMap<>();
+
+    private record LogTail(long validLength, boolean needsNewline) {
+    }
 
     public ResultStore(Path path) {
         this.root = path.toAbsolutePath().normalize();
@@ -127,7 +137,11 @@ public final class ResultStore implements Results {
                             "resume run identity or execution configuration changed");
                 }
                 if (caseManifest != null) {
+                    invalidateCases(runId);
                     verifyResumeManifest(directory, runId, caseManifest);
+                } else {
+                    invalidateCases(runId);
+                    loadCases(runId);
                 }
                 existing.put("status", "running");
                 existing.put("finished_at", null);
@@ -206,13 +220,14 @@ public final class ResultStore implements Results {
             Map<String, Object> record = Json.parseObject(AtomicFiles.readText(runFile));
             record.put("status", status);
             record.put("finished_at", now());
-            AtomicFiles.writeText(runFile, Json.write(record, 2));
             LinkedHashMap<String, Map<String, Object>> cases = loadCases(runId);
             List<String> lines = new ArrayList<>(cases.size());
             for (Map<String, Object> value : cases.values()) {
                 lines.add(Json.write(value));
             }
             AtomicFiles.writeText(directory.resolve("cases.jsonl"), lines.isEmpty() ? "" : String.join("\n", lines) + "\n");
+            logTails.remove(runId);
+            AtomicFiles.writeText(runFile, Json.write(record, 2));
         }
     }
 
@@ -237,17 +252,22 @@ public final class ResultStore implements Results {
         synchronized (lock) {
             String runId = results.get(0).runId();
             LinkedHashMap<String, Map<String, Object>> cases = loadCases(runId);
+            Map<String, Map<String, Object>> committed = new LinkedHashMap<>();
             StringBuilder appended = new StringBuilder();
             for (CaseResult result : results) {
+                if (!Objects.equals(result.runId(), runId)) {
+                    throw new IllegalArgumentException("a result batch must belong to one run");
+                }
                 // Stored and cached in normalized form so an in-memory read and a re-read from disk are
                 // indistinguishable; callers read plain maps, never live model objects.
                 Map<String, Object> payload = asMap(Json.normalize(result.toJson()));
                 payload.put("hard_pass", result.hardPass());
                 payload.put("soft_warning_count", result.softWarningCount());
-                cases.put(result.evalCase().caseId(), payload);
+                committed.put(result.evalCase().caseId(), payload);
                 appended.append(Json.write(payload)).append('\n');
             }
-            AtomicFiles.appendText(runDir(runId).resolve("cases.jsonl"), appended.toString());
+            appendCases(runId, appended.toString());
+            cases.putAll(committed);
         }
     }
 
@@ -272,18 +292,21 @@ public final class ResultStore implements Results {
                 throw new IllegalStateException("stored result has no checks array: " + runId + "/" + caseId);
             }
             @SuppressWarnings("unchecked")
-            List<Object> checks = (List<Object>) rawChecks;
+            List<Object> checks = new ArrayList<>((List<Object>) rawChecks);
             Map<String, Object> payload = asMap(check.toJson());
             if (checks.contains(payload)) {
                 return;
             }
             checks.add(payload);
+            record = new LinkedHashMap<>(record);
+            record.put("checks", checks);
             if ("hard".equals(check.level()) && !check.passed()) {
                 record.put("hard_pass", false);
             } else if (("soft".equals(check.level()) || "candidate".equals(check.level())) && !check.passed()) {
                 record.put("soft_warning_count", intValue(record.get("soft_warning_count")) + 1);
             }
-            AtomicFiles.appendLine(runDir(runId).resolve("cases.jsonl"), Json.write(record));
+            appendCases(runId, Json.write(record) + "\n");
+            cases.put(caseId, record);
         }
     }
 
@@ -387,20 +410,7 @@ public final class ResultStore implements Results {
         Map<String, Map<String, Object>> latest = new LinkedHashMap<>();
         Path path = runDir(runId).resolve("cases.jsonl");
         if (Files.isRegularFile(path)) {
-            for (String line : AtomicFiles.readText(path).split("\n", -1)) {
-                if (line.isBlank()) {
-                    continue;
-                }
-                Map<String, Object> record;
-                try {
-                    record = Json.parseObject(line);
-                } catch (RuntimeException truncatedTail) {
-                    // A crash can cut the final line in half; the batch it belonged to is replayed on resume.
-                    break;
-                }
-                String caseId = String.valueOf(asMap(record.get("case")).get("case_id"));
-                latest.put(caseId, record);
-            }
+            readCaseLog(runId, path, latest);
         }
         List<Map.Entry<String, Map<String, Object>>> entries = new ArrayList<>(latest.entrySet());
         entries.sort(Map.Entry.comparingByKey());
@@ -410,6 +420,78 @@ public final class ResultStore implements Results {
         }
         caseIndex.put(runId, ordered);
         return ordered;
+    }
+
+    private void readCaseLog(String runId, Path path, Map<String, Map<String, Object>> latest) {
+        byte[] content;
+        try {
+            content = Files.readAllBytes(path);
+        } catch (IOException error) {
+            throw new java.io.UncheckedIOException(error);
+        }
+        int lineNumber = 0;
+        for (int start = 0; start < content.length; ) {
+            lineNumber++;
+            int end = start;
+            while (end < content.length && content[end] != '\n') {
+                end++;
+            }
+            boolean terminated = end < content.length;
+            Map<String, Object> record;
+            try {
+                String line = StandardCharsets.UTF_8.newDecoder()
+                        .decode(ByteBuffer.wrap(content, start, end - start)).toString();
+                record = line.isBlank() ? null : Json.parseObject(line);
+            } catch (JsonException | CharacterCodingException error) {
+                if (terminated) {
+                    throw new IllegalStateException("corrupt case log at " + path + ":" + lineNumber, error);
+                }
+                // Only an unterminated last line is a recoverable interrupted append.
+                logTails.put(runId, new LogTail(start, false));
+                return;
+            }
+            if (record != null) {
+                Object caseId = asMap(record.get("case")).get("case_id");
+                if (!(caseId instanceof String id) || id.isBlank()) {
+                    throw new IllegalStateException("case log has no case_id at " + path + ":" + lineNumber);
+                }
+                latest.put(id, record);
+            }
+            if (!terminated) {
+                logTails.put(runId, new LogTail(content.length, true));
+            }
+            start = terminated ? end + 1 : end;
+        }
+    }
+
+    /** Repairs an interrupted tail before a writer appends; the caller holds the run lock. */
+    private void appendCases(String runId, String content) {
+        Path path = runDir(runId).resolve("cases.jsonl");
+        LogTail tail = logTails.get(runId);
+        try {
+            if (tail != null) {
+                try (FileChannel channel = FileChannel.open(path, StandardOpenOption.WRITE)) {
+                    channel.truncate(tail.validLength());
+                }
+                if (tail.needsNewline()) {
+                    content = "\n" + content;
+                }
+            }
+            AtomicFiles.appendText(path, content);
+            logTails.remove(runId);
+        } catch (IOException error) {
+            invalidateCases(runId);
+            throw new java.io.UncheckedIOException(error);
+        } catch (RuntimeException error) {
+            // A failed append may have written a prefix. Never keep uncommitted cache entries.
+            invalidateCases(runId);
+            throw error;
+        }
+    }
+
+    private void invalidateCases(String runId) {
+        caseIndex.remove(runId);
+        logTails.remove(runId);
     }
 
     private static Map<String, Object> withoutCaseCount(Map<String, Object> metadata) {
@@ -430,5 +512,6 @@ public final class ResultStore implements Results {
     @Override
     public void close() {
         caseIndex.clear();
+        logTails.clear();
     }
 }

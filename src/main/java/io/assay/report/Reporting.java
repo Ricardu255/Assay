@@ -194,7 +194,8 @@ public final class Reporting {
                             + Fmt.percent1(rate(asMap(comparison.get("candidate")))) + " | "
                             + Fmt.signedPercent1(doubleValue(comparison.get("hard_pass_rate_delta"))) + " | "
                             + Fmt.signedInt(intValue(comparison.get("soft_warning_delta"))) + " | "
-                            + Fmt.signedFixed1(doubleValue(comparison.get("mean_latency_ms_delta"))) + " ms |");
+                            + (comparison.get("mean_latency_ms_delta") instanceof Number latency
+                                    ? Fmt.signedFixed1(latency.doubleValue()) + " ms" : "missing") + " |");
         }
 
         Map<String, Object> policy = asMap(result.get("policy"));
@@ -203,8 +204,8 @@ public final class Reporting {
             report.add("");
             report.add("## Configured objectives");
             report.add("");
-            report.add("| Dataset | Objective | Baseline | Candidate |");
-            report.add("|---|---|---:|---:|");
+            report.add("| Dataset | Objective | Baseline | Candidate | Baseline samples | Candidate samples |");
+            report.add("|---|---|---:|---:|---:|---:|");
             for (String role : List.of("improvement", "regression", "holdout")) {
                 Map<String, Object> comparison = asMap(comparisons.get(role));
                 Map<String, Object> baselineObjectives =
@@ -216,7 +217,9 @@ public final class Reporting {
                     String name = String.valueOf(objective.get("name"));
                     report.add(
                             "| " + role + " | " + name + " | " + render(baselineObjectives.get(name)) + " | "
-                                    + render(candidateObjectives.get(name)) + " |");
+                                    + render(candidateObjectives.get(name)) + " | "
+                                    + sampleCoverage(asMap(comparison.get("baseline")), name) + " | "
+                                    + sampleCoverage(asMap(comparison.get("candidate")), name) + " |");
                 }
             }
         }
@@ -270,6 +273,11 @@ public final class Reporting {
                             + asMap(candidateRuns.get(role)).get("run_id") + "`");
         }
         AtomicFiles.writeText(outputDir.resolve("evolution_report.md"), Fmt.join(report));
+    }
+
+    private static String sampleCoverage(Map<String, Object> metrics, String objective) {
+        Map<String, Object> coverage = asMap(asMap(metrics.get("objective_coverage")).get(objective));
+        return coverage.isEmpty() ? "unknown" : coverage.get("sample_count") + "/" + coverage.get("case_count");
     }
 
     /** Writes {@code auto_evolution.json} and {@code auto_evolution_report.md}. */

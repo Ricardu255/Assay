@@ -18,7 +18,21 @@ public record ScenarioGate(
         implements Jsonable {
 
     public ScenarioGate {
+        if (scenario == null || scenario.isBlank()) {
+            throw new IllegalArgumentException("scenario gate requires scenario");
+        }
         roles = roles == null ? List.of("regression", "holdout") : Immutable.list(roles);
+        if (roles.isEmpty() || roles.stream().anyMatch(role -> !List.of("improvement", "regression", "holdout").contains(role))) {
+            throw new IllegalArgumentException("scenario gate has unsupported roles: " + roles);
+        }
+        if (minimumCaseCount < 1) {
+            throw new IllegalArgumentException("scenario gate minimum_case_count must be at least 1");
+        }
+        if (minimumHardPassRate != null) {
+            Values.rate("minimum_hard_pass_rate", minimumHardPassRate);
+        }
+        Values.rate("maximum_hard_pass_rate_drop", maximumHardPassRateDrop);
+        Values.nonNegative("maximum_soft_warning_increase", maximumSoftWarningIncrease);
     }
 
     public ScenarioGate(String scenario) {
@@ -51,28 +65,13 @@ public record ScenarioGate(
                 throw new IllegalArgumentException("scenario gate has unsupported roles: " + roles);
             }
         }
-        int minimumCaseCount = Values.toInt(value.get("minimum_case_count"), 1);
+        int minimumCaseCount = Values.intField(value, "minimum_case_count", 1);
         Double minimumHardPassRate =
                 value.get("minimum_hard_pass_rate") == null
                         ? null
-                        : Values.toDouble(value.get("minimum_hard_pass_rate"), 0);
-        double maximumHardPassRateDrop = Values.toDouble(value.get("maximum_hard_pass_rate_drop"), 0);
-        int maximumSoftWarningIncrease = Values.toInt(value.get("maximum_soft_warning_increase"), 0);
-        if (minimumCaseCount < 1) {
-            throw new IllegalArgumentException("scenario gate minimum_case_count must be at least 1");
-        }
-        if (minimumHardPassRate != null && (minimumHardPassRate < 0 || minimumHardPassRate > 1)) {
-            throw new IllegalArgumentException(
-                    "scenario gate minimum_hard_pass_rate must be between 0 and 1");
-        }
-        if (maximumHardPassRateDrop < 0 || maximumHardPassRateDrop > 1) {
-            throw new IllegalArgumentException(
-                    "scenario gate maximum_hard_pass_rate_drop must be between 0 and 1");
-        }
-        if (maximumSoftWarningIncrease < 0) {
-            throw new IllegalArgumentException(
-                    "scenario gate maximum_soft_warning_increase must not be negative");
-        }
+                        : Values.doubleField(value, "minimum_hard_pass_rate", 0);
+        double maximumHardPassRateDrop = Values.doubleField(value, "maximum_hard_pass_rate_drop", 0);
+        int maximumSoftWarningIncrease = Values.intField(value, "maximum_soft_warning_increase", 0);
         return new ScenarioGate(
                 scenario,
                 roles,
