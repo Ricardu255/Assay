@@ -11,7 +11,7 @@ const labels = {
   no_acceptable_candidate: "无合格候选", no_candidates: "无候选", review_required: "需要复核",
   insufficient_evidence: "证据不足", no_obvious_issue: "未发现明显问题", clear_out_of_scope: "明确越界",
   suspected_out_of_scope: "疑似越界", reasonable_related: "合理关联", low: "低风险", medium: "中风险", high: "高风险",
-  improvement: "改善集", regression: "回归集", holdout: "留出集"
+  improvement: "改善集", regression: "回归集", holdout: "留出集", not_run: "未运行", related: "相关"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
@@ -46,6 +46,8 @@ const date = (value) => {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 };
+const scrollMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+$("theme-select").value = AssayTheme.choice();
 
 function toast(message) {
   $("toast").textContent = message;
@@ -140,9 +142,9 @@ function overview() {
       <section class="panel"><div class="panel-head"><h2>运行结果分布</h2><span class="muted">按运行计数</span></div><div class="panel-body">
         <div class="stat-value">${total ? percent((total - failures) / total) : "—"}<span class="muted"> 硬门禁通过</span></div>
         <svg class="status-chart" viewBox="0 0 300 12" preserveAspectRatio="none" role="img" aria-label="通过 ${passedRuns}，软告警 ${warnedRuns}，失败 ${failedRuns}">
-          <rect width="300" height="12" fill="#edf1f5"/><rect width="${300 * passedRuns / denominator}" height="12" fill="#48a899"/>
-          <rect x="${300 * passedRuns / denominator}" width="${300 * warnedRuns / denominator}" height="12" fill="#e8bd69"/>
-          <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="#df7b85"/></svg>
+          <rect width="300" height="12" fill="var(--line)"/><rect width="${300 * passedRuns / denominator}" height="12" fill="var(--chart-good)"/>
+          <rect x="${300 * passedRuns / denominator}" width="${300 * warnedRuns / denominator}" height="12" fill="var(--chart-warning)"/>
+          <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="var(--chart-bad)"/></svg>
         ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
         <p class="mini-note">按扫描到的运行汇总。不同版本与数据集的运行分别计数。</p></div></section></div>
     <div class="artifact-counts">${sections.slice(3).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
@@ -164,7 +166,7 @@ function setupPage() {
     <section class="panel section-gap"><div class="panel-head"><h2>3 · 生成运行命令</h2><span class="muted">复制到终端运行</span></div><div class="panel-body form-grid">
       <label class="form-field">终端<select data-setup="shell"><option value="powershell" ${setup.shell === "powershell" ? "selected" : ""}>Windows PowerShell</option><option value="bash" ${setup.shell === "bash" ? "selected" : ""}>Bash / Zsh</option></select></label>
       ${field("jar", "框架 JAR 路径")}${field("output", "报告输出目录")}
-      <div id="setup-commands" class="full" aria-live="polite"></div>
+      <div id="setup-commands" class="full"></div>
     </div></section><section class="panel section-gap"><div class="panel-head"><h2>4 · 查看报告</h2></div><div class="panel-body"><p class="subtitle">首次使用先运行 mvn -q package。评测命令会打印 report.md 的位置；运行完成后，使用上方查看命令启动界面。若已经在查看同一输出目录，直接刷新结果。</p><button class="button secondary section-gap" data-section="run">查看运行记录 →</button></div></section>`;
 }
 
@@ -382,7 +384,7 @@ function scenarioTable(results) {
   return `<div class="table-wrap"><table><thead><tr><th>场景</th><th>样本数</th><th>硬门禁通过率</th><th>95% 置信区间</th><th>软告警</th></tr></thead><tbody>${[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, stats]) => {
     const [low, high] = interval(stats.passed, stats.total);
     return `<tr><td>${escape(name)}</td><td class="number">${stats.passed} / ${stats.total}</td><td class="positive number">${percent(stats.passed / stats.total)}</td>
-      <td><svg class="scenario-ci" viewBox="0 0 150 20" role="img" aria-label="${percent(low)} 至 ${percent(high)}"><line x1="5" y1="10" x2="145" y2="10" stroke="#edf0f5" stroke-width="3"/><line x1="${5 + low * 140}" y1="10" x2="${5 + high * 140}" y2="10" stroke="#7bb9aa" stroke-width="4"/><circle cx="${5 + stats.passed / stats.total * 140}" cy="10" r="4" fill="#178272"/></svg><span class="muted">${percent(low)} – ${percent(high)}</span></td><td class="number">${stats.soft}</td></tr>`;
+      <td><svg class="scenario-ci" viewBox="0 0 150 20" role="img" aria-label="${percent(low)} 至 ${percent(high)}"><line x1="5" y1="10" x2="145" y2="10" stroke="var(--line)" stroke-width="3"/><line x1="${5 + low * 140}" y1="10" x2="${5 + high * 140}" y2="10" stroke="var(--chart-good)" stroke-width="4"/><circle cx="${5 + stats.passed / stats.total * 140}" cy="10" r="4" fill="var(--teal)"/></svg><span class="muted">${percent(low)} – ${percent(high)}</span></td><td class="number">${stats.soft}</td></tr>`;
   }).join("")}</tbody></table></div>`;
 }
 
@@ -437,7 +439,7 @@ function renderAudit(context) {
   return `${detailHeader(context)}<div class="stats">${stat("变更文件", integer(array(payload.changed_files).length), "本次审计覆盖的文件")}${stat("审计发现", integer(findings.length), "按规则与模型证据整理")}${stat("新增 / 删除", `${integer(payload.additions)} / ${integer(payload.deletions)}`, "Git Diff 行数")}${stat("相关测试", labels[tests.status] || tests.status || "未运行", "测试结论与范围结论分别展示")}</div>
     <section class="panel"><div class="panel-head"><h2>任务与验收标准</h2></div><div class="panel-body"><p>${escape(payload.requirement || "未提供任务说明")}</p><ul class="evidence">${array(payload.acceptance_criteria).map((item) => `<li>${escape(item)}</li>`).join("")}</ul></div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>范围发现</h2><span class="muted">保留文件、行号与 Diff 侧别</span></div>${findings.map((finding, index) => `<article class="finding"><div class="finding-top">${badge(finding.status)}${badge(finding.risk)}<code>${escape(finding.path)}:${escape(finding.line ?? "?")} (${escape(finding.line_side || "target")})</code>${Number.isInteger(finding.line) && finding.line > 0 ? `<button class="link-button" data-finding="${index}">定位代码行 →</button>` : ""}</div><p>${escape(finding.reason)}</p>${details("证据", finding.evidence)}</article>`).join("") || empty("没有记录范围发现")}</section>
-    <section class="panel section-gap"><div class="panel-head"><h2>代码差异</h2><div class="trace-tools"><button class="button secondary" data-load-patch>加载代码差异</button><label class="patch-upload button secondary">选择 diff.patch<input id="audit-patch" type="file" accept=".patch,.diff,text/plain" aria-label="选择审计补丁"></label></div></div><div id="audit-diff" class="panel-body" aria-live="polite"></div></section>
+    <section class="panel section-gap"><div class="panel-head"><h2>代码差异</h2><div class="trace-tools"><button class="button secondary" data-load-patch>加载代码差异</button><label class="patch-upload button secondary">选择 diff.patch<input id="audit-patch" type="file" accept=".patch,.diff,text/plain" aria-label="选择审计补丁"></label></div></div><div id="audit-diff" class="panel-body"></div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>审计记录</h2></div><div class="panel-body">${details("测试结果", tests)}${details("模型发现的校验与处置", payload.model_finding_trace)}${details("原始数据", payload)}</div></section>`;
 }
 
@@ -484,7 +486,7 @@ async function locateFinding(index) {
   const row = file && [...file.querySelectorAll(".diff-row")].find((element) => Number(element.dataset[key]) === finding.line);
   if (!row) { toast("该文件或行不在补丁可见上下文内；请查看完整 diff.patch。"); return; }
   document.querySelectorAll(".diff-row.highlighted").forEach((element) => element.classList.remove("highlighted"));
-  row.classList.add("highlighted"); row.focus({ preventScroll: true }); row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.add("highlighted"); row.focus({ preventScroll: true }); row.scrollIntoView({ block: "center", behavior: scrollMotion() });
 }
 
 function renderRelease(context) {
@@ -545,7 +547,7 @@ function inlineReport(kind, payload, trail) {
   state.stack.push({ item: { kind, name, path: "当前报告内的完整评测结果" }, payload, trail, returnFocus: focusToken(document.activeElement) });
   resetCaseView(payload);
   render(true); view.querySelector("h1")?.focus({ preventScroll: true });
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: scrollMotion() });
 }
 
 function importedKind(payload) {
@@ -588,7 +590,7 @@ document.addEventListener("click", async (event) => {
   } else if (target.dataset.traceFilter) { state.traceFilter = target.dataset.traceFilter; renderTrace(); }
   else if (target.hasAttribute("data-jump-error")) {
     const first = document.querySelector(".trace-event.error");
-    if (first) { first.open = true; first.querySelector("summary").focus(); first.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    if (first) { first.open = true; first.querySelector("summary").focus(); first.scrollIntoView({ block: "center", behavior: scrollMotion() }); }
   } else if (target.hasAttribute("data-expand-events")) {
     const events = [...document.querySelectorAll(".trace-event")], open = events.some((entry) => !entry.open);
     events.forEach((entry) => { entry.open = open; }); target.textContent = open ? "折叠全部" : "展开全部";
@@ -626,7 +628,8 @@ document.addEventListener("input", (event) => {
   else if (event.target.id === "case-search") { state.caseQuery = event.target.value; state.casePage = 0; renderCaseRows(); syncLocation(); }
 });
 document.addEventListener("change", async (event) => {
-  if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); syncLocation(); }
+  if (event.target.id === "theme-select") AssayTheme.set(event.target.value);
+  else if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); syncLocation(); }
   else if (event.target.id === "audit-patch") {
     const context = current(), file = event.target.files[0];
     if (!file) return;

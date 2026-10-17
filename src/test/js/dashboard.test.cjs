@@ -1,5 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const ui = require("../../main/resources/io/assay/web/dashboard-core.js");
 
 test("JSONL checks aliases, duplicate IDs, line numbers and optional expectations", () => {
@@ -62,4 +64,24 @@ test("Split widths preserve both panel minimums and ignore corrupt preferences",
   assert.equal(ui.splitRatio(0.9, 400), 0.5);
   assert.equal(ui.splitRatio("broken", 1000), 0.5);
   assert.equal(ui.splitRatio(0.4, 1000), 0.4);
+});
+
+test("Theme follows the system, persists explicit choices and survives unavailable storage", () => {
+  const script = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/theme.js"), "utf8");
+  const document = { documentElement: { dataset: {} } }, window = {}, callbacks = [];
+  const media = { matches: true, addEventListener: (_event, callback) => callbacks.push(callback) };
+  let saved = '"invalid"';
+  vm.runInNewContext(script, { document, window, matchMedia: () => media,
+    localStorage: { getItem: () => saved, setItem: (_key, value) => { saved = value; } } });
+  assert.equal(document.documentElement.dataset.theme, "dark");
+  window.AssayTheme.set("light");
+  assert.equal(saved, '"light"');
+  media.matches = true; callbacks[0]();
+  assert.equal(document.documentElement.dataset.theme, "light");
+  window.AssayTheme.set("system");
+  media.matches = false; callbacks[0]();
+  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.doesNotThrow(() => vm.runInNewContext(script, { document, window, matchMedia: () => media,
+    localStorage: { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } } }));
+  assert.doesNotThrow(() => window.AssayTheme.set("dark"));
 });

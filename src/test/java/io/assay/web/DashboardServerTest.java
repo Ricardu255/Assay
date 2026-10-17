@@ -44,6 +44,8 @@ class DashboardServerTest {
             assertTrue(page.headers().firstValue("Content-Security-Policy").orElse("").contains("object-src 'none'"));
             assertEquals(200, get(base.resolve("app.js")).statusCode());
             assertEquals(200, get(base.resolve("dashboard-core.js")).statusCode());
+            assertEquals(200, get(base.resolve("theme.js")).statusCode());
+            assertEquals(200, get(base.resolve("theme.css")).statusCode());
             assertEquals(200, get(base.resolve("style.css")).statusCode());
 
             Map<String, Object> catalog = Json.parseObject(get(base.resolve("api/catalog")).body());
