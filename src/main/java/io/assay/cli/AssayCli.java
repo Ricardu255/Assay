@@ -110,7 +110,8 @@ public final class AssayCli {
         return switch (command) {
             case "serve" -> new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
                     .option("output", CommandLine.Kind.STRING, ".assay/runs")
-                    .option("port", CommandLine.Kind.INTEGER, "8080");
+                    .option("port", CommandLine.Kind.INTEGER, "8080")
+                    .flag("open-browser");
             case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                     .required("adapter", CommandLine.Kind.STRING)
                     .option("adapter-class", CommandLine.Kind.STRING, null)
@@ -208,13 +209,21 @@ public final class AssayCli {
     }
 
     private static int serve(CommandLine.Namespace args) {
-        try (DashboardServer server = new DashboardServer(args.path("output"), args.integer("port"))) {
+        try (DashboardServer server = startDashboard(args)) {
             Thread shutdown = new Thread(server::close, "assay-dashboard-shutdown");
             Runtime.getRuntime().addShutdownHook(shutdown);
             try {
                 System.out.println("dashboard: " + server.uri());
                 System.out.println("reports: " + server.output());
                 System.out.println("Read-only local viewer. Press Ctrl+C to stop.");
+                if (args.flag("open-browser")) {
+                    try {
+                        if (!java.awt.Desktop.isDesktopSupported()) throw new UnsupportedOperationException();
+                        java.awt.Desktop.getDesktop().browse(server.uri());
+                    } catch (java.io.IOException | UnsupportedOperationException | SecurityException unavailable) {
+                        System.out.println("Open the dashboard URL above in your browser.");
+                    }
+                }
                 server.await();
                 return 0;
             } finally {
@@ -229,6 +238,16 @@ public final class AssayCli {
             return 0;
         } catch (java.io.IOException error) {
             throw new IllegalStateException("cannot start dashboard: " + error.getMessage(), error);
+        }
+    }
+
+    private static DashboardServer startDashboard(CommandLine.Namespace args) throws java.io.IOException {
+        try {
+            return new DashboardServer(args.path("output"), args.integer("port"));
+        } catch (java.net.BindException busy) {
+            if (!args.flag("open-browser") || args.integer("port") == 0) throw busy;
+            System.out.println("Requested port is busy; selecting an available local port.");
+            return new DashboardServer(args.path("output"), 0);
         }
     }
 

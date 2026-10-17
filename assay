@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+set -eu
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if ! command -v java >/dev/null 2>&1; then
+  echo 'Java 17 or newer is required. Install a JDK and try again.' >&2
+  exit 1
+fi
+ASSAY_JAR=assay.jar
+if [ ! -f "$ASSAY_JAR" ]; then
+  if ! command -v mvn >/dev/null 2>&1; then
+    echo 'This source checkout needs Maven on PATH.' >&2
+    exit 1
+  fi
+  echo 'Building Assay...'
+  mvn -q -DskipTests package
+  ASSAY_JAR=target/assay.jar
+fi
+if [ "$#" -eq 0 ] || [ "$1" = demo ]; then
+  echo 'Running the bundled example. No API key is needed.'
+  java -jar "$ASSAY_JAR" run --adapter io.assay.examples.EchoAdapter --suite smoke --cases examples/cases.example.jsonl
+  echo 'Opening the dashboard. Press Ctrl+C to stop.'
+  exec java -jar "$ASSAY_JAR" serve --open-browser
+fi
+exec java -jar "$ASSAY_JAR" "$@"

@@ -13,6 +13,10 @@
 
 需要 JDK 17 或更高版本与 Maven。
 
+**Windows 首次体验：直接双击项目根目录的 `assay.cmd`。** 它会构建项目、运行一条无需 API Key 的示例，再自动打开报告界面。保持启动窗口运行，按 `Ctrl+C` 停止。macOS / Linux 可运行 `sh ./assay demo`。源码版需要 JDK 17+ 与 Maven 在 PATH 中；使用包含根目录 `assay.jar` 的分发目录时可省去 Maven。
+
+启动器也可简写其他命令，例如 `assay.cmd serve --open-browser`。显式请求自动打开浏览器时，如果 8080 端口已被占用，会选择空闲端口并打开实际地址。
+
 ```bash
 mvn -q clean package
 ```
