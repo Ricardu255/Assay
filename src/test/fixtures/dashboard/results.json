@@ -1,0 +1,32 @@
+{
+  "run_id": "UI-FIXTURE-可视化验证样例",
+  "suite": "smoke",
+  "source": "offline",
+  "status": "failed",
+  "case_count": 2,
+  "hard_failures": 1,
+  "soft_warnings": 0,
+  "results": [
+    {
+      "case": { "case_id": "UI-FAILED-001", "scenario": "工具失败", "payload": { "message": "查找资料" }, "expected": { "route": "SEARCH" } },
+      "hard_pass": false,
+      "soft_warning_count": 0,
+      "checks": [{ "name": "tool_completed", "level": "hard", "passed": false, "actual": "error", "expected": "ok", "message": "工具调用超时", "suspected_modules": ["Search"] }],
+      "trace": {
+        "trace_id": "ui-fixture-failed", "target_id": "fixture-agent", "target_version": "test", "final_output": "资料暂不可用",
+        "events": [
+          { "module": "Router", "action": "route", "status": "ok", "duration_ms": 5, "fields": { "route": "SEARCH" } },
+          { "module": "Search", "action": "query", "status": "error", "duration_ms": 2000, "error": "请求超时 <script>alert(1)</script>", "fields": { "input": { "query": "Agent evaluation" }, "attempt": 1 } }
+        ],
+        "fields": { "route": "SEARCH" }, "feedback": {}
+      }
+    },
+    {
+      "case": { "case_id": "UI-PASSED-002", "scenario": "直接回复", "payload": { "message": "hello" }, "expected": { "keyword": "hello" } },
+      "hard_pass": true,
+      "soft_warning_count": 0,
+      "checks": [],
+      "trace": { "trace_id": "ui-fixture-passed", "final_output": "hello", "events": [{ "module": "Reply", "action": "answer", "status": "ok", "duration_ms": 1, "fields": {} }], "fields": {}, "feedback": {} }
+    }
+  ]
+}

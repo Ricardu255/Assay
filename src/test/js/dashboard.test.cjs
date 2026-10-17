@@ -25,3 +25,11 @@ test("PowerShell and Bash commands quote shell metacharacters as literal argumen
   assert.equal(ui.setupCommands({ ...config, adapter: "http://agent", adapterClass: "" }).run, "");
   assert.equal(ui.setupCommands({ ...config, cases: "" }).run, "");
 });
+
+test("Trace failures keep explicit errors and normalize provider statuses", () => {
+  assert.equal(ui.failedEvent({ status: "FAILED" }), true);
+  assert.equal(ui.failedEvent({ status: "ok", error: "tool timeout" }), true);
+  assert.equal(ui.failedEvent({ status: "error" }), true);
+  assert.equal(ui.failedEvent({ status: "pending" }), false);
+  assert.equal(ui.failedEvent({ status: "ok", fields: { error_rate: 0.1 } }), false);
+});

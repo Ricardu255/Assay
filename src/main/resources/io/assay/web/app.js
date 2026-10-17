@@ -5,7 +5,7 @@ const sections = [
   ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
 const labels = {
-  passed: "通过", failed: "失败", warning: "软告警", accept: "接受", reject: "拒绝", rollback: "回退",
+  passed: "通过", failed: "失败", warning: "软告警", accept: "接受", reject: "拒绝", rollback: "回退", ok: "成功", success: "成功", error: "错误", failure: "失败",
   completed: "已完成", running: "运行中", unknown: "未知", budget_exhausted: "轮次用尽",
   time_budget_exhausted: "时间用尽", evolver_call_budget_exhausted: "调用预算用尽",
   no_acceptable_candidate: "无合格候选", no_candidates: "无候选", review_required: "需要复核",
@@ -14,7 +14,7 @@ const labels = {
   improvement: "改善集", regression: "回归集", holdout: "留出集"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
-  tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0 };
+  tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
 const setup = { mode: "example", shell: "powershell", jar: "target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
   validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
@@ -225,11 +225,16 @@ function renderTrace() {
   const checks = array(result.checks);
   const events = array(trace.events);
   const review = object(result.llm_review);
+  const failures = events.filter(AssayUI.failedEvent).length;
+  const visibleEvents = events.map((event, index) => ({ event, index })).filter(({ event }) => state.traceFilter !== "failed" || AssayUI.failedEvent(event));
   $("trace-detail").innerHTML = `<div class="trace-title"><strong>${escape(object(result.case).case_id)}</strong>${badge(caseStatus(result))}</div><div class="trace-content">
     <dl class="metadata"><dt>Trace ID</dt><dd>${escape(trace.trace_id || "无 Trace")}</dd><dt>目标版本</dt><dd>${escape([trace.target_id, trace.target_version].filter(Boolean).join(" · ") || "—")}</dd></dl>
     ${result.error ? `<div class="error-box section-gap">${escape(result.error)}</div>` : ""}
-    <h3 class="section-gap">执行时间线 <span class="muted">${events.length} 步</span></h3>
-    ${events.length ? events.map((event) => `<div class="trace-step ${event.error || ["error", "failed"].includes(event.status) ? "error" : ""}"><div class="step-title"><strong>${escape(event.module || "未标注模块")}</strong><span class="muted number">${decimal(event.duration_ms, " ms")}</span></div><div class="step-action">${escape(event.action || "—")} · ${escape(event.status || "unknown")}</div>${event.error ? `<p class="step-error">${escape(event.error)}</p>` : ""}</div>`).join("") : `<p class="muted">${result.trace ? "本次 Trace 没有步骤记录。" : "执行未产生可读取的 Trace。"}</p>`}
+    <h3 class="section-gap">执行时间线 <span class="muted">${events.length} 步 · ${failures} 步失败</span></h3>
+    ${events.length ? `<div class="trace-tools"><div class="button-group"><button class="button secondary" data-trace-filter="all" aria-pressed="${state.traceFilter === "all"}">全部步骤</button><button class="button secondary" data-trace-filter="failed" aria-pressed="${state.traceFilter === "failed"}">仅失败</button></div><button class="link-button" data-jump-error ${failures ? "" : "disabled"}>定位首个失败</button><button class="link-button" data-expand-events>展开全部</button></div>
+    ${visibleEvents.map(({ event, index }) => `<details class="trace-event ${AssayUI.failedEvent(event) ? "error" : ""}" data-event="${index}" ${AssayUI.failedEvent(event) ? "open" : ""}><summary><span class="step-number">${index + 1}</span><span class="step-main"><strong>${escape(event.module || "未标注模块")}</strong><span class="step-action">${escape(event.action || "未标注动作")}</span></span>${badge(event.status || "unknown")}<span class="muted number">${decimal(event.duration_ms, " ms")}</span></summary><div class="event-body">
+      ${event.error ? `<p class="step-error">${escape(event.error)}</p>` : ""}<div class="command-head"><strong>步骤字段</strong><button class="link-button" data-copy-event="${index}">复制步骤 JSON</button></div><pre>${json(event.fields || {})}</pre>
+      ${Object.keys(object(event.fields)).length ? "" : '<p class="mini-note">适配器未记录该步骤的额外字段。</p>'}</div></details>`).join("") || '<p class="muted">没有执行失败步骤；规则未通过的证据请查看下方规则检查。</p>'}` : `<p class="muted">${result.trace ? "本次 Trace 没有步骤记录。" : "执行未产生可读取的 Trace。"}</p>`}
     <h3 class="section-gap">规则检查</h3>${checks.length ? checks.map((check) => `<div class="check"><div class="check-head">${badge(check.passed ? "passed" : check.level === "hard" ? "failed" : "warning")}<strong>${escape(check.name)}</strong><span class="muted">${escape({ hard: "硬门禁", soft: "软质量", candidate: "复核信号" }[check.level] || check.level)}</span></div><p>${escape(check.message || check.layer || "")}</p>${details("实际值与期望值", { actual: check.actual, expected: check.expected, suspected_modules: check.suspected_modules })}</div>`).join("") : '<p class="muted">没有规则结果。</p>'}
     ${details("最终输出", trace.final_output, true)}${details("输入与期望", { input: object(result.case).payload, expected: object(result.case).expected })}${details("Trace 字段与反馈", { fields: trace.fields, feedback: trace.feedback })}
     ${Object.keys(review).length ? `<div class="model-note"><strong>模型建议 · 非权威</strong><p>${escape(review.summary || review.error || "查看建议详情")}</p>${details("建议详情", review)}</div>` : ""}</div>`;
@@ -330,7 +335,7 @@ function render() {
 }
 
 function resetCaseView(payload) {
-  state.tab = "cases"; state.caseFilter = "all"; state.caseQuery = ""; state.casePage = 0;
+  state.tab = "cases"; state.caseFilter = "all"; state.caseQuery = ""; state.casePage = 0; state.traceFilter = "all";
   const firstFailure = array(payload.results).findIndex((result) => result.hard_pass !== true);
   state.caseIndex = firstFailure >= 0 ? firstFailure : 0;
   state.casePage = Math.floor(state.caseIndex / 50);
@@ -401,6 +406,17 @@ document.addEventListener("click", async (event) => {
   } else if (target.dataset.setupCopy) {
     try { await navigator.clipboard.writeText(AssayUI.setupCommands(setup)[target.dataset.setupCopy]); toast("命令已复制。"); }
     catch { toast("复制失败，请在命令框中手动选择并复制。"); }
+  } else if (target.dataset.traceFilter) { state.traceFilter = target.dataset.traceFilter; renderTrace(); }
+  else if (target.hasAttribute("data-jump-error")) {
+    const first = document.querySelector(".trace-event.error");
+    if (first) { first.open = true; first.querySelector("summary").focus(); first.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  } else if (target.hasAttribute("data-expand-events")) {
+    const events = [...document.querySelectorAll(".trace-event")], open = events.some((entry) => !entry.open);
+    events.forEach((entry) => { entry.open = open; }); target.textContent = open ? "折叠全部" : "展开全部";
+  } else if (target.dataset.copyEvent !== undefined) {
+    const result = array(current().payload.results)[state.caseIndex];
+    try { await navigator.clipboard.writeText(JSON.stringify(array(object(result.trace).events)[Number(target.dataset.copyEvent)], null, 2)); toast("步骤 JSON 已复制。"); }
+    catch { toast("复制失败，请手动选择原始数据复制。"); }
   } else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
     state.stack.pop(); if (current()) resetCaseView(current().payload); render();

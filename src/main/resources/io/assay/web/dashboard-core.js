@@ -54,7 +54,10 @@
     } catch (error) { errors.push(error.message); }
     return { errors, run: errors.length ? "" : run, serve: errors.length ? "" : serve };
   }
-  const api = { exampleCases, validateCases, shellQuote, setupCommands };
+  function failedEvent(event) {
+    return Boolean(event.error) || ["error", "failed", "failure"].includes(String(event.status).toLowerCase());
+  }
+  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);
