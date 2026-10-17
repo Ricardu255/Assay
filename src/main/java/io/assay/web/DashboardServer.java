@@ -72,7 +72,7 @@ public final class DashboardServer implements AutoCloseable {
                     sendJson(exchange, 200, catalog.list());
                 } else if (path.startsWith("/api/artifacts/")) {
                     sendJson(exchange, 200, catalog.read(path.substring("/api/artifacts/".length())));
-                } else if (Map.of("/", "index.html", "/index.html", "index.html", "/app.js", "app.js", "/style.css", "style.css").containsKey(path)) {
+                } else if (Map.of("/", "index.html", "/index.html", "index.html", "/app.js", "app.js", "/dashboard-core.js", "dashboard-core.js", "/style.css", "style.css").containsKey(path)) {
                     String name = "/".equals(path) ? "index.html" : path.substring(1);
                     try (InputStream input = DashboardServer.class.getResourceAsStream("/io/assay/web/" + name)) {
                         if (input == null) {

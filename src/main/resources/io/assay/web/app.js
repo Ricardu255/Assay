@@ -1,7 +1,7 @@
 "use strict";
 
 const sections = [
-  ["overview", "总览", "▦"], ["run", "运行记录", "▤"], ["evolution", "版本演化", "⇄"],
+  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["run", "运行记录", "▤"], ["evolution", "版本演化", "⇄"],
   ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
 const labels = {
@@ -15,6 +15,9 @@ const labels = {
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0 };
+const setup = { mode: "example", shell: "powershell", jar: "target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
+  adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
+  validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
 const view = document.getElementById("view");
 const $ = (id) => document.getElementById(id);
 const array = (value) => Array.isArray(value) ? value : [];
@@ -74,7 +77,7 @@ async function refresh() {
 function renderNavigation() {
   $("navigation").innerHTML = sections.map(([kind, title, icon]) => `<button class="nav-button ${state.section === kind ? "active" : ""}" data-section="${kind}" title="${title}" ${state.section === kind ? 'aria-current="page"' : ""}>
     <span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-name">${title}</span>
-    ${kind === "overview" ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`).join("");
+    ${["overview", "setup"].includes(kind) ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`).join("");
   $("section-label").textContent = kindName(state.section);
 }
 
@@ -120,7 +123,7 @@ function overview() {
   const failedRuns = runs.filter((item) => item.status === "failed").length;
   const denominator = Math.max(1, runs.length);
   const recent = filteredItems().slice(0, 8);
-  return `${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。")}${warnings()}
+  return `${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
     <div class="stats">${stat("评测运行", integer(runs.length), "包含基线与候选的独立运行")}
       ${stat("硬门禁通过率", total ? percent((total - failures) / total) : "—", `${integer(total)} 条已记录用例`, "positive")}
       ${stat("硬失败用例", integer(failures), "需要优先关注的执行或门禁失败", failures ? "negative" : "")}
@@ -134,7 +137,41 @@ function overview() {
           <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="#df7b85"/></svg>
         ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
         <p class="mini-note">按扫描到的运行汇总。不同版本与数据集的运行分别计数。</p></div></section></div>
-    <div class="artifact-counts">${sections.slice(2).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
+    <div class="artifact-counts">${sections.slice(3).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
+}
+
+function setupPage() {
+  const field = (key, title, note = "") => `<label class="form-field">${title}<input data-setup="${key}" value="${escape(setup[key])}" autocomplete="off">${note ? `<small>${note}</small>` : ""}</label>`;
+  return `${heading("开始一次评测", "先跑通内置示例，再换成你自己的 Agent。命令在项目根目录的终端中运行。")}
+    <div class="setup-grid"><section class="panel"><div class="panel-head"><h2>1 · 选择适配器</h2></div><div class="panel-body form-grid">
+      <label class="form-field full">接入方式<select id="setup-mode"><option value="example" ${setup.mode === "example" ? "selected" : ""}>内置 Echo 示例（无需 API Key）</option><option value="custom" ${setup.mode === "custom" ? "selected" : ""}>自定义 Agent</option></select></label>
+      ${field("adapter", "适配器类名或 JAR 路径")}${field("adapterClass", "JAR 内的类名（可选）", "JAR 已注册单个服务实现时可留空。")}
+      <div class="full model-note">自定义适配器实现 ProjectAdapterFactory：调用 Agent、转换 Trace、声明硬门禁与软质量规则。可参考项目内的 src/main/java/io/assay/examples/EchoAdapter.java。适配器将在你运行命令时加载。</div>
+    </div></section><section class="panel"><div class="panel-head"><h2>2 · 检查测试集</h2></div><div class="panel-body form-grid">
+      ${field("cases", "JSONL 文件路径", "选择文件只检查内容；请确认此处是它在电脑上的实际路径。")}${field("suite", "测试集名称")}
+      <label class="form-field full">选择 JSONL 文件进行检查<input type="file" id="setup-cases" accept=".jsonl,.ndjson,application/x-ndjson,text/plain"></label>
+      <div id="setup-validation" class="full" aria-live="polite"></div>
+      <details class="full"><summary>查看一行一个用例的格式</summary><pre>${escape(AssayUI.exampleCases)}</pre></details>
+    </div></section></div>
+    <section class="panel section-gap"><div class="panel-head"><h2>3 · 生成运行命令</h2><span class="muted">复制到终端运行</span></div><div class="panel-body form-grid">
+      <label class="form-field">终端<select data-setup="shell"><option value="powershell" ${setup.shell === "powershell" ? "selected" : ""}>Windows PowerShell</option><option value="bash" ${setup.shell === "bash" ? "selected" : ""}>Bash / Zsh</option></select></label>
+      ${field("jar", "框架 JAR 路径")}${field("output", "报告输出目录")}
+      <div id="setup-commands" class="full" aria-live="polite"></div>
+    </div></section><section class="panel section-gap"><div class="panel-head"><h2>4 · 查看报告</h2></div><div class="panel-body"><p class="subtitle">首次使用先运行 mvn -q package。评测命令会打印 report.md 的位置；运行完成后，使用上方查看命令启动界面。若已经在查看同一输出目录，直接刷新结果。</p><button class="button secondary section-gap" data-section="run">查看运行记录 →</button></div></section>`;
+}
+
+function updateSetup() {
+  const check = setup.validation;
+  $("setup-validation").innerHTML = !check ? '<p class="muted">请选择测试集，检查后即可复制命令。</p>' :
+    `${badge(check.errors.length ? "failed" : "passed")} <span class="muted">${escape(setup.filename)} · ${check.count} 条有效用例 · ${check.scenarios.length} 个场景</span>
+    ${check.errors.length ? `<ul class="validation-errors">${check.errors.slice(0, 20).map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` : ""}
+    ${check.warnings.length ? `<details class="warnings"><summary>${check.warnings.length} 条提示</summary><ul>${check.warnings.slice(0, 20).map((warning) => `<li>${escape(warning)}</li>`).join("")}</ul></details>` : ""}`;
+  const commands = AssayUI.setupCommands(setup), errors = [...commands.errors];
+  if (!check) errors.push("尚未检查测试集。");
+  else if (check.errors.length) errors.push("请先修正测试集错误。");
+  $("setup-commands").innerHTML = errors.length ? `<ul class="validation-errors">${errors.map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` :
+    `<div class="command-head"><strong>运行评测</strong><button class="button secondary" data-setup-copy="run">复制运行命令</button></div><pre>${escape(commands.run)}</pre>
+    <div class="command-head section-gap"><strong>启动报告界面</strong><button class="button secondary" data-setup-copy="serve">复制查看命令</button></div><pre>${escape(commands.serve)}</pre><p class="mini-note">启动后访问 http://127.0.0.1:8080/；按 Ctrl+C 关闭服务。</p>`;
 }
 
 function listing() {
@@ -282,7 +319,11 @@ function renderRelease(context) {
 function render() {
   renderNavigation();
   const context = current();
-  if (!context) { view.innerHTML = state.section === "overview" ? overview() : listing(); return; }
+  if (!context) {
+    view.innerHTML = state.section === "overview" ? overview() : state.section === "setup" ? setupPage() : listing();
+    if (state.section === "setup") updateSetup();
+    return;
+  }
   const renderers = { run: renderRun, evolution: renderEvolution, auto: renderAuto, audit: renderAudit, release: renderRelease };
   view.innerHTML = renderers[context.item.kind](context);
   if (context.item.kind === "run" && state.tab === "cases") renderCaseRows();
@@ -352,11 +393,14 @@ $("file-input").addEventListener("change", async (event) => {
   if (first) { await openArtifact(first.id); toast(`已导入 ${added} 份报告，仅在当前页面查看。`); }
 });
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const target = event.target.closest("button,[data-case]");
   if (!target || target.disabled) return;
   if (target.dataset.section) {
     state.request++; state.section = target.dataset.section; state.stack = []; render();
+  } else if (target.dataset.setupCopy) {
+    try { await navigator.clipboard.writeText(AssayUI.setupCommands(setup)[target.dataset.setupCopy]); toast("命令已复制。"); }
+    catch { toast("复制失败，请在命令框中手动选择并复制。"); }
   } else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
     state.stack.pop(); if (current()) resetCaseView(current().payload); render();
@@ -377,11 +421,34 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.id === "global-search") { state.query = event.target.value; if (!state.stack.length) render(); }
+  if (event.target.dataset.setup) { setup[event.target.dataset.setup] = event.target.value.trim(); updateSetup(); }
+  else if (event.target.id === "global-search") { state.query = event.target.value; if (!state.stack.length) render(); }
   else if (event.target.id === "case-search") { state.caseQuery = event.target.value; state.casePage = 0; renderCaseRows(); }
 });
-document.addEventListener("change", (event) => {
+document.addEventListener("change", async (event) => {
   if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); }
+  else if (event.target.id === "setup-mode") {
+    setup.fileRequest++;
+    setup.mode = event.target.value; setup.adapterClass = "";
+    setup.adapter = setup.mode === "example" ? "io.assay.examples.EchoAdapter" : "";
+    setup.cases = setup.mode === "example" ? "examples/cases.example.jsonl" : "";
+    setup.validation = setup.mode === "example" ? AssayUI.validateCases(AssayUI.exampleCases) : null;
+    setup.filename = "内置示例"; render();
+  } else if (event.target.id === "setup-cases") {
+    const file = event.target.files[0], requestId = ++setup.fileRequest;
+    if (!file) return;
+    try {
+      if (file.size > 16 * 1024 * 1024) throw new Error("引导页检查上限为 16 MiB；较大测试集请直接使用 CLI。");
+      const text = await file.text();
+      if (requestId !== setup.fileRequest) return;
+      setup.validation = AssayUI.validateCases(text); setup.filename = file.name;
+      setup.cases = file.name;
+      if (state.section === "setup") { document.querySelector('[data-setup="cases"]').value = setup.cases; updateSetup(); }
+    } catch (error) {
+      setup.validation = { count: 0, scenarios: [], errors: [error.message], warnings: [] };
+      if (state.section === "setup") updateSetup();
+    }
+  }
 });
 $("refresh-button").addEventListener("click", refresh);
 $("import-button").addEventListener("click", () => $("file-input").click());
