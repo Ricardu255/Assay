@@ -7,10 +7,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -78,6 +81,33 @@ public final class ArtifactCatalog {
     }
 
     public Map<String, Object> read(String id) throws IOException {
+        return Json.parseObject(readText(reportPath(id), MAX_FILE_BYTES));
+    }
+
+    /** Only the fixed patch next to an audit report is exposed, never arbitrary workspace files. */
+    public Map<String, Object> readAuditPatch(String id) throws IOException {
+        Path report = reportPath(id);
+        if (!report.getFileName().toString().equals("scope_audit.json")) {
+            throw new IllegalArgumentException("patches are only available for scope audits");
+        }
+        Map<String, Object> audit = read(id);
+        Path patch = report.resolveSibling("diff.patch");
+        validateContainedFile(patch);
+        String text = readText(patch, 8L * 1024 * 1024);
+        String digest;
+        try {
+            digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        Object expected = audit.get("diff_sha256");
+        if (expected != null && !digest.equalsIgnoreCase(String.valueOf(expected))) {
+            throw new IllegalArgumentException("diff.patch SHA-256 does not match the audit report");
+        }
+        return Map.of("text", text, "sha256", digest, "verified", expected != null);
+    }
+
+    private Path reportPath(String id) throws IOException {
         if (id == null || id.length() > 8192) {
             throw new IllegalArgumentException("invalid artifact id");
         }
@@ -92,17 +122,25 @@ public final class ArtifactCatalog {
         if (!path.startsWith(root) || !KINDS.containsKey(path.getFileName().toString())) {
             throw new IllegalArgumentException("unsupported artifact path");
         }
+        validateContainedFile(path);
+        return path;
+    }
+
+    private void validateContainedFile(Path path) throws IOException {
         for (Path part = path; part != null && part.startsWith(root); part = part.getParent()) {
             if (Files.isSymbolicLink(part)) {
                 throw new IllegalArgumentException("symbolic link artifacts are not supported");
             }
         }
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !path.toRealPath().startsWith(root)) {
-            throw new java.nio.file.NoSuchFileException(relative);
+            throw new java.nio.file.NoSuchFileException(path.getFileName().toString());
         }
-        if (Files.size(path) > MAX_FILE_BYTES) {
-            throw new IllegalArgumentException("artifact exceeds the 64 MiB viewer limit");
+    }
+
+    private String readText(Path path, long maxBytes) throws IOException {
+        if (Files.size(path) > maxBytes) {
+            throw new IllegalArgumentException("artifact exceeds the " + (maxBytes / 1024 / 1024) + " MiB viewer limit");
         }
-        return Json.parseObject(Files.readString(path, StandardCharsets.UTF_8));
+        return Files.readString(path, StandardCharsets.UTF_8);
     }
 }

@@ -57,7 +57,76 @@
   function failedEvent(event) {
     return Boolean(event.error) || ["error", "failed", "failure"].includes(String(event.status).toLowerCase());
   }
-  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent };
+  function gitPath(raw, prefix = true) {
+    let value = raw;
+    if (raw.startsWith('"')) {
+      const quoted = raw.match(/^"((?:\\.|[^"\\])*)"/);
+      if (quoted) {
+        const bytes = [], encoder = new TextEncoder(), source = quoted[1];
+        for (let i = 0; i < source.length;) {
+          if (source[i] === "\\") {
+            const octal = source.slice(i + 1).match(/^[0-7]{1,3}/);
+            if (octal) { bytes.push(parseInt(octal[0], 8)); i += 1 + octal[0].length; continue; }
+            const next = source[++i];
+            bytes.push(...encoder.encode(({ t: "\t", n: "\n", r: "\r", a: "\x07", b: "\b", v: "\v", f: "\f" })[next] ?? next ?? "\\"));
+            i++;
+          } else {
+            const character = String.fromCodePoint(source.codePointAt(i));
+            bytes.push(...encoder.encode(character)); i += character.length;
+          }
+        }
+        value = new TextDecoder().decode(new Uint8Array(bytes));
+      }
+    } else value = value.split("\t")[0];
+    if (value === "/dev/null") return null;
+    return prefix ? value.replace(/^[ab]\//, "") : value;
+  }
+  function parseDiff(text, maxRows = 5000) {
+    const files = [];
+    let file = null, hunk = null, rows = 0, truncated = false;
+    function push(row) {
+      if (rows++ < maxRows) file.rows.push(row);
+      else truncated = true;
+    }
+    for (const line of String(text).split("\n")) {
+      if (line.startsWith("diff --git ")) {
+        if (files.length >= 200) { truncated = true; break; }
+        const header = line.slice(11), names = header.match(/^("(?:\\.|[^"\\])*"|a\/.*?) ("(?:\\.|[^"\\])*"|b\/.*)$/);
+        file = { oldPath: names ? gitPath(names[1]) : "", newPath: names ? gitPath(names[2]) : "", rows: [], binary: false };
+        files.push(file); hunk = null; continue;
+      }
+      if (!file) {
+        if (!line.startsWith("--- ") && !line.startsWith("@@ ")) continue;
+        file = { oldPath: "", newPath: "", rows: [], binary: false }; files.push(file);
+      }
+      const header = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (header) {
+        hunk = { old: +header[1], left: header[2] === undefined ? 1 : +header[2], next: +header[3], right: header[4] === undefined ? 1 : +header[4] };
+        push({ type: "hunk", text: line }); continue;
+      }
+      if (hunk && line.startsWith("\\ No newline")) { push({ type: "meta", text: line }); continue; }
+      if (hunk && (hunk.left > 0 || hunk.right > 0)) {
+        const type = line[0], row = { text: line.slice(1) };
+        if (type === "-" && hunk.left > 0) { row.type = "deletion"; row.oldLine = hunk.old++; hunk.left--; }
+        else if (type === "+" && hunk.right > 0) { row.type = "addition"; row.newLine = hunk.next++; hunk.right--; }
+        else if (type === " " && hunk.left > 0 && hunk.right > 0) {
+          row.type = "context"; row.oldLine = hunk.old++; row.newLine = hunk.next++; hunk.left--; hunk.right--;
+        } else { hunk = null; push({ type: "meta", text: line }); continue; }
+        push(row); continue;
+      }
+      hunk = null;
+      if (line.startsWith("--- ")) file.oldPath = gitPath(line.slice(4));
+      else if (line.startsWith("+++ ")) file.newPath = gitPath(line.slice(4));
+      else if (line.startsWith("rename from ")) { file.oldPath = gitPath(line.slice(12), false); push({ type: "meta", text: line }); }
+      else if (line.startsWith("rename to ")) { file.newPath = gitPath(line.slice(10), false); push({ type: "meta", text: line }); }
+      else if (line) {
+        if (line.startsWith("Binary files ") || line === "GIT binary patch") file.binary = true;
+        push({ type: "meta", text: line });
+      }
+    }
+    return { files, truncated };
+  }
+  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent, parseDiff };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);

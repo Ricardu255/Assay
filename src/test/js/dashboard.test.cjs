@@ -33,3 +33,25 @@ test("Trace failures keep explicit errors and normalize provider statuses", () =
   assert.equal(ui.failedEvent({ status: "pending" }), false);
   assert.equal(ui.failedEvent({ status: "ok", fields: { error_rate: 0.1 } }), false);
 });
+
+test("Diff parser preserves files, hunk line numbers, header-like code and missing newlines", () => {
+  const patch = 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -7,2 +7,2 @@\n--- header-like code\n+new\n same\n\\ No newline at end of file\ndiff --git a/b.txt b/b.txt\nnew file mode 100644\n--- /dev/null\n+++ b/b.txt\n@@ -0,0 +1 @@\n+<script>literal</script>\n';
+  const parsed = ui.parseDiff(patch);
+  assert.equal(parsed.files.length, 2);
+  assert.deepEqual(parsed.files[0].rows.filter((row) => row.oldLine || row.newLine), [
+    { type: "deletion", text: "-- header-like code", oldLine: 7 },
+    { type: "addition", text: "new", newLine: 7 },
+    { type: "context", text: "same", oldLine: 8, newLine: 8 }
+  ]);
+  assert.equal(parsed.files[1].oldPath, null);
+  assert.equal(parsed.files[1].rows.at(-1).newLine, 1);
+  assert.equal(ui.parseDiff(patch, 2).truncated, true);
+});
+
+test("Diff parser handles renamed, binary, spaced and Git octal UTF-8 paths", () => {
+  const parsed = ui.parseDiff('diff --git a/old name b/new name\nsimilarity index 100%\nrename from old name\nrename to new name\ndiff --git "a/\\344\\270\\255.txt" "b/\\344\\270\\255.txt"\nBinary files differ\n');
+  assert.equal(parsed.files[0].oldPath, "old name");
+  assert.equal(parsed.files[0].newPath, "new name");
+  assert.equal(parsed.files[1].newPath, "中.txt");
+  assert.equal(parsed.files[1].binary, true);
+});

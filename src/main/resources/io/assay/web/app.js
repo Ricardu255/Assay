@@ -312,8 +312,55 @@ function renderAudit(context) {
   const payload = context.payload, findings = array(payload.findings), tests = object(payload.tests);
   return `${detailHeader(context)}<div class="stats">${stat("变更文件", integer(array(payload.changed_files).length), "本次审计覆盖的文件")}${stat("审计发现", integer(findings.length), "按规则与模型证据整理")}${stat("新增 / 删除", `${integer(payload.additions)} / ${integer(payload.deletions)}`, "Git Diff 行数")}${stat("相关测试", labels[tests.status] || tests.status || "未运行", "测试结论与范围结论分别展示")}</div>
     <section class="panel"><div class="panel-head"><h2>任务与验收标准</h2></div><div class="panel-body"><p>${escape(payload.requirement || "未提供任务说明")}</p><ul class="evidence">${array(payload.acceptance_criteria).map((item) => `<li>${escape(item)}</li>`).join("")}</ul></div></section>
-    <section class="panel section-gap"><div class="panel-head"><h2>范围发现</h2><span class="muted">保留文件、行号与 Diff 侧别</span></div>${findings.map((finding) => `<article class="finding"><div class="finding-top">${badge(finding.status)}${badge(finding.risk)}<code>${escape(finding.path)}:${escape(finding.line ?? "?")} (${escape(finding.line_side || "target")})</code></div><p>${escape(finding.reason)}</p>${details("证据", finding.evidence)}</article>`).join("") || empty("没有记录范围发现")}</section>
+    <section class="panel section-gap"><div class="panel-head"><h2>范围发现</h2><span class="muted">保留文件、行号与 Diff 侧别</span></div>${findings.map((finding, index) => `<article class="finding"><div class="finding-top">${badge(finding.status)}${badge(finding.risk)}<code>${escape(finding.path)}:${escape(finding.line ?? "?")} (${escape(finding.line_side || "target")})</code>${Number.isInteger(finding.line) && finding.line > 0 ? `<button class="link-button" data-finding="${index}">定位代码行 →</button>` : ""}</div><p>${escape(finding.reason)}</p>${details("证据", finding.evidence)}</article>`).join("") || empty("没有记录范围发现")}</section>
+    <section class="panel section-gap"><div class="panel-head"><h2>代码差异</h2><div class="trace-tools"><button class="button secondary" data-load-patch>加载代码差异</button><label class="patch-upload button secondary">选择 diff.patch<input id="audit-patch" type="file" accept=".patch,.diff,text/plain" aria-label="选择审计补丁"></label></div></div><div id="audit-diff" class="panel-body" aria-live="polite"></div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>审计记录</h2></div><div class="panel-body">${details("测试结果", tests)}${details("模型发现的校验与处置", payload.model_finding_trace)}${details("原始数据", payload)}</div></section>`;
+}
+
+function renderAuditPatch(context) {
+  const container = $("audit-diff");
+  if (!container) return;
+  if (!context.patch) {
+    container.innerHTML = `<p class="muted">${escape(context.patchError || "加载报告旁的 diff.patch，或选择本地补丁。将核对报告记录的 SHA-256。")}</p>`;
+    return;
+  }
+  const patch = context.patch, parsed = context.parsedPatch || (context.parsedPatch = AssayUI.parseDiff(patch.text));
+  const split = context.diffMode === "split";
+  container.innerHTML = `<div class="diff-toolbar">${badge(patch.verified ? "passed" : "warning")}<span class="muted">${patch.verified ? "补丁与报告校验一致" : "报告未记录校验值，仅供浏览"}</span><div class="button-group"><button class="button secondary" data-diff-mode="unified" aria-pressed="${!split}">统一视图</button><button class="button secondary" data-diff-mode="split" aria-pressed="${split}">分屏视图</button></div></div>
+    ${parsed.truncated ? '<p class="warnings">页面最多展示 5,000 行、200 个文件；完整内容请查看原始 diff.patch。</p>' : ""}
+    ${parsed.files.map((file) => `<section class="diff-file" data-old-path="${escape(file.oldPath)}" data-new-path="${escape(file.newPath)}"><h3>${escape(file.newPath || file.oldPath || "未命名文件")}</h3>${file.binary ? '<p class="muted diff-meta">二进制变更，仅显示补丁元信息。</p>' : ""}<div class="table-wrap"><table class="diff-table ${split ? "split" : "unified"}" aria-label="${escape(file.newPath || file.oldPath || "文件")} 的代码差异"><thead><tr>${split ? '<th>旧行</th><th>修改前</th><th>新行</th><th>修改后</th>' : '<th>旧行</th><th>新行</th><th>变更</th>'}</tr></thead><tbody>${file.rows.map((row) => {
+      if (["hunk", "meta"].includes(row.type)) return `<tr class="diff-meta"><td colspan="${split ? 4 : 3}">${escape(row.text)}</td></tr>`;
+      const attributes = `${row.oldLine == null ? "" : `data-old-line="${row.oldLine}"`} ${row.newLine == null ? "" : `data-new-line="${row.newLine}"`}`;
+      return `<tr class="diff-row ${row.type}" ${attributes} tabindex="-1">${split ? `<td class="line-number">${row.oldLine ?? ""}</td><td class="diff-code ${row.type === "addition" ? "diff-blank" : ""}">${row.type === "addition" ? "" : escape(row.text)}</td><td class="line-number">${row.newLine ?? ""}</td><td class="diff-code ${row.type === "deletion" ? "diff-blank" : ""}">${row.type === "deletion" ? "" : escape(row.text)}</td>` : `<td class="line-number">${row.oldLine ?? ""}</td><td class="line-number">${row.newLine ?? ""}</td><td class="diff-code"><span class="diff-sign">${row.type === "addition" ? "+" : row.type === "deletion" ? "−" : " "}</span>${escape(row.text)}</td>`}</tr>`;
+    }).join("")}</tbody></table></div></section>`).join("") || '<p class="muted">补丁为空，或没有可展示的 Git 差异。</p>'}`;
+}
+
+async function loadAuditPatch(context) {
+  if (context.patch) return true;
+  if (context.patchLoading) return false;
+  if (!context.item.id || context.item.id.startsWith("import-")) { toast("请使用“选择 diff.patch”为导入的报告附上补丁。"); return false; }
+  context.patchLoading = true;
+  $("audit-diff").innerHTML = '<p class="muted">正在读取并核对补丁…</p>';
+  try {
+    context.patch = await request(`/api/audit-patch/${encodeURIComponent(context.item.id)}`);
+    if (current() === context) renderAuditPatch(context);
+    return true;
+  } catch (error) {
+    context.patchError = `补丁无法读取：${error.message}`;
+    if (current() === context) renderAuditPatch(context);
+    return false;
+  } finally { context.patchLoading = false; }
+}
+
+async function locateFinding(index) {
+  const context = current(), finding = array(context.payload.findings)[index];
+  if (!finding || !await loadAuditPatch(context) || current() !== context) return;
+  const file = [...document.querySelectorAll(".diff-file")].find((element) => element.dataset.oldPath === finding.path || element.dataset.newPath === finding.path);
+  const key = finding.line_side === "base" ? "oldLine" : "newLine";
+  const row = file && [...file.querySelectorAll(".diff-row")].find((element) => Number(element.dataset[key]) === finding.line);
+  if (!row) { toast("该文件或行不在补丁可见上下文内；请查看完整 diff.patch。"); return; }
+  document.querySelectorAll(".diff-row.highlighted").forEach((element) => element.classList.remove("highlighted"));
+  row.classList.add("highlighted"); row.focus({ preventScroll: true }); row.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function renderRelease(context) {
@@ -332,6 +379,7 @@ function render() {
   const renderers = { run: renderRun, evolution: renderEvolution, auto: renderAuto, audit: renderAudit, release: renderRelease };
   view.innerHTML = renderers[context.item.kind](context);
   if (context.item.kind === "run" && state.tab === "cases") renderCaseRows();
+  if (context.item.kind === "audit") renderAuditPatch(context);
 }
 
 function resetCaseView(payload) {
@@ -417,7 +465,10 @@ document.addEventListener("click", async (event) => {
     const result = array(current().payload.results)[state.caseIndex];
     try { await navigator.clipboard.writeText(JSON.stringify(array(object(result.trace).events)[Number(target.dataset.copyEvent)], null, 2)); toast("步骤 JSON 已复制。"); }
     catch { toast("复制失败，请手动选择原始数据复制。"); }
-  } else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
+  } else if (target.hasAttribute("data-load-patch")) await loadAuditPatch(current());
+  else if (target.dataset.diffMode) { current().diffMode = target.dataset.diffMode; renderAuditPatch(current()); }
+  else if (target.dataset.finding !== undefined) await locateFinding(Number(target.dataset.finding));
+  else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
     state.stack.pop(); if (current()) resetCaseView(current().payload); render();
   } else if (target.dataset.tab) { state.tab = target.dataset.tab; render(); }
@@ -443,7 +494,21 @@ document.addEventListener("input", (event) => {
 });
 document.addEventListener("change", async (event) => {
   if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); }
-  else if (event.target.id === "setup-mode") {
+  else if (event.target.id === "audit-patch") {
+    const context = current(), file = event.target.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 8 * 1024 * 1024) throw new Error("补丁超过 8 MiB 查看上限。");
+      const bytes = await file.arrayBuffer(), digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const expected = context.payload.diff_sha256;
+      if (expected != null && String(expected).toLowerCase() !== hash) throw new Error("补丁 SHA-256 与审计报告不一致。");
+      context.patch = { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), verified: expected != null };
+      context.parsedPatch = null;
+      if (current() === context) renderAuditPatch(context);
+    } catch (error) { toast(error.message); }
+    event.target.value = "";
+  } else if (event.target.id === "setup-mode") {
     setup.fileRequest++;
     setup.mode = event.target.value; setup.adapterClass = "";
     setup.adapter = setup.mode === "example" ? "io.assay.examples.EchoAdapter" : "";

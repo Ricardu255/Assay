@@ -1,0 +1,12 @@
+{
+  "requirement": "UI-FIXTURE-审计定位验证",
+  "conclusion": "review_required",
+  "acceptance_criteria": ["仅修改问候文案", "保留正确的行号和变更侧别"],
+  "changed_files": ["greeting.txt", "renamed file.txt"],
+  "additions": 1, "deletions": 1,
+  "tests": { "status": "not_run" },
+  "findings": [
+    { "path": "greeting.txt", "line": 2, "line_side": "target", "status": "related", "risk": "low", "reason": "修改问候文案", "evidence": "+hello <script>literal</script>" },
+    { "path": "greeting.txt", "line": 2, "line_side": "base", "status": "related", "risk": "low", "reason": "原文案被替换", "evidence": "-old greeting" }
+  ]
+}

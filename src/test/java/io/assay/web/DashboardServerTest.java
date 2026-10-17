@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.HexFormat;
+import java.security.MessageDigest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -81,6 +83,28 @@ class DashboardServerTest {
         Path file = root.resolve("file");
         Files.writeString(file, "x");
         assertThrows(IllegalArgumentException.class, () -> new ArtifactCatalog(file));
+    }
+
+    @Test
+    void auditPatchIsBoundToItsReportAndVerifiedBeforeServing(@TempDir Path root) throws Exception {
+        String patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n";
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(patch.getBytes(StandardCharsets.UTF_8)));
+        Files.writeString(root.resolve("scope_audit.json"), Json.write(Map.of("diff_sha256", digest)));
+        Files.writeString(root.resolve("diff.patch"), patch);
+        Files.writeString(root.resolve("results.json"), "{}");
+        ArtifactCatalog catalog = new ArtifactCatalog(root);
+        assertThrows(IllegalArgumentException.class, () -> catalog.readAuditPatch(id("results.json")));
+        assertThrows(IllegalArgumentException.class, () -> catalog.read(id("diff.patch")));
+        assertThrows(IllegalArgumentException.class, () -> catalog.readAuditPatch(id("../scope_audit.json")));
+        try (DashboardServer server = new DashboardServer(root, 0)) {
+            URI uri = server.uri().resolve("api/audit-patch/" + id("scope_audit.json"));
+            HttpResponse<String> response = get(uri);
+            assertEquals(200, response.statusCode());
+            assertEquals(patch, Json.parseObject(response.body()).get("text"));
+            assertEquals(true, Json.parseObject(response.body()).get("verified"));
+            Files.writeString(root.resolve("diff.patch"), "tampered");
+            assertEquals(400, get(uri).statusCode());
+        }
     }
 
     private static HttpResponse<String> get(URI uri) throws IOException, InterruptedException {
