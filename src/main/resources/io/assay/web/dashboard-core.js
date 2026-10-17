@@ -2,6 +2,31 @@
 (function (root) {
   "use strict";
   const exampleCases = '{"id":"EXAMPLE-001","scenario":"direct","input":{"message":"hello agent"},"expected":{"route":"ECHO","keyword":"hello"},"metadata":{"system_constraints":{"max_steps":3,"max_retries":0}}}';
+  const httpCases = '{"id":"HTTP-001","scenario":"smoke","input":{"message":"hello agent"},"expected":{"keyword":"hello"}}';
+  function httpConfig(config) {
+    const errors = [];
+    let endpoint = "";
+    try {
+      const url = new URL(config.endpoint);
+      if (!/^https?:$/.test(url.protocol) || !url.hostname || url.username || url.password || url.hash || url.port === "0"
+        || /[\u0000-\u001f\u007f]/.test(config.endpoint)) throw new Error();
+      endpoint = url.href;
+    } catch { errors.push("请填写 HTTP(S) 接口地址，不能包含用户名、密码或 # 片段。"); }
+    const path = (key, label) => {
+      const value = String(config[key] || "");
+      if (!value || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)
+        || value.split(".").some((part) => !part || (/^[0-9]+$/.test(part) && part.length > 9))) errors.push(`${label}应为点分隔的路径，如 data.answer 或 choices.0.message.content。`);
+      return value;
+    };
+    const output = path("outputPath", "响应字段"), expected = path("expectedPath", "期望字段");
+    if (!["contains", "eq"].includes(config.operator)) errors.push("请选择包含关键字或完全相等。");
+    const token = String(config.tokenEnv || "");
+    if (token && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) errors.push("密钥环境变量名只能包含字母、数字和下划线，不能以数字开头。");
+    const result = { type: "http", name: "my-agent", endpoint, output_path: output,
+      hard_gates: [{ name: "answer", actual: "final_output", operator: config.operator, expected }] };
+    if (token) result.bearer_token_env = token;
+    return { errors, config: errors.length ? null : result };
+  }
   function validateCases(text) {
     const errors = [], warnings = [], ids = new Set(), scenarios = new Set();
     let count = 0;
@@ -40,7 +65,11 @@
     for (const [field, label] of [["jar", "框架 JAR"], ["adapter", "适配器"], ["cases", "测试集路径"], ["suite", "测试集名称"], ["output", "报告目录"]]) {
       if (!String(config[field] || "").trim()) errors.push(`请填写${label}。`);
     }
-    if (config.adapter && !config.adapter.endsWith(".jar") && !name.test(config.adapter)) errors.push("适配器需要完整类名或以 .jar 结尾的路径。");
+    if (config.adapter && !config.adapter.endsWith(".jar") && !config.adapter.endsWith(".json") && !name.test(config.adapter)) errors.push("适配器需要完整类名、JAR 路径或 HTTP 配置 JSON 路径。");
+    if (config.mode === "http") {
+      errors.push(...httpConfig(config).errors);
+      if (!config.adapter?.endsWith(".json")) errors.push("HTTP 配置文件路径应以 .json 结尾。");
+    }
     if (config.adapterClass && (!config.adapter.endsWith(".jar") || !name.test(config.adapterClass))) errors.push("适配器类名仅用于 JAR，应填写完整类名。");
     let run = "", serve = "";
     try {
@@ -50,7 +79,7 @@
       args.push("--suite", config.suite, "--cases", config.cases, "--output", config.output);
       const command = (tokens) => tokens.map((token, index) => index === 0 ? token : shellQuote(token, config.shell)).join(" ");
       run = command(args);
-      serve = command([...base, "serve", "--output", config.output, "--port", "8080"]);
+      serve = command([...base, "serve", "--output", config.output, "--open-browser"]);
     } catch (error) { errors.push(error.message); }
     return { errors, run: errors.length ? "" : run, serve: errors.length ? "" : serve };
   }
@@ -131,7 +160,7 @@
     const requested = Number.isFinite(ratio) ? ratio : 0.5;
     return Math.max(260 / width, Math.min(1 - 314 / width, requested));
   }
-  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio };
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);

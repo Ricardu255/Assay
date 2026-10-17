@@ -45,7 +45,7 @@ java -jar target/assay.jar serve --output .assay/runs --port 8080
 
 命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本演化、范围审计和发布验证；可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机，查看和导入不会改写报告。
 
-首次接入可打开界面的「开始评测」：选择内置 Echo 示例或填写自己的适配器，选择 JSONL 文件检查格式、重复 ID 与必需字段，再复制适用于 PowerShell 或 Bash 的运行命令。文件检查在浏览器内完成；文件路径需填写电脑上的实际位置。引导页生成命令，命令由用户在项目根目录运行。
+首次接入可打开界面的「开始评测」：选择 **HTTP 接口（推荐，无需写代码）**，填写地址、响应字段和通过条件，下载配置，再选择 JSONL 测试集检查格式、重复 ID 与必需字段，复制适用于 PowerShell 或 Bash 的运行命令。配置生成和文件检查在浏览器内完成；下载文件放到项目根目录，或将路径改为实际位置。命令由用户在项目根目录的另一个终端运行，完成后点击顶部「刷新」查看结果。
 
 前端纯函数检查可用 Node.js 执行：`node --test src/test/js/dashboard.test.cjs`；运行仪表盘本身不需要 Node.js。
 
@@ -57,9 +57,59 @@ java -jar target/assay.jar serve --output .assay/runs --port 8080
 
 宽屏下可以拖动用例与 Trace 之间的分隔条；左右键调节宽度，双击或 Enter 恢复平分，拖动中按 Escape 撤销。分栏宽度与折叠状态保存在当前浏览器。窄面板自动上下排列。用例列表支持上下键、Home / End、PageUp / PageDown，详情标签支持左右键。目录中的报告、嵌套报告、用例和筛选条件保存在页面地址中，可刷新恢复或复制链接；临时导入的 JSON 仍仅保留在当前页面。
 
-## 领域项目只提供四项能力
+## 通过 HTTP 接口测试自己的 Agent
 
-评测逻辑与业务语义解耦。领域项目实现一个适配器，回答四个问题：
+普通的同步 JSON HTTP 接口不需要编写 Java 代码。推荐使用页面向导；也可以修改 `examples/http-agent.example.json` 的 `endpoint` 和 `output_path`，以及 `examples/http-cases.example.jsonl` 的请求和期望值，然后运行：
+
+```powershell
+.\assay.cmd run --adapter examples/http-agent.example.json --suite my-agent --cases examples/http-cases.example.jsonl
+```
+
+macOS / Linux 将 `.\assay.cmd` 换为 `sh ./assay`。启动器会自动构建；构建后也可使用 `java -jar target/assay.jar run ...`。
+
+例如接口接收 `{"message":"hello agent"}`，返回 `{"data":{"answer":"hello"},"route":"ECHO"}`，配置为：
+
+```json
+{
+  "type": "http",
+  "name": "my-agent",
+  "endpoint": "http://127.0.0.1:9000/agent",
+  "output_path": "data.answer",
+  "hard_gates": [
+    {"name":"answer","actual":"final_output","operator":"contains","expected":"keyword"},
+    {"name":"route","actual":"fields.route","operator":"eq","expected":"route"}
+  ]
+}
+```
+
+对应 JSONL 一行一个用例：
+
+```jsonl
+{"id":"HTTP-001","input":{"message":"hello agent"},"expected":{"keyword":"hello","route":"ECHO"}}
+```
+
+`input` 会原样序列化为 POST 请求体。若接口需要 `model`、`messages`、`session_id` 等字段，直接在 `input` 中填写完整 JSON 请求，使用同步响应设置（例如接口支持时设置 `stream:false`）。`expected` 不会发送给 Agent。
+
+| 配置字段 | 用途 |
+| --- | --- |
+| `type` / `endpoint` | 必填，`type` 为 `http`，地址为 HTTP(S) URL；不接受 URL 中的用户名、密码或片段 |
+| `output_path` | 回答所在字段，默认 `output`，支持 `data.answer`、`choices.0.message.content` 等点分隔路径 |
+| `hard_gates` | 至少一条通过条件；`actual` 读取标准 Trace，`expected` 读取用例的 `expected`，或用 `value` 设置固定值 |
+| `soft_quality` | 可选，规则格式与 `hard_gates` 相同，只产生软告警 |
+| `bearer_token_env` | 可选，保存 Bearer Token 的环境变量名，不填写实际密钥 |
+| `headers_env` | 可选，自定义请求头到环境变量名的映射，如 `{"X-API-Key":"AGENT_API_KEY"}`；变量值就是完整请求头值 |
+| `trace_id_path` | 可选，默认 `trace_id`；接口未返回时生成本次请求的本地追踪 ID，并在 `raw.http.trace_id_source` 标明来源 |
+| `events_path` | 可选，内部 TraceEvent 数组的响应路径；不配置时仅记录实测的 HTTP 耗时，不推断内部步骤 |
+
+完整 JSON 响应保存在 `Trace.fields` 中，规则可检查 `fields.route`、`fields.data.score` 等业务字段。配置 `events_path` 后使用接口提供的步骤，HTTP 总耗时仍保存在 `raw.http.duration_ms`，避免把总耗时和内部步骤耗时重复计入行为规则。
+
+需要鉴权时，在配置中添加 `"bearer_token_env":"AGENT_API_KEY"`，并在运行评测的**同一个终端**设置变量：PowerShell 使用 `$env:AGENT_API_KEY='你的密钥'`，Bash 使用 `export AGENT_API_KEY='你的密钥'`。向导不会要求填写实际密钥，请勿把密钥放入配置、请求体或提交到仓库。
+
+接口必须返回 JSON 对象；当前支持同步 POST 和 `--source online`，不支持 SSE、流式输出或独立异步任务轮询。单次请求和响应读取遵守 `--timeout`（单位为秒，默认 30），响应上限为 8 MiB，重定向不会跟随；HTTP 错误、超时、无效 JSON、缺少响应字段会生成失败证据。只有配置了 CLI `--retries` 才会重试，可能重复调用有副作用的接口。
+
+## 高级接入：领域项目提供四项能力
+
+需要 SDK、本地函数、离线 Trace 或特殊协议时，领域项目实现一个 Java 适配器，回答四个问题：
 
 1. **`callAgent(case, context)`** —— 怎么调用 Agent。HTTP、SDK、子进程或本地函数调用都行。
 2. **`readTrace(handle, case)`** —— 怎么把原生 Trace 转成框架的 `NormalizedTrace`。

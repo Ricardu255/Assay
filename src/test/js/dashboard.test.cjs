@@ -36,6 +36,29 @@ test("Trace failures keep explicit errors and normalize provider statuses", () =
   assert.equal(ui.failedEvent({ status: "ok", fields: { error_rate: 0.1 } }), false);
 });
 
+test("HTTP setup generates declarative config without accepting a literal API key", () => {
+  const config = { mode: "http", jar: "target/assay.jar", adapter: "my-agent.http.json", cases: "http-cases.jsonl", suite: "smoke",
+    output: ".assay/runs", shell: "powershell", endpoint: "http://localhost:9000/agent", outputPath: "data.answer",
+    expectedPath: "keyword", operator: "contains", tokenEnv: "AGENT_API_KEY" };
+  assert.deepEqual(ui.httpConfig(config), { errors: [], config: { type: "http", name: "my-agent", endpoint: config.endpoint,
+    output_path: "data.answer", hard_gates: [{ name: "answer", actual: "final_output", operator: "contains", expected: "keyword" }],
+    bearer_token_env: "AGENT_API_KEY" } });
+  assert.equal(ui.setupCommands(config).errors.length, 0);
+  assert.ok(ui.setupCommands(config).run.includes("'my-agent.http.json'"));
+  assert.ok(ui.setupCommands(config).serve.includes("'--open-browser'"));
+  assert.equal(ui.httpConfig({ ...config, tokenEnv: "" }).config.bearer_token_env, undefined);
+  assert.ok(ui.httpConfig({ ...config, tokenEnv: "sk-secret-value" }).errors.length);
+  for (const endpoint of ["file:///secret", "http://name:password@localhost/", "http://localhost/#fragment", "http://localhost/\nagent"]) {
+    assert.equal(ui.setupCommands({ ...config, endpoint }).run, "");
+  }
+  for (const outputPath of ["data..answer", "data.9999999999", "", "data.\nanswer"]) {
+    assert.equal(ui.httpConfig({ ...config, outputPath }).config, null);
+  }
+  assert.ok(ui.httpConfig({ ...config, outputPath: "choices.0.message.content" }).config);
+  assert.equal(ui.validateCases(ui.httpCases).count, 1);
+  assert.equal(ui.setupCommands({ ...config, adapter: "adapter.jar" }).run, "");
+});
+
 test("Diff parser preserves files, hunk line numbers, header-like code and missing newlines", () => {
   const patch = 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -7,2 +7,2 @@\n--- header-like code\n+new\n same\n\\ No newline at end of file\ndiff --git a/b.txt b/b.txt\nnew file mode 100644\n--- /dev/null\n+++ b/b.txt\n@@ -0,0 +1 @@\n+<script>literal</script>\n';
   const parsed = ui.parseDiff(patch);

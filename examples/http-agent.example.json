@@ -1,0 +1,14 @@
+{
+  "type": "http",
+  "name": "my-agent",
+  "endpoint": "http://127.0.0.1:9000/agent",
+  "output_path": "output",
+  "hard_gates": [
+    {
+      "name": "answer",
+      "actual": "final_output",
+      "operator": "contains",
+      "expected": "keyword"
+    }
+  ]
+}

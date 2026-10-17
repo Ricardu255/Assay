@@ -2,6 +2,7 @@ package io.assay.engine;
 
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.ProjectAdapter;
+import io.assay.http.HttpProjectAdapter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -19,15 +20,15 @@ import java.util.jar.JarFile;
 /**
  * Resolves a domain adapter from a command-line reference.
  *
- * <p>Three forms are accepted:
+ * <p>Four forms are accepted:
  * <ol>
  *   <li>a {@code .jar} containing a {@code META-INF/services} registration;
  *   <li>a fully-qualified class name on the current classpath;
  *   <li>a {@code .jar} plus {@code --adapter-class} naming the factory inside it.
+ *   <li>a {@code .json} HTTP adapter configuration (project adapters only).
  * </ol>
  *
- * <p>A domain adapter is a compiled artifact, so this loader resolves a class or a jar rather than a
- * script. Everything downstream depends only on the {@link ProjectAdapter} it returns.
+ * <p>Everything downstream depends only on the {@link ProjectAdapter} it returns.
  */
 public final class AdapterLoader {
 
@@ -36,6 +37,12 @@ public final class AdapterLoader {
 
     /** Loads a {@link ProjectAdapterFactory} from a jar or from a class name. */
     public static ProjectAdapter loadProjectAdapter(String reference, String adapterClass) {
+        if (reference != null && reference.endsWith(".json")) {
+            if (adapterClass != null && !adapterClass.isBlank()) {
+                throw new IllegalArgumentException("--adapter-class cannot be used with HTTP configuration");
+            }
+            return HttpProjectAdapter.load(Path.of(reference));
+        }
         ProjectAdapterFactory factory = loadFactory(reference, adapterClass, ProjectAdapterFactory.class);
         ProjectAdapter adapter = factory.create();
         if (adapter == null) {

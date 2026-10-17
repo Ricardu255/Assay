@@ -16,6 +16,7 @@ const labels = {
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
 const setup = { mode: "example", shell: "powershell", jar: "target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
+  endpoint: "", outputPath: "output", tokenEnv: "", operator: "contains", expectedPath: "keyword",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
   validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
 function preference(key, fallback) {
@@ -152,25 +153,37 @@ function overview() {
 
 function setupPage() {
   const field = (key, title, note = "") => `<label class="form-field">${title}<input data-setup="${key}" value="${escape(setup[key])}" autocomplete="off">${note ? `<small>${note}</small>` : ""}</label>`;
-  return `${heading("开始一次评测", "先跑通内置示例，再换成你自己的 Agent。命令在项目根目录的终端中运行。")}
+  const http = setup.mode === "http";
+  return `${heading("开始一次评测", "填写 HTTP 接口 → 下载配置 → 选择测试集 → 复制命令运行。无需编写 Java 适配器。")}
     <div class="setup-grid"><section class="panel"><div class="panel-head"><h2>1 · 选择适配器</h2></div><div class="panel-body form-grid">
-      <label class="form-field full">接入方式<select id="setup-mode"><option value="example" ${setup.mode === "example" ? "selected" : ""}>内置 Echo 示例（无需 API Key）</option><option value="custom" ${setup.mode === "custom" ? "selected" : ""}>自定义 Agent</option></select></label>
-      ${field("adapter", "适配器类名或 JAR 路径")}${field("adapterClass", "JAR 内的类名（可选）", "JAR 已注册单个服务实现时可留空。")}
-      <div class="full model-note">自定义适配器实现 ProjectAdapterFactory：调用 Agent、转换 Trace、声明硬门禁与软质量规则。可参考项目内的 src/main/java/io/assay/examples/EchoAdapter.java。适配器将在你运行命令时加载。</div>
+      <label class="form-field full">接入方式<select id="setup-mode"><option value="example" ${setup.mode === "example" ? "selected" : ""}>内置 Echo 示例（无需 API Key）</option><option value="http" ${http ? "selected" : ""}>HTTP 接口（推荐，无需写代码）</option><option value="custom" ${setup.mode === "custom" ? "selected" : ""}>Java 类 / JAR 适配器（高级）</option></select></label>
+      ${http ? `${field("endpoint", "Agent 接口地址", "同步 POST JSON 接口；请求体直接使用用例的 input。")}${field("outputPath", "回答在响应中的字段", "如 output、data.answer、choices.0.message.content。")}
+      ${field("tokenEnv", "Bearer 密钥环境变量名（可选）", "如 AGENT_API_KEY；请勿在此粘贴密钥。无需鉴权时留空。")}
+      <label class="form-field">通过条件<select data-setup="operator"><option value="contains" ${setup.operator === "contains" ? "selected" : ""}>回答包含期望关键字</option><option value="eq" ${setup.operator === "eq" ? "selected" : ""}>回答与期望值完全相等</option></select></label>
+      ${field("expectedPath", "用例 expected 中的期望字段", "默认 keyword；填写 answer 可检查 expected.answer。")}${field("adapter", "HTTP 配置文件路径", "下载后放在项目根目录；文件名需与这里一致。")}
+      <div id="setup-http" class="full" aria-live="polite"></div>` : `${field("adapter", "适配器类名或 JAR 路径")}${field("adapterClass", "JAR 内的类名（可选）", "JAR 已注册单个服务实现时可留空。")}
+      <div class="full model-note">自定义适配器实现 ProjectAdapterFactory：调用 Agent、转换 Trace、声明硬门禁与软质量规则。可参考项目内的 src/main/java/io/assay/examples/EchoAdapter.java。</div>`}
     </div></section><section class="panel"><div class="panel-head"><h2>2 · 检查测试集</h2></div><div class="panel-body form-grid">
       ${field("cases", "JSONL 文件路径", "选择文件只检查内容；请确认此处是它在电脑上的实际路径。")}${field("suite", "测试集名称")}
       <label class="form-field full">选择 JSONL 文件进行检查<input type="file" id="setup-cases" accept=".jsonl,.ndjson,application/x-ndjson,text/plain"></label>
       <div id="setup-validation" class="full" aria-live="polite"></div>
-      <details class="full"><summary>查看一行一个用例的格式</summary><pre>${escape(AssayUI.exampleCases)}</pre></details>
+      ${http ? '<div class="full"><button class="button secondary" data-setup-download="cases">下载 HTTP 测试集模板</button><p class="mini-note">修改 input 为接口需要的完整请求体，修改 expected 为真实期望，再选择修改后的文件进行检查。</p></div>' : ""}
+      <details class="full"><summary>查看一行一个用例的格式</summary><pre>${escape(http ? AssayUI.httpCases : AssayUI.exampleCases)}</pre></details>
     </div></section></div>
     <section class="panel section-gap"><div class="panel-head"><h2>3 · 生成运行命令</h2><span class="muted">复制到终端运行</span></div><div class="panel-body form-grid">
       <label class="form-field">终端<select data-setup="shell"><option value="powershell" ${setup.shell === "powershell" ? "selected" : ""}>Windows PowerShell</option><option value="bash" ${setup.shell === "bash" ? "selected" : ""}>Bash / Zsh</option></select></label>
-      ${field("jar", "框架 JAR 路径")}${field("output", "报告输出目录")}
+      ${field("output", "报告输出目录")}<details class="full"><summary>高级：JAR 路径与手写配置</summary>${field("jar", "框架 JAR 路径")}<p class="mini-note">HTTP 配置可手动增加 hard_gates / soft_quality 规则；fields 保存完整 JSON 响应，可用 fields.route 等路径检查业务字段。events_path 可接入真实内部步骤。</p></details>
       <div id="setup-commands" class="full"></div>
-    </div></section><section class="panel section-gap"><div class="panel-head"><h2>4 · 查看报告</h2></div><div class="panel-body"><p class="subtitle">首次使用先运行 mvn -q package。评测命令会打印 report.md 的位置；运行完成后，使用上方查看命令启动界面。若已经在查看同一输出目录，直接刷新结果。</p><button class="button secondary section-gap" data-section="run">查看运行记录 →</button></div></section>`;
+    </div></section><section class="panel section-gap"><div class="panel-head"><h2>4 · 查看报告</h2></div><div class="panel-body"><p class="subtitle">在项目根目录的终端运行命令。源码版启动器需要 JDK 17+ 和 Maven，会自动构建。完成后会打印 report.md 的位置；若当前界面查看的是同一输出目录，点击顶部刷新即可。否则运行查看命令打开界面。</p><button class="button secondary section-gap" data-section="run">查看运行记录 →</button></div></section>`;
 }
 
 function updateSetup() {
+  if (setup.mode === "http") {
+    const generated = AssayUI.httpConfig(setup);
+    $("setup-http").innerHTML = generated.errors.length ? `<ul class="validation-errors">${generated.errors.map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` :
+      `<button class="button primary" data-setup-download="config" ${setup.adapter.endsWith(".json") ? "" : "disabled"}>下载 HTTP 配置</button><details class="section-gap"><summary>预览配置（不含密钥）</summary><pre>${json(generated.config)}</pre></details>
+      ${setup.tokenEnv ? `<p class="mini-note">运行前，在同一个终端执行下方命令，将占位文字替换为实际密钥。配置与评测命令只保存变量名。</p><pre>${escape(setup.shell === "bash" ? `export ${setup.tokenEnv}='替换为你的密钥'` : `$env:${setup.tokenEnv}='替换为你的密钥'`)}</pre>` : ""}`;
+  }
   const check = setup.validation;
   $("setup-validation").innerHTML = !check ? '<p class="muted">请选择测试集，检查后即可复制命令。</p>' :
     `${badge(check.errors.length ? "failed" : "passed")} <span class="muted">${escape(setup.filename)} · ${check.count} 条有效用例 · ${check.scenarios.length} 个场景</span>
@@ -181,7 +194,7 @@ function updateSetup() {
   else if (check.errors.length) errors.push("请先修正测试集错误。");
   $("setup-commands").innerHTML = errors.length ? `<ul class="validation-errors">${errors.map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` :
     `<div class="command-head"><strong>运行评测</strong><button class="button secondary" data-setup-copy="run">复制运行命令</button></div><pre>${escape(commands.run)}</pre>
-    <div class="command-head section-gap"><strong>启动报告界面</strong><button class="button secondary" data-setup-copy="serve">复制查看命令</button></div><pre>${escape(commands.serve)}</pre><p class="mini-note">启动后访问 http://127.0.0.1:8080/；按 Ctrl+C 关闭服务。</p>`;
+    <div class="command-head section-gap"><strong>启动报告界面</strong><button class="button secondary" data-setup-copy="serve">复制查看命令</button></div><pre>${escape(commands.serve)}</pre><p class="mini-note">查看命令会自动打开浏览器；实际地址以终端输出为准，按 Ctrl+C 关闭服务。</p>`;
 }
 
 function listing() {
@@ -584,6 +597,14 @@ document.addEventListener("click", async (event) => {
   if (target.dataset.section) {
     state.request++; state.section = target.dataset.section; state.stack = []; render(true);
     if (!target.closest("#navigation")) view.querySelector("h1")?.focus({ preventScroll: true });
+  } else if (target.dataset.setupDownload) {
+    const cases = target.dataset.setupDownload === "cases", generated = AssayUI.httpConfig(setup);
+    if (!cases && generated.errors.length) { toast("请先修正 HTTP 配置。"); return; }
+    const url = URL.createObjectURL(new Blob([cases ? AssayUI.httpCases + "\n" : JSON.stringify(generated.config, null, 2) + "\n"], { type: cases ? "application/x-ndjson" : "application/json" }));
+    const link = document.createElement("a"); link.href = url;
+    link.download = cases ? "http-cases.jsonl" : setup.adapter.split(/[\\/]/).pop() || "my-agent.http.json";
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("请将下载文件放在项目根目录，或将路径改为实际位置。");
   } else if (target.dataset.setupCopy) {
     try { await navigator.clipboard.writeText(AssayUI.setupCommands(setup)[target.dataset.setupCopy]); toast("命令已复制。"); }
     catch { toast("复制失败，请在命令框中手动选择并复制。"); }
@@ -647,8 +668,8 @@ document.addEventListener("change", async (event) => {
   } else if (event.target.id === "setup-mode") {
     setup.fileRequest++;
     setup.mode = event.target.value; setup.adapterClass = "";
-    setup.adapter = setup.mode === "example" ? "io.assay.examples.EchoAdapter" : "";
-    setup.cases = setup.mode === "example" ? "examples/cases.example.jsonl" : "";
+    setup.adapter = setup.mode === "example" ? "io.assay.examples.EchoAdapter" : setup.mode === "http" ? "my-agent.http.json" : "";
+    setup.cases = setup.mode === "example" ? "examples/cases.example.jsonl" : setup.mode === "http" ? "http-cases.jsonl" : "";
     setup.validation = setup.mode === "example" ? AssayUI.validateCases(AssayUI.exampleCases) : null;
     setup.filename = "内置示例"; render();
   } else if (event.target.id === "setup-cases") {
