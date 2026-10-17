@@ -55,3 +55,11 @@ test("Diff parser handles renamed, binary, spaced and Git octal UTF-8 paths", ()
   assert.equal(parsed.files[1].newPath, "中.txt");
   assert.equal(parsed.files[1].binary, true);
 });
+
+test("Split widths preserve both panel minimums and ignore corrupt preferences", () => {
+  assert.equal(ui.splitRatio(0, 1000), 0.26);
+  assert.ok(Math.abs((1 - ui.splitRatio(1, 1000)) * 1000 - 14 - 300) < 1e-10);
+  assert.equal(ui.splitRatio(0.9, 400), 0.5);
+  assert.equal(ui.splitRatio("broken", 1000), 0.5);
+  assert.equal(ui.splitRatio(0.4, 1000), 0.4);
+});

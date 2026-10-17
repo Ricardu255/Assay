@@ -18,6 +18,14 @@ const state = { remote: [], imports: [], warnings: [], section: "overview", quer
 const setup = { mode: "example", shell: "powershell", jar: "target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
   validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
+function preference(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(`assay.${key}`)) ?? fallback; } catch { return fallback; }
+}
+function savePreference(key, value) {
+  try { localStorage.setItem(`assay.${key}`, JSON.stringify(value)); } catch { /* Storage may be disabled. */ }
+}
+let preferredSplit = preference("caseSplit", 0.5), traceCollapsed = preference("traceCollapsed", false) === true;
+let disposeSplit = () => {}, routeReady = false, restoringRoute = false;
 const view = document.getElementById("view");
 const $ = (id) => document.getElementById(id);
 const array = (value) => Array.isArray(value) ? value : [];
@@ -63,7 +71,7 @@ async function refresh() {
     $("refresh-time").textContent = `上次刷新 ${new Date().toLocaleTimeString("zh-CN")}`;
     if (state.stack.length) {
       const id = state.stack[0].item.id;
-      if (state.remote.some((item) => item.id === id)) await openArtifact(id);
+      if (state.remote.some((item) => item.id === id)) await restoreLocation();
       else render();
     } else render();
   } catch (error) {
@@ -82,7 +90,7 @@ function renderNavigation() {
 }
 
 function heading(title, subtitle, eyebrow = "EVALUATION WORKSPACE", actions = "") {
-  return `<div class="page-heading"><div><div class="eyebrow">${escape(eyebrow)}</div><h1>${escape(title)}</h1><p class="subtitle">${escape(subtitle)}</p></div>${actions}</div>`;
+  return `<div class="page-heading"><div><div class="eyebrow">${escape(eyebrow)}</div><h1 tabindex="-1">${escape(title)}</h1><p class="subtitle">${escape(subtitle)}</p></div>${actions}</div>`;
 }
 
 function stat(title, value, note, color = "") {
@@ -208,10 +216,125 @@ function renderCaseRows() {
   const pageCases = cases.slice(state.casePage * 50, (state.casePage + 1) * 50);
   if (!pageCases.some(({ index }) => index === state.caseIndex)) state.caseIndex = pageCases[0]?.index ?? -1;
   $("case-rows").innerHTML = pageCases.map(({ result, index }) => `<tr class="case-row ${state.caseIndex === index ? "selected" : ""}" data-case="${index}">
-    <td><button class="record-name" data-case="${index}">${escape(object(result.case).case_id)}</button><div class="record-path">${escape(object(result.case).scenario || "default")}</div></td>
+    <td><button class="record-name" data-case="${index}" tabindex="${state.caseIndex === index ? 0 : -1}" ${state.caseIndex === index ? 'aria-current="true"' : ""}>${escape(object(result.case).case_id)}</button><div class="record-path">${escape(object(result.case).scenario || "default")}</div></td>
     <td>${badge(caseStatus(result))}</td><td class="number">${array(object(result.trace).events).length}</td><td class="number">${count(result.soft_warning_count)}</td></tr>`).join("");
   $("case-count").innerHTML = `<span>${cases.length} 条匹配 · 每页最多 50 条</span><div class="pager"><button class="link-button" data-case-page="-1" ${state.casePage === 0 ? "disabled" : ""}>上一页</button><span>${state.casePage + 1} / ${lastPage + 1}</span><button class="link-button" data-case-page="1" ${state.casePage >= lastPage ? "disabled" : ""}>下一页</button></div>`;
   renderTrace();
+}
+
+function focusToken(element) {
+  if (!element || element === document.body) return null;
+  if (element.id) return { id: element.id };
+  const data = Object.entries(element.dataset || {});
+  return data.length ? { data, tag: element.tagName } : null;
+}
+function restoreFocus(token) {
+  if (!token) return false;
+  const element = token.id ? $(token.id) : [...document.querySelectorAll("button,summary,input,select")]
+    .find((candidate) => candidate.tagName === token.tag && token.data.every(([key, value]) => candidate.dataset[key] === value));
+  if (!element || element.closest("[hidden]")) return false;
+  element.focus({ preventScroll: true }); return true;
+}
+function focusCase() { document.querySelector('#case-rows button[aria-current="true"]')?.focus({ preventScroll: true }); }
+
+function mountSplit() {
+  const container = document.querySelector(".case-layout"), handle = $("case-resizer");
+  if (!container || !handle) return;
+  let drag = null, ratio = preferredSplit;
+  const apply = (next) => {
+    const width = container.getBoundingClientRect().width;
+    ratio = AssayUI.splitRatio(next, width);
+    container.style.setProperty("--case-split", `${ratio * 100}%`);
+    handle.setAttribute("aria-valuenow", Math.round(ratio * 100));
+    handle.setAttribute("aria-valuemin", Math.ceil(260 / Math.max(width, 700) * 100));
+    handle.setAttribute("aria-valuemax", Math.floor((1 - 314 / Math.max(width, 700)) * 100));
+  };
+  const persist = () => { preferredSplit = ratio; savePreference("caseSplit", ratio); };
+  const finish = (cancel = false) => {
+    if (!drag) return;
+    const previous = drag; drag = null;
+    if (cancel) apply(previous.ratio); else persist();
+    document.documentElement.classList.remove("pane-dragging");
+    if (handle.hasPointerCapture(previous.id)) handle.releasePointerCapture(previous.id);
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); handle.focus();
+    drag = { x: event.clientX, ratio, id: event.pointerId };
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag || Math.abs(event.clientX - drag.x) < 4) return;
+    document.documentElement.classList.add("pane-dragging");
+    apply(drag.ratio + (event.clientX - drag.x) / container.getBoundingClientRect().width);
+  });
+  handle.addEventListener("pointerup", () => finish());
+  handle.addEventListener("pointercancel", () => finish(true));
+  handle.addEventListener("lostpointercapture", () => finish(true));
+  handle.addEventListener("dblclick", () => { apply(0.5); persist(); });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && drag) { finish(true); return; }
+    if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter"].includes(event.key)) return;
+    event.preventDefault();
+    apply(event.key === "Enter" ? 0.5 : event.key === "Home" ? 0 : event.key === "End" ? 1 : ratio + (event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 0.1 : 0.02));
+    persist();
+  });
+  const observer = new ResizeObserver(() => apply(preferredSplit)); observer.observe(container); apply(preferredSplit);
+  disposeSplit = () => { finish(true); observer.disconnect(); document.documentElement.classList.remove("pane-dragging"); };
+}
+
+function syncLocation(push = false) {
+  if (!routeReady || restoringRoute) return;
+  const params = new URLSearchParams({ section: state.section });
+  const root = state.stack[0], context = current();
+  if (root?.item.id && !root.item.id.startsWith("import-")) {
+    params.set("report", root.item.id);
+    const trail = state.stack.slice(1).map((entry) => entry.trail).filter(Boolean).join(",");
+    if (trail) params.set("trail", trail);
+    if (context.item.kind === "run") {
+      params.set("tab", state.tab); params.set("filter", state.caseFilter);
+      if (state.caseQuery) params.set("caseQuery", state.caseQuery);
+      const id = object(array(context.payload.results)[state.caseIndex]?.case).case_id;
+      if (id) params.set("case", id);
+    }
+  }
+  if (state.query) params.set("q", state.query);
+  const hash = `#${params}`;
+  if (location.hash !== hash) history[push ? "pushState" : "replaceState"](null, "", hash);
+}
+
+async function restoreLocation() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  restoringRoute = true;
+  try {
+    state.section = sections.some(([kind]) => kind === params.get("section")) ? params.get("section") : "overview";
+    state.query = (params.get("q") || "").slice(0, 1000); $("global-search").value = state.query; state.stack = [];
+    const id = params.get("report");
+    if (id && state.remote.some((item) => item.id === id)) {
+      await openArtifact(id);
+      if (state.stack[0]?.item.id !== id) return;
+      for (const trail of (params.get("trail") || "").split(",").filter(Boolean).slice(0, 8)) {
+        const [type, first, second] = trail.split(":"), payload = current().payload;
+        if (type === "run" && ["baseline", "candidate"].includes(first) && ["improvement", "regression", "holdout"].includes(second)) {
+          const run = object(payload[`${first}_runs`])[second]; if (!run) break;
+          inlineReport("run", run, trail);
+        } else if (type === "proposal" && /^\d+$/.test(first) && /^\d+$/.test(second)) {
+          const evaluation = array(object(array(payload.rounds)[+first]).candidates)[+second]?.evaluation;
+          if (!evaluation) break; inlineReport("evolution", evaluation, trail);
+        } else if (type === "stage" && /^\d+$/.test(first)) {
+          const run = array(payload.stages)[+first]; if (!run) break; inlineReport("run", run, trail);
+        } else break;
+      }
+      if (current().item.kind === "run") {
+        if (["cases", "scenarios", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
+        if (["all", "passed", "warning", "failed"].includes(params.get("filter"))) state.caseFilter = params.get("filter");
+        state.caseQuery = (params.get("caseQuery") || "").slice(0, 1000);
+        const selected = array(current().payload.results).findIndex((result) => object(result.case).case_id === params.get("case"));
+        if (selected >= 0) { state.caseIndex = selected; state.casePage = Math.floor(selected / 50); }
+      }
+    } else if (id) toast("报告已不在当前目录，请从列表重新选择。");
+    render();
+  } finally { restoringRoute = false; syncLocation(); }
 }
 
 function details(title, value, open = false) {
@@ -268,12 +391,13 @@ function renderRun(context) {
   const failures = results.filter((result) => result.hard_pass !== true).length;
   const soft = results.reduce((sum, result) => sum + count(result.soft_warning_count), 0);
   const header = `${detailHeader(context)}<div class="stats">${stat("用例数量", integer(results.length), payload.suite || "当前数据集")}${stat("硬门禁通过率", results.length ? percent((results.length - failures) / results.length) : "—", `${results.length - failures} 条通过`, "positive")}${stat("硬失败", integer(failures), "规则或执行失败", failures ? "negative" : "")}${stat("复核信号", integer(soft), "软告警与复核候选", soft ? "warning-text" : "")}</div>
-    <div class="tabs">${[["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["raw", "原始数据"]].map(([tab, title]) => `<button class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
-  if (state.tab === "raw") return `${header}<pre class="raw-data">${json(payload)}</pre>`;
-  if (state.tab === "scenarios") return `${header}<section class="panel"><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
-  return `${header}<div class="case-layout"><section class="panel"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
+    <div class="tabs" role="tablist" aria-label="运行详情">${[["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["raw", "原始数据"]].map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
+  const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
+  if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
+  if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
+  return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
     <input type="search" id="case-search" placeholder="搜索用例或场景" aria-label="搜索用例或场景" value="${escape(state.caseQuery)}"><select id="case-filter" aria-label="筛选用例状态">${[["all", "全部状态"], ["failed", "仅硬失败"], ["warning", "仅软告警"], ["passed", "全部通过"]].map(([value, title]) => `<option value="${value}" ${state.caseFilter === value ? "selected" : ""}>${title}</option>`).join("")}</select></div>
-    <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><section class="panel" id="trace-detail"></section></div>`;
+    <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><div id="case-resizer" class="split-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="case-list trace-detail" aria-label="调整用例与 Trace 宽度，左右键调节，双击或 Enter 平分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div><section class="panel" id="trace-detail" ${traceCollapsed ? "hidden" : ""}></section></div></div></div>`;
 }
 
 function coverage(metrics, name) {
@@ -368,18 +492,23 @@ function renderRelease(context) {
   return `${detailHeader(context)}<section class="panel"><div class="panel-head"><h2>发布验证阶段</h2><span class="muted">硬门禁失败后停止后续阶段</span></div><div class="table-wrap"><table><thead><tr><th>阶段</th><th>结果</th><th>用例</th><th>硬失败</th><th>查看</th></tr></thead><tbody>${array(payload.stages).map((stage, index) => `<tr><td>${escape(stage.suite)}</td><td>${badge(stage.status)}</td><td>${integer(stage.case_count)}</td><td>${integer(stage.hard_failures)}</td><td><button class="link-button" data-stage="${index}">运行明细 →</button></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
-function render() {
+function render(pushLocation = false) {
+  const token = focusToken(document.activeElement);
+  disposeSplit();
   renderNavigation();
   const context = current();
   if (!context) {
     view.innerHTML = state.section === "overview" ? overview() : state.section === "setup" ? setupPage() : listing();
     if (state.section === "setup") updateSetup();
+    syncLocation(pushLocation); restoreFocus(token);
     return;
   }
   const renderers = { run: renderRun, evolution: renderEvolution, auto: renderAuto, audit: renderAudit, release: renderRelease };
   view.innerHTML = renderers[context.item.kind](context);
   if (context.item.kind === "run" && state.tab === "cases") renderCaseRows();
   if (context.item.kind === "audit") renderAuditPatch(context);
+  if (context.item.kind === "run" && state.tab === "cases") mountSplit();
+  syncLocation(pushLocation); restoreFocus(token);
 }
 
 function resetCaseView(payload) {
@@ -393,14 +522,15 @@ async function openArtifact(id) {
   const item = items().find((entry) => entry.id === id);
   if (!item) return;
   const requestId = ++state.request;
+  const returnFocus = focusToken(document.activeElement);
   view.innerHTML = '<div class="empty">正在读取报告…</div>';
   try {
     const payload = item.payload || await request(`/api/artifacts/${encodeURIComponent(id)}`);
     if (requestId !== state.request) return;
     state.section = item.kind;
-    state.stack = [{ item, payload }];
+    state.stack = [{ item, payload, returnFocus }];
     resetCaseView(payload);
-    render();
+    render(true); view.querySelector("h1")?.focus({ preventScroll: true });
   } catch (error) {
     if (requestId !== state.request) return;
     state.stack = [];
@@ -409,12 +539,12 @@ async function openArtifact(id) {
   }
 }
 
-function inlineReport(kind, payload) {
+function inlineReport(kind, payload, trail) {
   if (!payload || typeof payload !== "object") { toast("本报告没有记录该运行。"); return; }
   const name = payload.run_id || payload.experiment_id || kindName(kind);
-  state.stack.push({ item: { kind, name, path: "当前报告内的完整评测结果" }, payload });
+  state.stack.push({ item: { kind, name, path: "当前报告内的完整评测结果" }, payload, trail, returnFocus: focusToken(document.activeElement) });
   resetCaseView(payload);
-  render();
+  render(true); view.querySelector("h1")?.focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -450,7 +580,8 @@ document.addEventListener("click", async (event) => {
   const target = event.target.closest("button,[data-case]");
   if (!target || target.disabled) return;
   if (target.dataset.section) {
-    state.request++; state.section = target.dataset.section; state.stack = []; render();
+    state.request++; state.section = target.dataset.section; state.stack = []; render(true);
+    if (!target.closest("#navigation")) view.querySelector("h1")?.focus({ preventScroll: true });
   } else if (target.dataset.setupCopy) {
     try { await navigator.clipboard.writeText(AssayUI.setupCommands(setup)[target.dataset.setupCopy]); toast("命令已复制。"); }
     catch { toast("复制失败，请在命令框中手动选择并复制。"); }
@@ -470,16 +601,18 @@ document.addEventListener("click", async (event) => {
   else if (target.dataset.finding !== undefined) await locateFinding(Number(target.dataset.finding));
   else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
-    state.stack.pop(); if (current()) resetCaseView(current().payload); render();
+    const closed = state.stack.pop(); if (current()) resetCaseView(current().payload); render(true);
+    if (!restoreFocus(closed?.returnFocus)) view.querySelector("h1")?.focus({ preventScroll: true });
   } else if (target.dataset.tab) { state.tab = target.dataset.tab; render(); }
+  else if (target.hasAttribute("data-toggle-trace")) { traceCollapsed = !traceCollapsed; savePreference("traceCollapsed", traceCollapsed); render(); }
   else if (target.dataset.case !== undefined) {
-    state.caseIndex = Number(target.dataset.case); renderCaseRows();
-  } else if (target.dataset.casePage) { state.casePage += Number(target.dataset.casePage); renderCaseRows(); }
+    state.caseIndex = Number(target.dataset.case); renderCaseRows(); syncLocation(); focusCase();
+  } else if (target.dataset.casePage) { state.casePage += Number(target.dataset.casePage); renderCaseRows(); syncLocation(); }
   else if (target.dataset.runSide) {
-    inlineReport("run", object(current().payload[`${target.dataset.runSide}_runs`])[target.dataset.role]);
+    inlineReport("run", object(current().payload[`${target.dataset.runSide}_runs`])[target.dataset.role], `run:${target.dataset.runSide}:${target.dataset.role}`);
   } else if (target.dataset.proposal !== undefined) {
-    inlineReport("evolution", array(object(array(current().payload.rounds)[Number(target.dataset.round)]).candidates)[Number(target.dataset.proposal)]?.evaluation);
-  } else if (target.dataset.stage !== undefined) inlineReport("run", array(current().payload.stages)[Number(target.dataset.stage)]);
+    inlineReport("evolution", array(object(array(current().payload.rounds)[Number(target.dataset.round)]).candidates)[Number(target.dataset.proposal)]?.evaluation, `proposal:${target.dataset.round}:${target.dataset.proposal}`);
+  } else if (target.dataset.stage !== undefined) inlineReport("run", array(current().payload.stages)[Number(target.dataset.stage)], `stage:${target.dataset.stage}`);
   else if (target.hasAttribute("data-download") && current()) {
     const url = URL.createObjectURL(new Blob([JSON.stringify(current().payload, null, 2)], { type: "application/json" }));
     const link = document.createElement("a"); link.href = url; link.download = `${current().item.kind}-report.json`; link.click();
@@ -489,11 +622,11 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("input", (event) => {
   if (event.target.dataset.setup) { setup[event.target.dataset.setup] = event.target.value.trim(); updateSetup(); }
-  else if (event.target.id === "global-search") { state.query = event.target.value; if (!state.stack.length) render(); }
-  else if (event.target.id === "case-search") { state.caseQuery = event.target.value; state.casePage = 0; renderCaseRows(); }
+  else if (event.target.id === "global-search") { state.query = event.target.value; if (!state.stack.length) render(); else syncLocation(); }
+  else if (event.target.id === "case-search") { state.caseQuery = event.target.value; state.casePage = 0; renderCaseRows(); syncLocation(); }
 });
 document.addEventListener("change", async (event) => {
-  if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); }
+  if (event.target.id === "case-filter") { state.caseFilter = event.target.value; state.casePage = 0; renderCaseRows(); syncLocation(); }
   else if (event.target.id === "audit-patch") {
     const context = current(), file = event.target.files[0];
     if (!file) return;
@@ -534,6 +667,21 @@ document.addEventListener("change", async (event) => {
 $("refresh-button").addEventListener("click", refresh);
 $("import-button").addEventListener("click", () => $("file-input").click());
 document.querySelector(".brand").addEventListener("click", (event) => {
-  event.preventDefault(); state.request++; state.section = "overview"; state.stack = []; render();
+  event.preventDefault(); state.request++; state.section = "overview"; state.stack = []; render(true);
 });
-refresh();
+document.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.target.matches('#case-rows button[data-case]') && ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+    event.preventDefault();
+    const cases = filteredCases(), index = cases.findIndex((entry) => entry.index === state.caseIndex);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? cases.length - 1 : index + ({ ArrowUp: -1, ArrowDown: 1, PageUp: -50, PageDown: 50 })[event.key];
+    const position = Math.max(0, Math.min(cases.length - 1, next));
+    if (cases[position]) { state.caseIndex = cases[position].index; state.casePage = Math.floor(position / 50); renderCaseRows(); syncLocation(); focusCase(); }
+  } else if (event.target.matches('[role="tab"]') && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+    event.preventDefault(); const tabs = ["cases", "scenarios", "raw"], index = tabs.indexOf(state.tab);
+    state.tab = tabs[event.key === "Home" ? 0 : event.key === "End" ? 2 : (index + (event.key === "ArrowLeft" ? -1 : 1) + 3) % 3];
+    render(); $(`tab-${state.tab}`).focus();
+  }
+});
+window.addEventListener("hashchange", restoreLocation);
+refresh().then(() => { routeReady = true; return restoreLocation(); });

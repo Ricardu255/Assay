@@ -97,7 +97,18 @@ tbody tr:hover { background: #fbfcfe; }
 .tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
 .tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: #8794a6; padding: 9px 0 13px; font-size: 12px; }
 .tab.active { color: var(--teal); border-bottom-color: var(--teal); font-weight: 550; }
-.case-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 1fr); gap: 20px; align-items: start; }
+.case-view-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.case-workspace { container: case-view / inline-size; }
+.case-layout { display: grid; grid-template-columns: minmax(260px, var(--case-split, 50%)) 14px minmax(300px, 1fr); align-items: start; }
+.case-layout.trace-collapsed { grid-template-columns: minmax(0, 1fr); }
+.case-layout.trace-collapsed .split-handle { display: none; }
+.split-handle { height: 100%; min-height: 160px; position: relative; cursor: col-resize; touch-action: none; }
+.split-handle::after { content: ""; position: absolute; width: 3px; inset: 0 auto 0 6px; background: var(--line); border-radius: 3px; }
+.split-handle:hover::after, .split-handle:focus-visible::after { background: var(--teal); }
+.split-handle:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.pane-dragging, .pane-dragging * { cursor: col-resize !important; user-select: none !important; }
+[hidden] { display: none !important; }
+@container case-view (max-width: 699px) { .case-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } .split-handle { display: none; } }
 .setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .form-field { display: flex; flex-direction: column; gap: 8px; color: var(--ink); font-size: 12px; min-width: 0; }
@@ -186,6 +197,6 @@ pre { margin: 12px 0 0; padding: 13px 15px; background: #f6f8fb; border: 1px sol
 .workspace-source { display: flex; gap: 20px; justify-content: space-between; padding: 12px 36px 20px; color: #9ca6b4; font-size: 10px; overflow-wrap: anywhere; }
 #toast { position: fixed; bottom: 25px; left: calc(50% + 100px); transform: translateX(-50%); border-radius: 7px; box-shadow: 0 8px 30px #10253d25; background: #243951; color: #fff; padding: 12px 23px; font-size: 12px; max-width: 80vw; z-index: 5; }
 @media (min-width: 1600px) { main { padding-left: 48px; padding-right: 48px; } }
-@media (max-width: 1150px) { .sidebar { width: 190px; padding: 28px 14px; } .shell { margin-left: 190px; } .topbar, main { padding-left: 24px; padding-right: 24px; } .search input { width: 150px; } .case-layout { grid-template-columns: 1fr; } .stats { gap: 10px; } .stat { padding: 16px; } }
+@media (max-width: 1150px) { .sidebar { width: 190px; padding: 28px 14px; } .shell { margin-left: 190px; } .topbar, main { padding-left: 24px; padding-right: 24px; } .search input { width: 150px; } .stats { gap: 10px; } .stat { padding: 16px; } }
 @media (max-width: 900px) { .sidebar { width: 70px; padding: 23px 10px; } .brand { margin: 0 auto 28px; justify-content: center; } .brand span, .nav-caption, .nav-name, .nav-count, .sidebar-footer { display: none; } .nav-button { justify-content: center; padding: 13px 8px; } .shell { margin-left: 70px; } .topbar { flex-wrap: wrap; gap: 12px; } .top-actions { flex: 1; justify-content: flex-end; } .search input { width: 150px; } .grid, .comparison-grid { grid-template-columns: 1fr; } .stat-value { font-size: 26px; } .workspace-source { padding: 10px 24px; } #toast { left: calc(50% + 35px); } }
 @media (max-width: 600px) { .topbar { padding: 15px; } .breadcrumb { font-size: 11px; } .top-actions { width: 100%; gap: 6px; flex-wrap: wrap; justify-content: flex-start; } .search { width: 100%; } .search input { width: 100%; } main { padding: 24px 15px; } h1 { font-size: 23px; } .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; } .stat { padding: 14px; } .stat-label { font-size: 11px; } .stat-value { font-size: 25px; } .stat-note { font-size: 9px; } .artifact-counts { grid-template-columns: repeat(2, 1fr); } .page-heading { gap: 10px; flex-wrap: wrap; } .workspace-source { padding: 10px 15px; flex-wrap: wrap; gap: 6px; } .case-tools { flex-wrap: wrap; } .case-tools input { width: 100%; } .panel-head, .panel-body { padding: 16px; } td, th { padding: 12px 13px; } .case-layout { grid-template-columns: minmax(0, 1fr); } }

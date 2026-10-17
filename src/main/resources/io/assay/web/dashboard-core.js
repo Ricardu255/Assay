@@ -126,7 +126,12 @@
     }
     return { files, truncated };
   }
-  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent, parseDiff };
+  function splitRatio(ratio, width) {
+    if (!Number.isFinite(width) || width < 700) return 0.5;
+    const requested = Number.isFinite(ratio) ? ratio : 0.5;
+    return Math.max(260 / width, Math.min(1 - 314 / width, requested));
+  }
+  const api = { exampleCases, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);
