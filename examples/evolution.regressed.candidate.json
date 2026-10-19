@@ -1,0 +1,9 @@
+{
+  "candidate_id": "intent-router-regressed",
+  "target_type": "skill",
+  "target_id": "intent-router",
+  "baseline_version": "2",
+  "candidate_version": "3",
+  "change_type": "skill",
+  "summary": "Deliberately routes support requests to GENERAL so the first-error diagnosis is demonstrable"
+}

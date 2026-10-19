@@ -109,9 +109,10 @@ public final class EvaluationEngine {
                     evalCase.metadata().containsKey("trace_ref")
                             ? evalCase.metadata().get("trace_ref")
                             : evalCase.metadata().get("trace");
+            // A file-backed adapter normally keys its collection by case id. Supplying the id as the
+            // default handle keeps that case zero-code while still letting an adapter read trace_ref.
             if (handle == null) {
-                throw new IllegalStateException(
-                        "offline case " + evalCase.caseId() + " requires metadata.trace_ref or metadata.trace");
+                handle = evalCase.caseId();
             }
         } else {
             throw new IllegalArgumentException("unsupported source: " + source);

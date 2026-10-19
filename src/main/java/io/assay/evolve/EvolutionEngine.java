@@ -6,6 +6,7 @@ import io.assay.model.EvalCase;
 import io.assay.model.EvolutionCandidate;
 import io.assay.model.EvolutionPolicy;
 import io.assay.model.MetricObjective;
+import io.assay.model.QualityGate;
 import io.assay.model.ScenarioGate;
 import io.assay.rules.ValueOps;
 import io.assay.support.AtomicFiles;
@@ -14,6 +15,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -107,9 +111,18 @@ public final class EvolutionEngine {
                     "mean_latency_ms_delta",
                     difference(candidateMetrics.get("mean_latency_ms"), baselineMetrics.get("mean_latency_ms")));
             comparison.put(
+                    "p95_latency_ms_delta",
+                    difference(candidateMetrics.get("p95_latency_ms"), baselineMetrics.get("p95_latency_ms")));
+            comparison.put(
                     "mean_steps_delta",
                     difference(candidateMetrics.get("mean_steps"), baselineMetrics.get("mean_steps")));
             comparison.put("scenarios", compareScenarios(baselineSummary, candidateSummary));
+            comparison.put("case_transitions", compareCases(cases, baselineSummary, candidateSummary));
+            comparison.put(
+                    "rule_deltas",
+                    compareRuleStats(
+                            asMap(baselineMetrics.get("rule_stats")),
+                            asMap(candidateMetrics.get("rule_stats"))));
             comparisons.put(role, comparison);
         }
 
@@ -197,6 +210,41 @@ public final class EvolutionEngine {
             }
         }
 
+        for (QualityGate gate : policy.qualityGates()) {
+            for (String role : gate.roles()) {
+                Map<String, Object> comparison = asMap(comparisons.get(role));
+                Map<String, Object> transitions = asMap(comparison.get("case_transitions"));
+                int caseCount = intValue(transitions.get("case_count"));
+                if (caseCount == 0) {
+                    rollback.add(role + ": quality gate has no evaluated cases");
+                    continue;
+                }
+                if (caseCount < gate.minimumSamples()) {
+                    rollback.add(role + ": quality gate needs at least " + gate.minimumSamples()
+                            + " cases, found " + caseCount);
+                    continue;
+                }
+                double passRate = doubleValue(asMap(comparison.get("candidate")).get("hard_pass_rate"));
+                if (gate.minimumHardPassRate() != null && passRate < gate.minimumHardPassRate()) {
+                    rollback.add(role + ": hard pass rate " + percent(passRate)
+                            + " is below the minimum " + percent(gate.minimumHardPassRate()));
+                }
+                int regressions = intValue(transitions.get("regressed_count"));
+                if (gate.maximumTaskRegressions() != null
+                        && regressions > gate.maximumTaskRegressions()) {
+                    rollback.add(role + ": " + regressions + " regressed cases exceed the maximum "
+                            + gate.maximumTaskRegressions());
+                }
+                int criticalRegressions = criticalRegressions(transitions);
+                if (gate.maximumCriticalTaskRegressions() != null
+                        && criticalRegressions > gate.maximumCriticalTaskRegressions()) {
+                    rollback.add(role + ": " + criticalRegressions
+                            + " critical regressions exceed the maximum "
+                            + gate.maximumCriticalTaskRegressions());
+                }
+            }
+        }
+
         for (MetricObjective objective : policy.objectives()) {
             for (String role : ROLES) {
                 Map<String, Object> comparison = asMap(comparisons.get(role));
@@ -208,7 +256,12 @@ public final class EvolutionEngine {
                     }
                     continue;
                 }
-                double delta = improvement(doubleValue(baselineValue), doubleValue(candidateValue), objective.direction());
+                double candidateNumeric = doubleValue(candidateValue);
+                if (objective.maximum() != null && candidateNumeric > objective.maximum()) {
+                    rollback.add(role + "/" + objective.name() + ": " + candidateNumeric
+                            + " exceeds the absolute maximum " + objective.maximum());
+                }
+                double delta = improvement(doubleValue(baselineValue), candidateNumeric, objective.direction());
                 if (delta < -objective.maximumRegression()) {
                     rollback.add(role + "/" + objective.name() + ": exceeded maximum regression");
                 }
@@ -314,6 +367,8 @@ public final class EvolutionEngine {
             objectiveCoverage.put(objective.name(), coverage(samples.size(), caseCount));
         }
 
+        Map<String, Object> ruleStats = ruleStatsJson(ruleStats(results), caseCount);
+
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("case_count", caseCount);
         metrics.put("hard_failures", summary.get("hard_failures"));
@@ -322,9 +377,11 @@ public final class EvolutionEngine {
                 caseCount == 0 ? 0.0 : (double) (caseCount - intValue(summary.get("hard_failures"))) / caseCount);
         metrics.put("soft_warning_count", summary.get("soft_warnings"));
         metrics.put("mean_latency_ms", aggregate(latencies, "mean"));
+        metrics.put("p95_latency_ms", aggregate(latencies, "p95"));
         metrics.put("mean_steps", aggregate(steps, "mean"));
         metrics.put("efficiency", efficiency);
         metrics.put("objectives", objectiveValues);
+        metrics.put("rule_stats", ruleStats);
         metrics.put("metric_coverage", coverage);
         metrics.put("objective_coverage", objectiveCoverage);
         return metrics;
@@ -388,6 +445,187 @@ public final class EvolutionEngine {
             comparisons.put(scenario, comparison);
         }
         return comparisons;
+    }
+
+    /**
+     * Per-case pass/fail transitions and, for every regression, the first divergent step.
+     *
+     * <p>A regression is exactly a case that passed for the baseline and fails for the candidate. The
+     * traces used here are the ones that were already evaluated and stored, so a diagnosis never
+     * re-runs an agent and never disagrees with the report it explains.
+     */
+    public static Map<String, Object> compareCases(
+            List<EvalCase> cases, Map<String, Object> baseline, Map<String, Object> candidate) {
+        Map<String, Map<String, Object>> baselineByCase = resultsByCase(baseline);
+        Map<String, Map<String, Object>> candidateByCase = resultsByCase(candidate);
+
+        List<Map<String, Object>> regressed = new ArrayList<>();
+        List<Map<String, Object>> recovered = new ArrayList<>();
+        List<Map<String, Object>> persistent = new ArrayList<>();
+        int stablePasses = 0;
+
+        for (EvalCase evalCase : cases) {
+            Map<String, Object> baselineResult = baselineByCase.get(evalCase.caseId());
+            Map<String, Object> candidateResult = candidateByCase.get(evalCase.caseId());
+            boolean baselinePass = Boolean.TRUE.equals(
+                    baselineResult == null ? null : baselineResult.get("hard_pass"));
+            boolean candidatePass = Boolean.TRUE.equals(
+                    candidateResult == null ? null : candidateResult.get("hard_pass"));
+            if (baselinePass && candidatePass) {
+                stablePasses++;
+            } else if (!baselinePass && !candidatePass) {
+                persistent.add(caseIdentity(evalCase));
+            } else if (baselinePass) {
+                regressed.add(regression(evalCase, baselineResult, candidateResult));
+            } else {
+                recovered.add(caseIdentity(evalCase));
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("case_count", cases.size());
+        result.put("stable_pass_count", stablePasses);
+        result.put("regressed_count", regressed.size());
+        result.put("recovered_count", recovered.size());
+        result.put("persistent_failure_count", persistent.size());
+        result.put("regressed", regressed);
+        result.put("recovered", recovered);
+        result.put("persistent_failures", persistent);
+        return result;
+    }
+
+    private static Map<String, Map<String, Object>> resultsByCase(Map<String, Object> summary) {
+        Map<String, Map<String, Object>> byCase = new LinkedHashMap<>();
+        for (Object rawResult : asList(summary.get("results"))) {
+            Map<String, Object> result = asMap(rawResult);
+            String caseId = String.valueOf(asMap(result.get("case")).getOrDefault("case_id", ""));
+            if (!caseId.isEmpty()) {
+                byCase.put(caseId, result);
+            }
+        }
+        return byCase;
+    }
+
+    private static Map<String, Object> regression(
+            EvalCase evalCase, Map<String, Object> baseline, Map<String, Object> candidate) {
+        Map<String, Object> row = caseIdentity(evalCase);
+        row.put("failed_checks", failedChecks(candidate));
+        row.put("baseline_trace_id", traceId(baseline));
+        row.put("candidate_trace_id", traceId(candidate));
+        Map<String, Object> diff =
+                TraceDiff.compare(traceOf(baseline), traceOf(candidate), evalCase.metadata());
+        row.put("first_divergence", asMap(diff.get("first_divergence")));
+        row.put("divergence_count", diff.get("divergence_count"));
+        row.put("alignment", diff.get("alignment"));
+        row.put("divergences", diff.get("divergences"));
+        return row;
+    }
+
+    private static Map<String, Object> caseIdentity(EvalCase evalCase) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("case_id", evalCase.caseId());
+        row.put("scenario", evalCase.scenario());
+        row.put("critical", isCritical(evalCase));
+        return row;
+    }
+
+    private static boolean isCritical(EvalCase evalCase) {
+        Object value = evalCase.metadata().get("critical");
+        return Boolean.TRUE.equals(value) || "true".equalsIgnoreCase(String.valueOf(value));
+    }
+
+    private static List<Map<String, Object>> failedChecks(Map<String, Object> result) {
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Object rawCheck : asList(result.get("checks"))) {
+            Map<String, Object> check = asMap(rawCheck);
+            if (!Boolean.TRUE.equals(check.get("passed"))) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("layer", check.get("layer"));
+                row.put("level", check.get("level"));
+                row.put("name", check.get("name"));
+                row.put("message", check.get("message"));
+                failed.add(row);
+            }
+        }
+        return failed;
+    }
+
+    private static Map<String, Object> traceOf(Map<String, Object> result) {
+        return result == null ? Map.of() : asMap(result.get("trace"));
+    }
+
+    private static String traceId(Map<String, Object> result) {
+        Object value = traceOf(result).get("trace_id");
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /** Aggregates every named check across a run, so a rule's pass rate is comparable across versions. */
+    private static Map<String, RuleStat> ruleStats(List<Object> results) {
+        Map<String, RuleStat> stats = new TreeMap<>();
+        for (Object rawResult : results) {
+            for (Object rawCheck : asList(asMap(rawResult).get("checks"))) {
+                Map<String, Object> check = asMap(rawCheck);
+                String name = String.valueOf(check.getOrDefault("name", "")).trim();
+                if (name.isEmpty() || "null".equals(name)) {
+                    continue;
+                }
+                RuleStat stat = stats.computeIfAbsent(name, key -> new RuleStat());
+                stat.evaluated++;
+                if (Boolean.TRUE.equals(check.get("passed"))) {
+                    stat.passed++;
+                }
+                String level = String.valueOf(check.getOrDefault("level", "")).trim();
+                if (!level.isEmpty() && (stat.level == null || "hard".equals(level))) {
+                    stat.level = level;
+                }
+            }
+        }
+        return stats;
+    }
+
+    private static Map<String, Object> ruleStatsJson(Map<String, RuleStat> stats, int caseCount) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, RuleStat> entry : stats.entrySet()) {
+            RuleStat stat = entry.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("level", stat.level == null ? "unknown" : stat.level);
+            row.put("evaluated", stat.evaluated);
+            row.put("passed", stat.passed);
+            row.put("pass_rate", stat.evaluated == 0 ? null : (double) stat.passed / stat.evaluated);
+            row.put("missing", Math.max(0, caseCount - stat.evaluated));
+            result.put(entry.getKey(), row);
+        }
+        return result;
+    }
+
+    private static Map<String, Object> compareRuleStats(
+            Map<String, Object> baseline, Map<String, Object> candidate) {
+        Set<String> names = new TreeSet<>(baseline.keySet());
+        names.addAll(candidate.keySet());
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String name : names) {
+            Map<String, Object> left = asMap(baseline.get(name));
+            Map<String, Object> right = asMap(candidate.get(name));
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("baseline", left.isEmpty() ? null : left);
+            row.put("candidate", right.isEmpty() ? null : right);
+            Object leftRate = left.get("pass_rate");
+            Object rightRate = right.get("pass_rate");
+            row.put(
+                    "pass_rate_delta",
+                    leftRate instanceof Number leftValue && rightRate instanceof Number rightValue
+                            ? rightValue.doubleValue() - leftValue.doubleValue()
+                            : null);
+            result.put(name, row);
+        }
+        return result;
+    }
+
+    /** One rule's samples within a run. */
+    private static final class RuleStat {
+        private String level;
+        private int evaluated;
+        private int passed;
     }
 
     /** Reads one numeric metric out of a normalized trace, or null when the trace does not carry it. */
@@ -485,9 +723,35 @@ public final class EvolutionEngine {
             case "sum" -> values.stream().mapToDouble(Double::doubleValue).sum();
             case "min" -> values.stream().mapToDouble(Double::doubleValue).min().orElse(0);
             case "max" -> values.stream().mapToDouble(Double::doubleValue).max().orElse(0);
+            case "p50" -> percentile(values, 0.50);
+            case "p95" -> percentile(values, 0.95);
+            case "p99" -> percentile(values, 0.99);
             default -> values.stream().mapToDouble(Double::doubleValue).average().orElse(0);
         };
         return Double.isFinite(result) ? result : null;
+    }
+
+    /**
+     * Linear-interpolated percentile, so a small sample still produces a defined value instead of an
+     * index error. The sample count is reported separately through metric coverage.
+     */
+    static Double percentile(List<Double> values, double fraction) {
+        if (values.isEmpty()) {
+            return null;
+        }
+        List<Double> sorted = new ArrayList<>(values);
+        sorted.sort(Double::compareTo);
+        if (sorted.size() == 1) {
+            return sorted.get(0);
+        }
+        double rank = fraction * (sorted.size() - 1);
+        int lower = (int) Math.floor(rank);
+        int upper = (int) Math.ceil(rank);
+        if (lower == upper) {
+            return sorted.get(lower);
+        }
+        double value = sorted.get(lower) * (1 - (rank - lower)) + sorted.get(upper) * (rank - lower);
+        return Double.isFinite(value) ? value : null;
     }
 
     private static Map<String, Integer> coverage(int observed, int total) {
@@ -500,6 +764,20 @@ public final class EvolutionEngine {
         }
         double delta = right.doubleValue() - left.doubleValue();
         return Double.isFinite(delta) ? delta : null;
+    }
+
+    private static int criticalRegressions(Map<String, Object> transitions) {
+        int count = 0;
+        for (Object rawRegression : asList(transitions.get("regressed"))) {
+            if (Boolean.TRUE.equals(asMap(rawRegression).get("critical"))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String percent(double value) {
+        return String.format(java.util.Locale.ROOT, "%.1f%%", value * 100);
     }
 
     private static String shortId() {

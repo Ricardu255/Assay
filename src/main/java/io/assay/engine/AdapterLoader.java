@@ -1,8 +1,10 @@
 package io.assay.engine;
 
+import io.assay.json.Json;
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.ProjectAdapter;
 import io.assay.http.HttpProjectAdapter;
+import io.assay.trace.TraceFileAdapter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -25,7 +27,7 @@ import java.util.jar.JarFile;
  *   <li>a {@code .jar} containing a {@code META-INF/services} registration;
  *   <li>a fully-qualified class name on the current classpath;
  *   <li>a {@code .jar} plus {@code --adapter-class} naming the factory inside it.
- *   <li>a {@code .json} HTTP adapter configuration (project adapters only).
+ *   <li>a {@code .json} adapter configuration: HTTP or file-backed traces.
  * </ol>
  *
  * <p>Everything downstream depends only on the {@link ProjectAdapter} it returns.
@@ -39,9 +41,19 @@ public final class AdapterLoader {
     public static ProjectAdapter loadProjectAdapter(String reference, String adapterClass) {
         if (reference != null && reference.endsWith(".json")) {
             if (adapterClass != null && !adapterClass.isBlank()) {
-                throw new IllegalArgumentException("--adapter-class cannot be used with HTTP configuration");
+                throw new IllegalArgumentException("--adapter-class cannot be used with a JSON adapter configuration");
             }
-            return HttpProjectAdapter.load(Path.of(reference));
+            Path path = Path.of(reference);
+            Map<String, Object> config = readConfig(path);
+            Object type = config.get("type");
+            if ("http".equals(type)) {
+                return HttpProjectAdapter.load(path);
+            }
+            if ("trace_file".equals(type)) {
+                return TraceFileAdapter.load(path);
+            }
+            throw new IllegalArgumentException(
+                    "unknown adapter configuration type: " + type + " (expected http or trace_file)");
         }
         ProjectAdapterFactory factory = loadFactory(reference, adapterClass, ProjectAdapterFactory.class);
         ProjectAdapter adapter = factory.create();
@@ -60,6 +72,20 @@ public final class AdapterLoader {
             throw new IllegalArgumentException(reference + " returned a null AutoEvolutionAdapter");
         }
         return adapter;
+    }
+
+    private static Map<String, Object> readConfig(Path path) {
+        try {
+            if (!Files.isRegularFile(path)) {
+                throw new IllegalArgumentException("adapter configuration does not exist: " + path);
+            }
+            if (Files.size(path) > 1024 * 1024) {
+                throw new IllegalArgumentException("adapter configuration exceeds 1 MiB: " + path);
+            }
+            return Json.parseObject(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (IOException error) {
+            throw new UncheckedIOException("cannot read adapter configuration: " + path, error);
+        }
     }
 
     private static <T> T loadFactory(String reference, String adapterClass, Class<T> factoryType) {

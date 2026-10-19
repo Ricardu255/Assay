@@ -11,7 +11,10 @@ const labels = {
   no_acceptable_candidate: "无合格候选", no_candidates: "无候选", review_required: "需要复核",
   insufficient_evidence: "证据不足", no_obvious_issue: "未发现明显问题", clear_out_of_scope: "明确越界",
   suspected_out_of_scope: "疑似越界", reasonable_related: "合理关联", low: "低风险", medium: "中风险", high: "高风险",
-  improvement: "改善集", regression: "回归集", holdout: "留出集", not_run: "未运行", related: "相关"
+  improvement: "改善集", regression: "回归集", holdout: "留出集", not_run: "未运行", related: "相关",
+  step_added: "新增步骤", step_removed: "缺失步骤", step_changed: "步骤变更", step_reordered: "步骤顺序",
+  step_fields: "字段变化", step_error: "步骤报错", step_status: "状态变化", final_output: "最终输出",
+  trace_fields: "Trace 字段", missing_trace: "缺少 Trace", no_visible_divergence: "无可见差异"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
@@ -425,17 +428,80 @@ function renderEvolution(context) {
   const improvement = object(comparisons.improvement);
   const roles = ["improvement", "regression", "holdout"];
   const objectives = array(object(payload.policy).objectives);
-  return `${detailHeader(context)}<div class="stats">${stat("候选版本", candidate.candidate_version || "—", `${candidate.target_type || "目标"} · ${candidate.target_id || "未标注"}`)}${stat("改善集通过率变化", delta(improvement.hard_pass_rate_delta, true), "候选减去基线", count(improvement.hard_pass_rate_delta) >= 0 ? "positive" : "negative")}${stat("改善集告警变化", delta(improvement.soft_warning_delta), "负值表示告警减少", count(improvement.soft_warning_delta) <= 0 ? "positive" : "warning-text")}${stat("配置目标", integer(objectives.length), "必需指标覆盖全部样本")}</div>
+  const qualityGates = array(object(payload.policy).quality_gates);
+  const regressions = AssayUI.regressions(payload);
+  const criticalRegressions = regressions.filter((item) => item.critical).length;
+  const ruleRows = roles.flatMap((role) => Object.entries(object(object(comparisons[role]).rule_deltas))
+    .map(([name, row]) => ({ role, name, row: object(row) })));
+  const latencySamples = (metrics) => {
+    const stats = object(object(metrics.metric_coverage).latency_ms);
+    return number(stats.sample_count) === null ? "样本未知" : `${stats.sample_count}/${stats.case_count}`;
+  };
+  const ruleRow = ({ role, name, row }) => {
+    const baseline = object(row.baseline), proposed = object(row.candidate);
+    const stats = Object.keys(proposed).length ? proposed : baseline;
+    const level = { hard: "硬门禁", soft: "软质量", candidate: "复核信号" }[stats.level] || stats.level || "未知";
+    const sample = (value) => {
+      if (!Object.keys(value).length) return "—";
+      const evaluated = number(value.evaluated), missing = number(value.missing);
+      return evaluated === null ? "—" : `${evaluated} / ${evaluated + count(missing)}`;
+    };
+    const deltaValue = number(row.pass_rate_delta);
+    const deltaClass = deltaValue === null ? "" : deltaValue < 0 ? "negative" : deltaValue > 0 ? "positive" : "";
+    return `<tr><td>${labels[role]}</td><td>${escape(name)}</td><td>${escape(level)}</td><td class="number">${percent(baseline.pass_rate)}</td><td class="number">${percent(proposed.pass_rate)}</td><td class="number ${deltaClass}">${deltaValue === null ? "缺失" : `${deltaValue > 0 ? "+" : ""}${percent(deltaValue)}`}</td><td class="muted number">${sample(baseline)}</td><td class="muted number">${sample(proposed)}</td></tr>`;
+  };
+  const ruleTable = (rows) => `<div class="table-wrap"><table><thead><tr><th>数据集</th><th>规则</th><th>级别</th><th>基线</th><th>候选</th><th>变化</th><th>基线样本</th><th>候选样本</th></tr></thead><tbody>${rows.map(ruleRow).join("")}</tbody></table></div>`;
+  const changedRuleRows = ruleRows.filter(({ row }) => {
+    const delta = number(row.pass_rate_delta);
+    return delta === null || delta !== 0;
+  });
+  return `${detailHeader(context)}<div class="stats">${stat("候选版本", candidate.candidate_version || "—", `${candidate.target_type || "目标"} · ${candidate.target_id || "未标注"}`)}${stat("改善集通过率变化", delta(improvement.hard_pass_rate_delta, true), "候选减去基线", count(improvement.hard_pass_rate_delta) >= 0 ? "positive" : "negative")}${stat("改善集告警变化", delta(improvement.soft_warning_delta), "负值表示告警减少", count(improvement.soft_warning_delta) <= 0 ? "positive" : "warning-text")}${stat("回归用例", integer(regressions.length), criticalRegressions ? `其中关键 ${criticalRegressions} 条` : "基线通过、候选失败", regressions.length ? "negative" : "")}</div>
     <div class="comparison-grid"><section class="panel"><div class="panel-head"><h2>数据集对比</h2><span class="muted">基线 ${escape(candidate.baseline_version || "—")} → 候选 ${escape(candidate.candidate_version || "—")}</span></div>
-      <div class="table-wrap"><table><thead><tr><th>数据集</th><th>基线通过率</th><th>候选通过率</th><th>变化</th><th>延迟变化</th></tr></thead><tbody>${roles.map((role) => {
+      <div class="table-wrap"><table><thead><tr><th>数据集</th><th>基线通过率</th><th>候选通过率</th><th>变化</th><th>平均延迟变化</th><th>P95 延迟变化</th></tr></thead><tbody>${roles.map((role) => {
         const row = object(comparisons[role]);
-        return `<tr><td><strong>${labels[role]}</strong><div><button class="link-button" data-run-side="baseline" data-role="${role}">基线明细</button> <span class="muted">/</span> <button class="link-button" data-run-side="candidate" data-role="${role}">候选明细</button></div></td><td class="number">${percent(object(row.baseline).hard_pass_rate)}</td><td class="number">${percent(object(row.candidate).hard_pass_rate)}</td><td class="number ${count(row.hard_pass_rate_delta) < 0 ? "negative" : "positive"}">${delta(row.hard_pass_rate_delta, true)}</td><td class="muted number">${number(row.mean_latency_ms_delta) === null ? "缺失" : delta(row.mean_latency_ms_delta) + " ms"}</td></tr>`;
-      }).join("")}</tbody></table></div></section><section class="panel"><div class="panel-head"><h2>判定依据</h2><span class="muted">确定性策略</span></div><div class="panel-body"><ul class="evidence">${array(payload.reasons).map((reason) => `<li>${escape(reason)}</li>`).join("") || '<li>没有记录判定依据。</li>'}</ul></div></section></div>
+        return `<tr><td><strong>${labels[role]}</strong><div><button class="link-button" data-run-side="baseline" data-role="${role}">基线明细</button> <span class="muted">/</span> <button class="link-button" data-run-side="candidate" data-role="${role}">候选明细</button></div></td><td class="number">${percent(object(row.baseline).hard_pass_rate)}</td><td class="number">${percent(object(row.candidate).hard_pass_rate)}</td><td class="number ${count(row.hard_pass_rate_delta) < 0 ? "negative" : "positive"}">${delta(row.hard_pass_rate_delta, true)}</td><td class="muted number">${number(row.mean_latency_ms_delta) === null ? "缺失" : delta(row.mean_latency_ms_delta) + " ms"}</td><td class="muted number">${number(row.p95_latency_ms_delta) === null ? "缺失" : delta(row.p95_latency_ms_delta) + " ms"}<div class="record-path">${latencySamples(object(row.baseline))} → ${latencySamples(object(row.candidate))}</div></td></tr>`;
+      }).join("")}</tbody></table></div></section><section class="panel"><div class="panel-head"><h2>判定依据</h2><span class="muted">确定性策略</span></div><div class="panel-body"><ul class="evidence">${array(payload.reasons).map((reason) => `<li>${escape(AssayUI.reasonText(reason))}</li>`).join("") || '<li>没有记录判定依据。</li>'}</ul></div></section></div>
+    ${caseTransitionPanels(payload)}
     ${objectives.length ? `<section class="panel"><div class="panel-head"><h2>目标指标与样本覆盖</h2><span class="muted">缺失指标保留为缺失</span></div><div class="table-wrap"><table><thead><tr><th>数据集 / 目标</th><th>基线</th><th>候选</th><th>基线样本</th><th>候选样本</th></tr></thead><tbody>${roles.flatMap((role) => objectives.map((objective) => {
       const row = object(comparisons[role]), baseline = object(row.baseline), proposed = object(row.candidate);
-      return `<tr><td>${labels[role]} · ${escape(objective.name)}<div class="record-path">${escape(objective.metric)} · ${escape(objective.aggregation)}${objective.required ? " · 必需" : ""}</div></td><td class="number">${decimal(object(baseline.objectives)[objective.name])}</td><td class="number">${decimal(object(proposed.objectives)[objective.name])}</td><td class="muted number">${coverage(baseline, objective.name)}</td><td class="muted number">${coverage(proposed, objective.name)}</td></tr>`;
+      return `<tr><td>${labels[role]} · ${escape(objective.name)}<div class="record-path">${escape(objective.metric)} · ${escape(objective.aggregation)}${objective.required ? " · 必需" : ""}${objective.maximum != null ? ` · 上限 ${decimal(objective.maximum)}` : ""}</div></td><td class="number">${decimal(object(baseline.objectives)[objective.name])}</td><td class="number">${decimal(object(proposed.objectives)[objective.name])}</td><td class="muted number">${coverage(baseline, objective.name)}</td><td class="muted number">${coverage(proposed, objective.name)}</td></tr>`;
     })).join("")}</tbody></table></div></section>` : ""}
+    ${qualityGates.length ? `<section class="panel section-gap"><div class="panel-head"><h2>绝对质量门禁</h2><span class="muted">不依赖基线，只约束候选自身</span></div><div class="table-wrap"><table><thead><tr><th>数据集</th><th>最低硬通过率</th><th>最大回归数</th><th>最大关键回归</th><th>最小样本</th></tr></thead><tbody>${qualityGates.flatMap((gate) => array(gate.roles).map((role) => `<tr><td>${labels[role] || escape(role)}</td><td class="number">${gate.minimum_hard_pass_rate == null ? "—" : percent(gate.minimum_hard_pass_rate)}</td><td class="number">${integer(gate.maximum_task_regressions)}</td><td class="number">${integer(gate.maximum_critical_task_regressions)}</td><td class="number">${integer(gate.minimum_samples)}</td></tr>`)).join("")}</tbody></table></div></section>` : ""}
+    ${ruleRows.length ? `<section class="panel section-gap"><div class="panel-head"><h2>规则通过率</h2><span class="muted">只显示相对基线有变化的规则</span></div>
+      ${changedRuleRows.length ? ruleTable(changedRuleRows) : '<div class="panel-body"><p class="muted">所有规则的通过率与基线一致。</p></div>'}
+      ${ruleRows.length > changedRuleRows.length ? `<div class="panel-body"><details><summary>查看全部 ${ruleRows.length} 条规则（含未变化）</summary>${ruleTable(ruleRows)}</details></div>` : ""}
+    </section>` : ""}
     <section class="panel section-gap"><div class="panel-head"><h2>候选说明与策略</h2></div><div class="panel-body"><p class="muted">${escape(candidate.summary || "未提供候选说明")}</p>${details("候选清单", candidate)}${details("评测策略", payload.policy)}</div></section>`;
+}
+
+function caseTransitionPanels(payload) {
+  const transitions = AssayUI.caseTransitions(payload);
+  if (!transitions.some(({ data }) => Object.keys(data).length)) {
+    return '<section class="panel section-gap"><div class="panel-head"><h2>用例状态迁移</h2></div><div class="panel-body"><p class="muted">这份报告生成于用例级诊断之前；重新运行演化即可看到回归用例与首错。</p></div></section>';
+  }
+  const regressions = AssayUI.regressions(payload);
+
+  const summary = `<section class="panel section-gap"><div class="panel-head"><h2>用例状态迁移</h2><span class="muted">基线通过、候选失败才算回归</span></div>
+    <div class="table-wrap"><table><thead><tr><th>数据集</th><th>用例</th><th>回归</th><th>恢复</th><th>持续失败</th><th>稳定通过</th></tr></thead><tbody>${transitions.map(({ role, data }) => `<tr><td><strong>${labels[role]}</strong></td><td class="number">${integer(data.case_count)}</td><td class="number">${count(data.regressed_count) ? '<strong class="negative">' + integer(data.regressed_count) + '</strong>' : integer(data.regressed_count)}</td><td class="number">${integer(data.recovered_count)}</td><td class="number">${integer(data.persistent_failure_count)}</td><td class="number">${integer(data.stable_pass_count)}</td></tr>`).join("")}</tbody></table></div></section>`;
+
+  const rows = regressions.map((item) => {
+    const first = object(item.first_divergence);
+    const checks = array(item.failed_checks).map((check) => escape(check.name || "")).filter(Boolean).join("、") || "—";
+    const evidence = `<details><summary>查看证据</summary><pre>${json({
+      category: first.category, reason: first.reason, changed_paths: first.changed_paths,
+      baseline: first.baseline, candidate: first.candidate,
+      baseline_values: first.baseline_values, candidate_values: first.candidate_values
+    })}</pre></details>`;
+    return `<tr><td>${labels[item.role] || escape(item.role)}</td><td><strong>${escape(item.case_id)}</strong><div class="record-path">${escape(item.scenario || "default")}</div></td><td>${item.critical ? '<span class="badge warning">关键</span>' : "—"}</td><td class="number">${first.step == null ? "—" : integer(first.step)}</td><td>${badge(first.category)}</td><td>${checks}</td><td>${escape(AssayUI.divergenceText(first))}${evidence}</td></tr>`;
+  }).join("");
+  const regressionPanel = `<section class="panel section-gap"><div class="panel-head"><h2>回归用例与首错</h2><span class="count-chip">${regressions.length} 条</span></div>
+    ${regressions.length ? `<div class="table-wrap"><table><thead><tr><th>数据集</th><th>用例 / 场景</th><th>关键</th><th>首错步骤</th><th>类型</th><th>失败规则</th><th>首处差异</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="panel-body"><p class="muted">没有用例从通过变为失败。</p></div>'}</section>`;
+
+  const clusterRows = AssayUI.failureClusters(regressions);
+  const clusterPanel = regressions.length ? `<section class="panel section-gap"><div class="panel-head"><h2>失败聚类</h2><span class="muted">按首错类型与步骤归类</span></div>
+    <div class="table-wrap"><table><thead><tr><th>类型</th><th>模块 / 动作</th><th>回归数</th><th>用例</th></tr></thead><tbody>${clusterRows.map((cluster) => `<tr><td>${badge(cluster.category)}</td><td>${escape([cluster.module, cluster.action].filter(Boolean).join("/") || "—")}</td><td class="number">${cluster.count}</td><td class="muted">${escape(cluster.cases.join("、"))}${cluster.count > cluster.cases.length ? " …" : ""}</td></tr>`).join("")}</tbody></table></div></section>` : "";
+
+  return summary + regressionPanel + clusterPanel;
 }
 
 function renderAuto(context) {

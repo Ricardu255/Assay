@@ -184,8 +184,8 @@ public final class Reporting {
         report.add("");
         report.add("## Version comparison");
         report.add("");
-        report.add("| Dataset | Baseline hard pass | Candidate hard pass | Delta | Soft warning delta | Latency delta |");
-        report.add("|---|---:|---:|---:|---:|---:|");
+        report.add("| Dataset | Baseline hard pass | Candidate hard pass | Delta | Soft warning delta | Mean latency delta | P95 latency delta |");
+        report.add("|---|---:|---:|---:|---:|---:|---:|");
         Map<String, Object> comparisons = asMap(result.get("comparisons"));
         for (String role : List.of("improvement", "regression", "holdout")) {
             Map<String, Object> comparison = asMap(comparisons.get(role));
@@ -195,8 +195,18 @@ public final class Reporting {
                             + Fmt.signedPercent1(doubleValue(comparison.get("hard_pass_rate_delta"))) + " | "
                             + Fmt.signedInt(intValue(comparison.get("soft_warning_delta"))) + " | "
                             + (comparison.get("mean_latency_ms_delta") instanceof Number latency
-                                    ? Fmt.signedFixed1(latency.doubleValue()) + " ms" : "missing") + " |");
+                                    ? Fmt.signedFixed1(latency.doubleValue()) + " ms" : "missing") + " | "
+                            + (comparison.get("p95_latency_ms_delta") instanceof Number p95
+                                    ? Fmt.signedFixed1(p95.doubleValue()) + " ms" : "missing") + " |");
         }
+        report.add("");
+        report.add("P95 latency samples:");
+        for (String role : List.of("improvement", "regression", "holdout")) {
+            Map<String, Object> comparison = asMap(comparisons.get(role));
+            report.add("- `" + role + "`: " + latencySamples(asMap(comparison.get("baseline")))
+                    + " → " + latencySamples(asMap(comparison.get("candidate"))));
+        }
+        appendCaseTransitions(report, result);
 
         Map<String, Object> policy = asMap(result.get("policy"));
         List<Object> objectives = asList(policy.get("objectives"));
@@ -204,8 +214,8 @@ public final class Reporting {
             report.add("");
             report.add("## Configured objectives");
             report.add("");
-            report.add("| Dataset | Objective | Baseline | Candidate | Baseline samples | Candidate samples |");
-            report.add("|---|---|---:|---:|---:|---:|");
+            report.add("| Dataset | Objective | Baseline | Candidate | Ceiling | Baseline samples | Candidate samples |");
+            report.add("|---|---|---:|---:|---:|---:|---:|");
             for (String role : List.of("improvement", "regression", "holdout")) {
                 Map<String, Object> comparison = asMap(comparisons.get(role));
                 Map<String, Object> baselineObjectives =
@@ -218,6 +228,7 @@ public final class Reporting {
                     report.add(
                             "| " + role + " | " + name + " | " + render(baselineObjectives.get(name)) + " | "
                                     + render(candidateObjectives.get(name)) + " | "
+                                    + renderOptional(objective.get("maximum")) + " | "
                                     + sampleCoverage(asMap(comparison.get("baseline")), name) + " | "
                                     + sampleCoverage(asMap(comparison.get("candidate")), name) + " |");
                 }
@@ -256,6 +267,56 @@ public final class Reporting {
             }
         }
 
+        List<Object> qualityGates = asList(policy.get("quality_gates"));
+        if (!qualityGates.isEmpty()) {
+            report.add("");
+            report.add("## Configured quality gates");
+            report.add("");
+            report.add("| Dataset | Min hard pass | Max regressions | Max critical regressions | Min samples |");
+            report.add("|---|---:|---:|---:|---:|");
+            for (Object rawGate : qualityGates) {
+                Map<String, Object> gate = asMap(rawGate);
+                for (Object rawRole : asList(gate.get("roles"))) {
+                    report.add("| " + cell(rawRole) + " | " + renderPercent(gate.get("minimum_hard_pass_rate"))
+                            + " | " + renderOptional(gate.get("maximum_task_regressions"))
+                            + " | " + renderOptional(gate.get("maximum_critical_task_regressions"))
+                            + " | " + renderOptional(gate.get("minimum_samples")) + " |");
+                }
+            }
+        }
+
+        report.add("");
+        report.add("## Rule pass rates");
+        report.add("");
+        boolean anyRule = false;
+        for (String role : List.of("improvement", "regression", "holdout")) {
+            if (!asMap(asMap(comparisons.get(role)).get("rule_deltas")).isEmpty()) {
+                anyRule = true;
+                break;
+            }
+        }
+        if (!anyRule) {
+            report.add("- None");
+        } else {
+            report.add("| Dataset | Rule | Level | Baseline | Candidate | Delta | Baseline samples | Candidate samples |");
+            report.add("|---|---|---|---:|---:|---:|---:|---:|");
+            for (String role : List.of("improvement", "regression", "holdout")) {
+                Map<String, Object> deltas = asMap(asMap(comparisons.get(role)).get("rule_deltas"));
+                for (Map.Entry<String, Object> entry : deltas.entrySet()) {
+                    Map<String, Object> row = asMap(entry.getValue());
+                    Map<String, Object> baselineStats = asMap(row.get("baseline"));
+                    Map<String, Object> candidateStats = asMap(row.get("candidate"));
+                    Map<String, Object> stats = candidateStats.isEmpty() ? baselineStats : candidateStats;
+                    report.add("| " + role + " | `" + cell(entry.getKey()) + "` | "
+                            + cell(stats.getOrDefault("level", "unknown")) + " | "
+                            + passRate(baselineStats) + " | " + passRate(candidateStats) + " | "
+                            + (row.get("pass_rate_delta") instanceof Number delta
+                                    ? Fmt.signedPercent1(delta.doubleValue()) : "missing") + " | "
+                            + samples(baselineStats) + " | " + samples(candidateStats) + " |");
+                }
+            }
+        }
+
         report.add("");
         report.add("## Decision evidence");
         report.add("");
@@ -273,6 +334,156 @@ public final class Reporting {
                             + asMap(candidateRuns.get(role)).get("run_id") + "`");
         }
         AtomicFiles.writeText(outputDir.resolve("evolution_report.md"), Fmt.join(report));
+    }
+
+    /** Adds the per-case transition counts, every regression's first divergence, and failure clusters. */
+    private static void appendCaseTransitions(List<String> report, Map<String, Object> result) {
+        Map<String, Object> comparisons = asMap(result.get("comparisons"));
+        List<String> roles = List.of("improvement", "regression", "holdout");
+        List<Map<String, Object>> regressions = new ArrayList<>();
+
+        report.add("");
+        report.add("## Case transitions");
+        report.add("");
+        report.add("| Dataset | Cases | Regressed | Recovered | Persistent failures | Stable passes |");
+        report.add("|---|---:|---:|---:|---:|---:|");
+        for (String role : roles) {
+            Map<String, Object> transitions = asMap(asMap(comparisons.get(role)).get("case_transitions"));
+            report.add("| " + role + " | " + intValue(transitions.get("case_count")) + " | "
+                    + intValue(transitions.get("regressed_count")) + " | "
+                    + intValue(transitions.get("recovered_count")) + " | "
+                    + intValue(transitions.get("persistent_failure_count")) + " | "
+                    + intValue(transitions.get("stable_pass_count")) + " |");
+            for (Object rawRegression : asList(transitions.get("regressed"))) {
+                Map<String, Object> row = new LinkedHashMap<>(asMap(rawRegression));
+                row.put("_role", role);
+                regressions.add(row);
+            }
+        }
+
+        report.add("");
+        report.add("## Regressions and first divergence");
+        report.add("");
+        if (regressions.isEmpty()) {
+            report.add("- None");
+            return;
+        }
+        report.add("| Dataset | Case | Scenario | Critical | Step | Category | Failed checks | First divergence |");
+        report.add("|---|---|---|---:|---:|---|---|---|");
+
+        Map<String, Cluster> clusters = new LinkedHashMap<>();
+        for (Map<String, Object> row : regressions) {
+            Map<String, Object> first = asMap(row.get("first_divergence"));
+            String role = text(row.get("_role"));
+            String category = text(first.get("category"));
+            Map<String, Object> event = asMap(first.get("candidate"));
+            if (event.isEmpty()) {
+                event = asMap(first.get("baseline"));
+            }
+            String module = text(event.get("module"));
+            String action = text(event.get("action"));
+            String key = role + '\u0000' + category + '\u0000' + module + '\u0000' + action;
+            Cluster cluster = clusters.computeIfAbsent(key, ignored -> new Cluster(role, category, module, action));
+            cluster.count++;
+            if (cluster.cases.size() < 5) {
+                cluster.cases.add(text(row.get("case_id")));
+            }
+
+            report.add("| " + role + " | `" + cell(row.get("case_id")) + "` | " + cell(row.get("scenario"))
+                    + " | " + (Boolean.TRUE.equals(row.get("critical")) ? "yes" : "-")
+                    + " | " + (first.get("step") == null ? "—" : cell(first.get("step")))
+                    + " | " + cell(category)
+                    + " | " + cell(checkNames(row.get("failed_checks")))
+                    + " | " + cell(first.get("reason")) + " |");
+        }
+
+        report.add("");
+        report.add("## Failure clusters");
+        report.add("");
+        report.add("| Dataset | Category | Module / Action | Regressions | Cases |");
+        report.add("|---|---|---|---:|---|");
+        List<Cluster> sorted = new ArrayList<>(clusters.values());
+        sorted.sort((left, right) -> {
+            int byCount = Integer.compare(right.count, left.count);
+            if (byCount != 0) {
+                return byCount;
+            }
+            int byRole = left.role.compareTo(right.role);
+            if (byRole != 0) {
+                return byRole;
+            }
+            int byCategory = left.category.compareTo(right.category);
+            if (byCategory != 0) {
+                return byCategory;
+            }
+            int byModule = left.module.compareTo(right.module);
+            return byModule != 0 ? byModule : left.action.compareTo(right.action);
+        });
+        for (Cluster cluster : sorted) {
+            String step = cluster.module.isEmpty() && cluster.action.isEmpty()
+                    ? "—"
+                    : (cluster.module + "/" + cluster.action).replaceAll("^/|/$", "");
+            report.add("| " + cell(cluster.role) + " | " + cell(cluster.category) + " | " + cell(step)
+                    + " | " + cluster.count + " | " + cell(String.join(", ", cluster.cases))
+                    + (cluster.count > cluster.cases.size() ? ", …" : "") + " |");
+        }
+    }
+
+    /** The failed check names, with the level only when it is not the default hard gate. */
+    private static String checkNames(Object value) {
+        List<String> names = new ArrayList<>();
+        for (Object rawCheck : asList(value)) {
+            Map<String, Object> check = asMap(rawCheck);
+            String level = text(check.get("level"));
+            names.add(("hard".equals(level) || level.isEmpty() ? "" : level + ":") + text(check.get("name")));
+        }
+        return names.isEmpty() ? "—" : String.join(", ", names);
+    }
+
+    /** One group of regressions that diverged in the same category at the same kind of step. */
+    private static final class Cluster {
+        private final String role;
+        private final String category;
+        private final String module;
+        private final String action;
+        private final List<String> cases = new ArrayList<>();
+        private int count;
+
+        private Cluster(String role, String category, String module, String action) {
+            this.role = role;
+            this.category = category;
+            this.module = module;
+            this.action = action;
+        }
+    }
+
+    private static String cell(Object value) {
+        return text(value).replace("|", "\\|").replace("\n", " ");
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String latencySamples(Map<String, Object> metrics) {
+        Map<String, Object> coverage = asMap(asMap(metrics.get("metric_coverage")).get("latency_ms"));
+        return coverage.isEmpty()
+                ? "unknown"
+                : intValue(coverage.get("sample_count")) + "/" + intValue(coverage.get("case_count"));
+    }
+
+    private static String passRate(Map<String, Object> stats) {
+        Object value = stats.get("pass_rate");
+        return value instanceof Number number ? Fmt.percent1(number.doubleValue()) : "—";
+    }
+
+    private static String samples(Map<String, Object> stats) {
+        if (stats.isEmpty()) {
+            return "—";
+        }
+        int evaluated = intValue(stats.get("evaluated"));
+        int missing = intValue(stats.get("missing"));
+        return evaluated + "/" + (evaluated + missing);
     }
 
     private static String sampleCoverage(Map<String, Object> metrics, String objective) {
@@ -370,6 +581,14 @@ public final class Reporting {
 
     private static String render(Object value) {
         return value == null ? "None" : String.valueOf(value);
+    }
+
+    private static String renderPercent(Object value) {
+        return value instanceof Number number ? Fmt.percent1(number.doubleValue()) : "—";
+    }
+
+    private static String renderOptional(Object value) {
+        return value == null ? "—" : String.valueOf(value);
     }
 
     private static double doubleValue(Object value) {

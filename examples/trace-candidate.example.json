@@ -1,0 +1,12 @@
+{
+  "type": "trace_file",
+  "name": "intent-router-candidate",
+  "format": "normalized",
+  "runs": "examples/traces/candidate.normalized.json",
+  "target_type": "skill",
+  "target_id": "intent-router",
+  "target_version": "2",
+  "hard_gates": [
+    {"name": "route", "actual": "fields.route", "operator": "eq", "expected": "route"}
+  ]
+}

@@ -7,6 +7,7 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.model.RunContext;
 import io.assay.model.TraceEvent;
+import io.assay.rules.RuleConfig;
 import io.assay.rules.ValueOps;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,7 +37,6 @@ public final class HttpProjectAdapter {
     private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
     private static final Set<String> OPTIONS = Set.of("type", "name", "endpoint", "output_path",
             "trace_id_path", "events_path", "bearer_token_env", "headers_env", "hard_gates", "soft_quality");
-    private static final Set<String> OPERATORS = Set.of("eq", "ne", "contains", "not_contains", "min", "max", "in", "exists");
     private final URI endpoint;
     private final String outputPath;
     private final String traceIdPath;
@@ -99,9 +99,9 @@ public final class HttpProjectAdapter {
             throw new UncheckedIOException("cannot read HTTP configuration: " + file, error);
         }
         // Validate rules before constructing a client or attempting a network request.
-        List<Rule> hard = rules(config, "hard_gates");
+        List<Rule> hard = RuleConfig.parse(config.get("hard_gates"), "hard_gates");
         if (hard.isEmpty()) throw new IllegalArgumentException("HTTP configuration requires at least one hard_gates rule");
-        List<Rule> soft = rules(config, "soft_quality");
+        List<Rule> soft = RuleConfig.parse(config.get("soft_quality"), "soft_quality");
         String name = text(config, "name", "http-agent");
         HttpProjectAdapter adapter = new HttpProjectAdapter(config, environment);
         return new ProjectAdapter(name, adapter::call, adapter::read, hard, soft);
@@ -198,42 +198,6 @@ public final class HttpProjectAdapter {
     private static Map<String, Object> object(Object value, String label) {
         if (!(value instanceof Map<?, ?>)) throw new IllegalArgumentException(label + " must be an object");
         return (Map<String, Object>) value;
-    }
-
-    private static List<Rule> rules(Map<String, Object> config, String key) {
-        Object value = config.getOrDefault(key, List.of());
-        if (!(value instanceof List<?> rows)) throw new IllegalArgumentException(key + " must be an array");
-        List<Rule> rules = new ArrayList<>();
-        Set<String> names = new java.util.HashSet<>();
-        for (Object row : rows) {
-            Map<String, Object> rule = object(row, key + " rule");
-            for (String option : rule.keySet()) {
-                if (!Set.of("name", "actual", "operator", "expected", "value", "message", "suspected_modules").contains(option)) {
-                    throw new IllegalArgumentException("unknown rule option: " + option);
-                }
-            }
-            String name = text(rule, "name", null), actual = path(rule, "actual", null);
-            if (!names.add(name)) throw new IllegalArgumentException("duplicate rule name in " + key + ": " + name);
-            String operator = text(rule, "operator", "eq");
-            if (!OPERATORS.contains(operator)) throw new IllegalArgumentException("unsupported rule operator: " + operator);
-            if (!"exists".equals(operator) && rule.containsKey("expected") == rule.containsKey("value")) {
-                throw new IllegalArgumentException("rule requires exactly one of expected or value: " + name);
-            }
-            if ("exists".equals(operator) && (rule.containsKey("expected") || rule.containsKey("value"))) {
-                throw new IllegalArgumentException("exists rule does not use expected or value: " + name);
-            }
-            List<String> modules = new ArrayList<>();
-            Object suspects = rule.getOrDefault("suspected_modules", List.of());
-            if (!(suspects instanceof List<?> list)) throw new IllegalArgumentException("suspected_modules must be an array");
-            for (Object module : list) {
-                if (!(module instanceof String text) || text.isBlank()) throw new IllegalArgumentException("suspected_modules entries must be non-empty strings");
-                modules.add(text);
-            }
-            if (rule.containsKey("message") && !(rule.get("message") instanceof String)) throw new IllegalArgumentException("message must be a string");
-            rules.add(new Rule(name, actual, operator, rule.containsKey("expected") ? path(rule, "expected", null) : null,
-                    rule.get("value"), (String) rule.get("message"), modules));
-        }
-        return List.copyOf(rules);
     }
 
     /** Enforce the response limit while receiving, before accumulating an unbounded body. */

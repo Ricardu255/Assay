@@ -89,6 +89,46 @@ test("Split widths preserve both panel minimums and ignore corrupt preferences",
   assert.equal(ui.splitRatio(0.4, 1000), 0.4);
 });
 
+test("Case transitions expose regressions and cluster their first errors", () => {
+  const first = { category: "step_fields", step: 2, candidate: { module: "Tool", action: "query_order" } };
+  const payload = { comparisons: {
+    improvement: {},
+    regression: { case_transitions: { case_count: 2, regressed_count: 1, recovered_count: 0,
+      persistent_failure_count: 1, stable_pass_count: 0,
+      regressed: [{ case_id: "C1", critical: true, first_divergence: first }] } },
+    holdout: { case_transitions: { case_count: 1, regressed_count: 1,
+      regressed: [{ case_id: "C2", first_divergence: first }] } }
+  } };
+  const transitions = ui.caseTransitions(payload);
+  assert.deepEqual(transitions.map(({ role }) => role), ["improvement", "regression", "holdout"]);
+  assert.equal(transitions[0].data.case_count, undefined);
+  const regressions = ui.regressions(payload);
+  assert.deepEqual(regressions.map(({ role, case_id }) => `${role}:${case_id}`), ["regression:C1", "holdout:C2"]);
+  const clusters = ui.failureClusters(regressions);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].count, 2);
+  assert.deepEqual(clusters[0].cases, ["C1", "C2"]);
+  assert.equal(clusters[0].category, "step_fields");
+  assert.deepEqual(ui.regressions({}), []);
+  assert.deepEqual(ui.failureClusters(null), []);
+});
+
+test("Diagnosis text is localized from structured evidence", () => {
+  const fields = { category: "step_fields", step: 2, changed_paths: ["route"],
+    baseline_values: ["SUPPORT"], candidate_values: ["GENERAL"],
+    baseline: { module: "IntentRouter", action: "route" }, candidate: { module: "IntentRouter", action: "route" } };
+  assert.match(ui.divergenceText(fields), /第 2 步.*IntentRouter\/route.*route.*SUPPORT.*GENERAL/);
+  assert.match(ui.divergenceText({ category: "step_changed", step: 2,
+    baseline: { module: "Tool", action: "query_order" }, candidate: { module: "Tool", action: "estimate_delivery" } }),
+  /Tool\/query_order.*Tool\/estimate_delivery/);
+  assert.equal(ui.divergenceText({ category: "missing_trace" }), "缺少可读取的 Trace");
+  assert.match(ui.divergenceText({ category: "final_output", baseline_values: ["old"], candidate_values: ["new"] }), /old.*new/);
+  assert.match(ui.reasonText("holdout: candidate has hard failures"), /留出集.*候选存在硬失败/);
+  assert.match(ui.reasonText("holdout/latency: required metric is missing"), /留出集\/latency.*必需指标缺失/);
+  assert.match(ui.reasonText("regression: 2 regressed cases exceed the maximum 0"), /回归集.*2.*0/);
+  assert.equal(ui.reasonText("something new"), "something new");
+});
+
 test("Theme follows the system, persists explicit choices and survives unavailable storage", () => {
   const script = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/theme.js"), "utf8");
   const document = { documentElement: { dataset: {} } }, window = {}, callbacks = [];

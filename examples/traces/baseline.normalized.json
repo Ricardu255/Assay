@@ -1,0 +1,41 @@
+{
+  "version": "1",
+  "runs": [
+    {
+      "case_id": "EVOLVE-IMPROVE-001",
+      "trace": {
+        "trace_id": "baseline-improve",
+        "final_output": {"route": "GENERAL"},
+        "events": [
+          {"module": "IntentRouter", "action": "plan", "status": "ok", "duration_ms": 1, "error": null, "fields": {}},
+          {"module": "IntentRouter", "action": "route", "status": "ok", "duration_ms": 2, "error": null, "fields": {"route": "GENERAL"}}
+        ],
+        "fields": {"route": "GENERAL"}
+      }
+    },
+    {
+      "case_id": "EVOLVE-REGRESSION-001",
+      "trace": {
+        "trace_id": "baseline-regression",
+        "final_output": {"route": "GENERAL"},
+        "events": [
+          {"module": "IntentRouter", "action": "plan", "status": "ok", "duration_ms": 1, "error": null, "fields": {}},
+          {"module": "IntentRouter", "action": "route", "status": "ok", "duration_ms": 2, "error": null, "fields": {"route": "GENERAL"}}
+        ],
+        "fields": {"route": "GENERAL"}
+      }
+    },
+    {
+      "case_id": "EVOLVE-HOLDOUT-001",
+      "trace": {
+        "trace_id": "baseline-holdout",
+        "final_output": {"route": "SUPPORT"},
+        "events": [
+          {"module": "IntentRouter", "action": "plan", "status": "ok", "duration_ms": 1, "error": null, "fields": {}},
+          {"module": "IntentRouter", "action": "route", "status": "ok", "duration_ms": 2, "error": null, "fields": {"route": "SUPPORT"}}
+        ],
+        "fields": {"route": "SUPPORT"}
+      }
+    }
+  ]
+}

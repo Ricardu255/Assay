@@ -1,0 +1,6 @@
+{
+  "require_regression_pass": true,
+  "require_holdout_pass": true,
+  "require_improvement": false,
+  "objectives": []
+}

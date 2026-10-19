@@ -1,0 +1,26 @@
+{
+  "require_regression_pass": true,
+  "require_holdout_pass": true,
+  "require_improvement": false,
+  "quality_gates": [
+    {
+      "roles": ["regression", "holdout"],
+      "minimum_hard_pass_rate": 0.95,
+      "maximum_task_regressions": 0,
+      "maximum_critical_task_regressions": 0,
+      "minimum_samples": 10
+    }
+  ],
+  "objectives": [
+    {
+      "name": "latency_p95",
+      "metric": "latency_ms",
+      "direction": "minimize",
+      "aggregation": "p95",
+      "minimum_improvement": 0,
+      "maximum_regression": 50,
+      "required": false,
+      "maximum": 1200
+    }
+  ]
+}

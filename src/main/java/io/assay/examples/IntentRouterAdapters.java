@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The two versions of the intent router used by the {@code evolve} walkthrough.
+ * The versions of the intent router used by the {@code evolve} walkthroughs.
  *
  * <p>Version 1 routes everything to GENERAL; version 2 recognises support requests. Running
  * {@code evolve} against both is what the README's example does, and it exercises every decision the
@@ -40,6 +40,20 @@ public final class IntentRouterAdapters {
         @Override
         public ProjectAdapter create() {
             return build("2", true);
+        }
+    }
+
+    /**
+     * A candidate that regressed: support requests are routed to GENERAL again.
+     *
+     * <p>Used with {@link Candidate} as the baseline, it produces a deterministic rollback and a
+     * step-level diagnosis, which is what the first-error walkthrough demonstrates.
+     */
+    public static final class Regressed implements ProjectAdapterFactory {
+
+        @Override
+        public ProjectAdapter create() {
+            return build("3", false);
         }
     }
 
@@ -75,7 +89,9 @@ public final class IntentRouterAdapters {
         return new NormalizedTrace(
                 String.valueOf(values.get("trace_id")),
                 values.get("output"),
-                List.of(new TraceEvent("IntentRouter", "route", 2)),
+                List.of(
+                        new TraceEvent("IntentRouter", "plan", 1),
+                        new TraceEvent("IntentRouter", "route", "ok", 2, null, Map.of("route", values.get("route")))),
                 fields,
                 Map.of(),
                 "skill",

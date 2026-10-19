@@ -1,0 +1,12 @@
+{
+  "type": "trace_file",
+  "name": "intent-router-regressed",
+  "format": "normalized",
+  "runs": "examples/traces/regressed.normalized.json",
+  "target_type": "skill",
+  "target_id": "intent-router",
+  "target_version": "3",
+  "hard_gates": [
+    {"name": "route", "actual": "fields.route", "operator": "eq", "expected": "route"}
+  ]
+}

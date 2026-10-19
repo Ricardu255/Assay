@@ -160,7 +160,136 @@
     const requested = Number.isFinite(ratio) ? ratio : 0.5;
     return Math.max(260 / width, Math.min(1 - 314 / width, requested));
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio };
+  const roles = ["improvement", "regression", "holdout"];
+  function caseTransitions(payload) {
+    const comparisons = (payload && payload.comparisons) || {};
+    return roles.map((role) => ({ role, data: (comparisons[role] && comparisons[role].case_transitions) || {} }));
+  }
+  function regressions(payload) {
+    return caseTransitions(payload).flatMap(({ role, data }) => {
+      const rows = Array.isArray(data.regressed) ? data.regressed : [];
+      return rows.map((item) => ({ role, ...(item && typeof item === "object" ? item : {}) }));
+    });
+  }
+  function failureClusters(rows) {
+    const clusters = new Map();
+    for (const item of Array.isArray(rows) ? rows : []) {
+      const first = (item && item.first_divergence) || {};
+      const candidate = first.candidate || {}, baseline = first.baseline || {};
+      const event = candidate.module || candidate.action ? candidate : baseline;
+      const category = first.category || "unknown";
+      const module = event.module || "", action = event.action || "";
+      const key = `${category}|${module}|${action}`;
+      if (!clusters.has(key)) clusters.set(key, { category, module, action, count: 0, cases: [] });
+      const cluster = clusters.get(key);
+      cluster.count++;
+      if (cluster.cases.length < 5) cluster.cases.push(item.case_id);
+    }
+    return [...clusters.values()].sort((left, right) => right.count - left.count
+      || `${left.category}${left.module}`.localeCompare(`${right.category}${right.module}`));
+  }
+  function valueText(value) {
+    if (value === null || value === undefined) return "—";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  function clipped(value, limit = 120) {
+    const text = String(value);
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  }
+  function eventLabel(event) {
+    const value = event && typeof event === "object" ? event : {};
+    const parts = [value.module, value.action].filter(Boolean);
+    return parts.length ? parts.join("/") : "未知步骤";
+  }
+  function changesText(paths, left, right) {
+    return (Array.isArray(paths) ? paths : []).map((path, index) => {
+      const before = Array.isArray(left) && index < left.length ? valueText(left[index]) : "—";
+      const after = Array.isArray(right) && index < right.length ? valueText(right[index]) : "—";
+      return `${path}：${clipped(before)} → ${clipped(after)}`;
+    }).join("；");
+  }
+  function divergenceText(first) {
+    const data = first && typeof first === "object" ? first : {};
+    const step = data.step == null ? "" : `第 ${data.step} 步 `;
+    const candidate = data.candidate && typeof data.candidate === "object" ? data.candidate : {};
+    const baseline = data.baseline && typeof data.baseline === "object" ? data.baseline : {};
+    const where = eventLabel(Object.keys(candidate).length ? candidate : baseline);
+    const paths = Array.isArray(data.changed_paths) ? data.changed_paths : [];
+    const left = Array.isArray(data.baseline_values) ? data.baseline_values : [];
+    const right = Array.isArray(data.candidate_values) ? data.candidate_values : [];
+    switch (data.category) {
+      case "step_fields":
+        return `${step}${where} 字段 ${changesText(paths, left, right) || "发生变化"}`;
+      case "step_changed":
+        return `${step}从 ${eventLabel(baseline)} 变为 ${eventLabel(candidate)}`;
+      case "step_added":
+        return `${step}新增 ${where}`;
+      case "step_removed":
+        return `${step}缺少基线中的 ${where}`;
+      case "step_reordered":
+        return `${step}步骤顺序变化：${where}`;
+      case "step_error":
+        return `${step}${where} 报错：${clipped(candidate.error || data.reason || "未知错误")}`;
+      case "step_status":
+        return `${step}${where} 状态从 ${baseline.status || "未知"} 变为 ${candidate.status || "未知"}`;
+      case "final_output":
+        return `最终输出从 ${clipped(left.length ? valueText(left[0]) : "—")} 变为 ${clipped(right.length ? valueText(right[0]) : "—")}`;
+      case "trace_fields":
+        return `Trace 字段 ${changesText(paths, left, right) || "发生变化"}`;
+      case "missing_trace":
+        return "缺少可读取的 Trace";
+      case "no_visible_divergence":
+        return "轨迹、最终输出和 Trace 字段一致；失败来自相同数据上的规则或运行完整性问题";
+      default:
+        return data.reason || "未记录差异原因";
+    }
+  }
+  function reasonText(reason) {
+    const text = String(reason ?? "");
+    const roleNames = { improvement: "改善集", regression: "回归集", holdout: "留出集" };
+    const match = text.match(/^(improvement|regression|holdout)(?:\/([^:]+))?: (.+)$/);
+    const role = match ? roleNames[match[1]] : "";
+    const name = match && match[2] ? `/${match[2]}` : "";
+    const detail = match ? match[3] : text;
+    const prefix = role ? `${role}${name}：` : "";
+    const exact = {
+      "candidate has hard failures": "候选存在硬失败",
+      "hard pass rate decreased": "硬通过率下降",
+      "soft warnings exceeded the allowed increase": "软告警超过允许增幅",
+      "hard pass rate exceeded the allowed drop": "硬通过率超过允许跌幅",
+      "exceeded maximum regression": "超过允许的最大退化",
+      "required metric is missing": "必需指标缺失",
+      "hard pass rate is below the configured minimum": "硬通过率低于配置下限",
+      "configured scenario is missing": "配置的场景缺失",
+      "candidate satisfied all configured gates": "候选满足全部配置门禁",
+      "target identity or version does not match candidate manifest": "目标身份或版本与候选清单不一致",
+      "candidate produced no measurable improvement": "候选没有产生可测量的改善",
+      "quality gate has no evaluated cases": "质量门禁没有可评测的用例",
+      "hard pass rate increased": "硬通过率提升",
+      "soft warnings decreased": "软告警减少",
+      "minimum improvement not met": "未达到最低改善幅度"
+    };
+    if (exact[detail]) return prefix + exact[detail];
+    if (detail.startsWith("objective improved: ")) {
+      return `目标改善：${detail.slice("objective improved: ".length)}`;
+    }
+    let found = detail.match(/^(\d+) regressed cases exceed the maximum (\d+)$/);
+    if (found) return `${prefix}回归用例 ${found[1]} 条，超过上限 ${found[2]} 条`;
+    found = detail.match(/^(\d+) critical regressions exceed the maximum (\d+)$/);
+    if (found) return `${prefix}关键回归 ${found[1]} 条，超过上限 ${found[2]} 条`;
+    found = detail.match(/^quality gate needs at least (\d+) cases, found (\d+)$/);
+    if (found) return `${prefix}质量门禁至少需要 ${found[1]} 条用例，实际 ${found[2]} 条`;
+    found = detail.match(/^scenario has fewer than (\d+) cases$/);
+    if (found) return `${prefix}场景样本少于 ${found[1]} 条`;
+    found = detail.match(/^hard pass rate ([\d.]+%) is below the minimum ([\d.]+%)$/);
+    if (found) return `${prefix}硬通过率 ${found[1]} 低于下限 ${found[2]}`;
+    found = detail.match(/^([\d.]+) exceeds the absolute maximum ([\d.]+)$/);
+    if (found) return `${prefix}指标 ${found[1]} 超过绝对上限 ${found[2]}`;
+    return text;
+  }
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);

@@ -63,6 +63,59 @@ jobs:
             --store .assay/store \
             --output .assay/runs \
             --max-rounds 1 --max-candidates-per-round 2 --loop-id ci-loop
+      - name: Exercise first-error diagnosis
+        shell: bash
+        run: |
+          set +e
+          java -jar target/assay.jar evolve \
+            --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
+            --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Regressed' \
+            --candidate examples/evolution.regressed.candidate.json \
+            --policy examples/evolution.regressed.policy.json \
+            --improvement examples/evolution.improvement.jsonl \
+            --regression examples/evolution.regression.jsonl \
+            --holdout examples/evolution.holdout.jsonl \
+            --store .assay/store \
+            --output .assay/runs \
+            --experiment-id ci-regression
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -q '"decision": "rollback"' .assay/runs/ci-regression/evolution.json
+          grep -q '"category": "step_fields"' .assay/runs/ci-regression/evolution.json
+      - name: Exercise external trace ingestion
+        shell: bash
+        run: |
+          set +e
+          java -jar target/assay.jar evolve \
+            --baseline-adapter examples/trace-candidate.example.json \
+            --candidate-adapter examples/trace-regressed.example.json \
+            --candidate examples/evolution.trace-regressed.candidate.json \
+            --policy examples/evolution.regressed.policy.json \
+            --improvement examples/evolution.improvement.jsonl \
+            --regression examples/evolution.regression.jsonl \
+            --holdout examples/evolution.holdout.jsonl \
+            --source offline \
+            --store .assay/store \
+            --output .assay/runs \
+            --experiment-id ci-trace
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -q '"category": "step_fields"' .assay/runs/ci-trace/evolution.json
+      - name: Publish quality summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Assay quality summary"
+            for report in .assay/runs/*/evolution_report.md; do
+              [ -f "$report" ] || continue
+              echo ""
+              echo "### ${report#.assay/runs/}"
+              cat "$report"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,0 +1,9 @@
+{
+  "candidate_id": "intent-router-trace-regressed",
+  "target_type": "skill",
+  "target_id": "intent-router",
+  "baseline_version": "2",
+  "candidate_version": "3",
+  "change_type": "skill",
+  "summary": "An exported trace whose holdout support request was routed to GENERAL"
+}

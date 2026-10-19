@@ -65,12 +65,52 @@ class EvolutionConfigurationTest {
     }
 
     @Test
+    void validatesQualityGatesAndAbsoluteCeilings() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new MetricObjective("latency", "latency_ms", "minimize", "p95", 0, 0, true, -1.0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QualityGate(List.of("holdout"), null, null, null, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QualityGate(List.of("typo"), 0.9, null, null, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QualityGate(List.of("holdout"), 1.1, null, null, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QualityGate(List.of("holdout"), 0.9, -1, null, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QualityGate(List.of("holdout"), 0.9, null, null, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> EvolutionPolicy.fromDict(Map.of("quality_gates", Map.of())));
+
+        QualityGate gate = QualityGate.fromDict(Map.of(
+                "roles", List.of("holdout"),
+                "minimum_hard_pass_rate", 0.95,
+                "maximum_task_regressions", 0,
+                "maximum_critical_task_regressions", 0,
+                "minimum_samples", 10));
+        assertEquals(0.95, gate.minimumHardPassRate());
+        assertEquals(0, gate.maximumTaskRegressions());
+        assertEquals(10, gate.minimumSamples());
+
+        MetricObjective p95 = MetricObjective.fromDict(Map.of(
+                "name", "latency_p95",
+                "metric", "latency_ms",
+                "aggregation", "p95",
+                "maximum", 1200));
+        assertEquals(1200.0, p95.maximum());
+    }
+
+    @Test
     void keepsDefaultsAndValidRoundTrips() {
         EvolutionPolicy defaults = new EvolutionPolicy();
         assertEquals(defaults, EvolutionPolicy.fromDict(Map.of()));
         EvolutionPolicy configured = new EvolutionPolicy(List.of(new MetricObjective("quality", "score", 0.1)),
                 List.of(new ScenarioGate("critical")), 0.1);
         assertEquals(configured, EvolutionPolicy.fromDict(Fixtures.asMap(Json.normalize(configured.toJson()))));
+
+        EvolutionPolicy withQualityGate = new EvolutionPolicy(true, false, 0, 0, 0, true, List.of(), List.of(),
+                List.of(new QualityGate(List.of("holdout"), 0.95, 0, 0, 10)));
+        assertEquals(withQualityGate,
+                EvolutionPolicy.fromDict(Fixtures.asMap(Json.normalize(withQualityGate.toJson()))));
     }
 
     @Test

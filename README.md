@@ -107,6 +107,62 @@ macOS / Linux 将 `.\assay.cmd` 换为 `sh ./assay`。启动器会自动构建�
 
 接口必须返回 JSON 对象；当前支持同步 POST 和 `--source online`，不支持 SSE、流式输出或独立异步任务轮询。单次请求和响应读取遵守 `--timeout`（单位为秒，默认 30），响应上限为 8 MiB，重定向不会跟随；HTTP 错误、超时、无效 JSON、缺少响应字段会生成失败证据。只有配置了 CLI `--retries` 才会重试，可能重复调用有副作用的接口。
 
+## 通过轨迹文件评测外部 Agent
+
+如果 Agent 不在本机运行，或需要先离线比较两批导出轨迹，可以完全用 JSON 配置，无需编写 Java 适配器。归一化轨迹就是 `NormalizedTrace` 的 JSON 投影：
+
+```json
+{
+  "version": "2026-10-19",
+  "runs": [
+    {
+      "case_id": "CASE-001",
+      "trace": {
+        "trace_id": "trace-001",
+        "final_output": {"answer": "..."},
+        "events": [
+          {"module": "Planner", "action": "plan", "status": "ok", "duration_ms": 12, "fields": {}},
+          {"module": "Tool", "action": "query_order", "status": "ok", "duration_ms": 8, "fields": {"order_id": "A1001"}}
+        ],
+        "fields": {"route": "SUPPORT"}
+      }
+    }
+  ]
+}
+```
+
+对应配置：
+
+```json
+{
+  "type": "trace_file",
+  "runs": "exports/baseline.json",
+  "format": "normalized",
+  "target_type": "skill",
+  "target_id": "intent-router",
+  "target_version": "1",
+  "hard_gates": [{"name": "route", "actual": "fields.route", "operator": "eq", "expected": "route"}]
+}
+```
+
+运行时使用 `--source offline`：
+
+```bash
+java -jar target/assay.jar evolve \
+  --baseline-adapter examples/trace-candidate.example.json \
+  --candidate-adapter examples/trace-regressed.example.json \
+  --candidate examples/evolution.trace-regressed.candidate.json \
+  --policy examples/evolution.regressed.policy.json \
+  --improvement examples/evolution.improvement.jsonl \
+  --regression examples/evolution.regression.jsonl \
+  --holdout examples/evolution.holdout.jsonl \
+  --source offline
+```
+
+该示例会返回 `rollback`，并指出第 2 步 `IntentRouter/route` 的 `fields.route` 从 `SUPPORT` 变为 `GENERAL`。单套评测同样可用 `assay run --adapter <配置> --cases <测试集> --source offline`。
+
+`format` 设为 `openinference` 时读取 Phoenix/OTel 导出：支持扁平 attributes、OTLP 属性数组、`traces[].spans` 和 `resourceSpans[].scopeSpans[].spans`。用 `assay.case_id` 属性关联用例，必要时回退到 `trajectiq.task_id`。`runs` 相对当前工作目录解析；`target_type`、`target_id`、`target_version` 会覆盖文件中的目标身份，`evolve` 的版本匹配依赖它们。用例缺少导出轨迹时会记录为硬失败，不会静默跳过。
+
 ## 高级接入：领域项目提供四项能力
 
 需要 SDK、本地函数、离线 Trace 或特殊协议时，领域项目实现一个 Java 适配器，回答四个问题：
@@ -239,7 +295,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 - `review_queue.jsonl` —— 等待人工确认的报告。
 - `few_shot_candidates.jsonl` —— 通过全部门禁和质量检查的成功路径候选。
 
-每次 `evolve` 额外生成 `evolution.json` 和 `evolution_report.md`；每次 `evolve-auto` 额外生成 `auto_evolution.json` 和 `auto_evolution_report.md`；`audit-scope` 生成 `scope_audit.json`、`report.md` 和完整的 `diff.patch`。
+每次 `evolve` 额外生成 `evolution.json` 和 `evolution_report.md`；`evolution.json` 的 `comparisons.*.case_transitions` 保存逐用例状态迁移和首错证据，`rule_deltas` 保存规则通过率变化；每次 `evolve-auto` 额外生成 `auto_evolution.json` 和 `auto_evolution_report.md`；`audit-scope` 生成 `scope_audit.json`、`report.md` 和完整的 `diff.patch`。
 
 ## 架构
 
@@ -258,17 +314,17 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 |---|---|
 | 领域适配 | `engine.ProjectAdapterFactory`、`engine.AdapterLoader`、`model.ProjectAdapter` |
 | 数据模型 | `model.*`（不可变 `record`，`CaseResult` 可变） |
-| 评测规则 | `rules.Rules`、`rules.ValueOps` |
+| 评测规则 | `rules.Rules`、`rules.ValueOps`、`rules.RuleConfig` |
 | 评测执行 | `engine.EvaluationEngine`、`engine.CaseLoader` |
 | 结果存储 | `store.Results`（接口）、`store.ResultStore` |
 | 报告产物 | `report.Reporting`、`report.Fmt`、`audit.ScopeAuditReport` |
 | 可选 LLM | `llm.OpenAiCompatibleReviewer`、`llm.OpenAiCompatibleTextEvolver` |
-| 版本演化 | `evolve.EvolutionEngine` |
+| 版本演化 | `evolve.EvolutionEngine`、`evolve.TraceDiff` |
 | 自动演化 | `autoevolve.AutoEvolutionLoop`、`workspace.TextArtifactWorkspace` |
 | 测试集选择 | `diff.DiffAnalysis`、`selection.TestSelectionService` |
 | 范围审计 | `audit.ScopeAudit` |
 | 进程与容器 | `process.AgentProcessRunner`、`process.ContainerRunner` |
-| OpenAI Trace | `opentrace.OpenAiTrace`、`opentrace.OpenAiTraceProcessor` |
+| 轨迹接入 | `opentrace.OpenAiTrace`、`opentrace.OpenAiTraceProcessor`、`trace.TraceFileAdapter` |
 | 评测指标 | `metrics.EvaluatorMetrics`、`review.ReviewSamples` |
 
 核心规则不依赖命令行、存储或 LLM；LLM 只产出语义分析、疑似模块、修改建议和 few-shot 候选，永远不参与硬门禁判定。
@@ -322,7 +378,27 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 - `regression` —— 已经确认、不能复发的历史能力。
 - `holdout` —— 候选生成过程没有使用的留出样本。
 
-策略文件可以约束 regression、holdout 和数值目标。目标可直接使用 `hard_pass`、`soft_warning_count`、`latency_ms`、`steps`、`llm_calls`、`input_tokens`、`output_tokens`、`total_tokens` 和 `cost_usd`，也可以从标准结果路径读取业务字段；支持 `mean`、`sum`、`min`、`max` 聚合，以及最大允许退化和最低改善幅度。
+策略文件可以约束 regression、holdout 和数值目标。目标可直接使用 `hard_pass`、`soft_warning_count`、`latency_ms`、`steps`、`llm_calls`、`input_tokens`、`output_tokens`、`total_tokens` 和 `cost_usd`，也可以从标准结果路径读取业务字段；支持 `mean`、`sum`、`min`、`max`、`p50`、`p95`、`p99` 聚合，以及最大允许退化和最低改善幅度。`maximum` 是候选自身的绝对上限，与基线无关。
+
+`quality_gates` 补充绝对门禁：按角色设置最低硬通过率、最大回归条数、最大关键回归条数和最小样本数。它不替代 `objectives` 的相对退化判断，而是回答“这个候选本身是否可接受”。例如：
+
+```json
+{
+  "quality_gates": [
+    {
+      "roles": ["regression", "holdout"],
+      "minimum_hard_pass_rate": 0.95,
+      "maximum_task_regressions": 0,
+      "maximum_critical_task_regressions": 0,
+      "minimum_samples": 10
+    }
+  ]
+}
+```
+
+完整示例见 `examples/evolution.quality-policy.example.json`。
+
+`rule_stats` 汇总每条命名规则在当前运行的通过率，`rule_deltas` 给出基线到候选的变化；工具选择、参数校验、答案覆盖等规则因此可以统一比较，不需要框架硬编码工具名。`evolution_report.md` 和 Dashboard 都会展示规则通过率与有效样本数。
 
 策略字段采用严格校验：数值必须有限、比例必须在 `[0,1]`，计数必须是范围内的整数，布尔值必须使用 JSON 布尔类型。显式填写的非法值不会退回默认值；Java 构造器执行相同校验，同名目标也会被拒绝。
 
@@ -337,6 +413,23 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 - `rollback` —— 候选破坏 regression、holdout、版本身份或必要指标。
 
 每次演化保存完整的基线与候选运行结果、`evolution.json`、`evolution_report.md` 和存储中的审计记录。
+
+### 用例级回归与首错定位
+
+`evolve` 不只比较聚合指标，还会把每条用例标记为稳定通过、回归、恢复或持续失败。回归用例会定位第一处可见差异：步骤增删、模块/动作变化、字段变化、步骤报错、最终输出或 Trace 字段变化。诊断直接读取已经评测过的 Trace，不重跑 Agent；每次运行都会变化的字段可以通过用例 `metadata.trace_diff_ignore` 忽略（默认已忽略 span id、父 span id 和时间字段）。
+
+```bash
+java -jar target/assay.jar evolve \
+  --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
+  --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Regressed' \
+  --candidate examples/evolution.regressed.candidate.json \
+  --policy examples/evolution.regressed.policy.json \
+  --improvement examples/evolution.improvement.jsonl \
+  --regression examples/evolution.regression.jsonl \
+  --holdout examples/evolution.holdout.jsonl
+```
+
+该候选会返回 `rollback`，`evolution_report.md` 会指出 `EVOLVE-HOLDOUT-001` 的第 2 步 `IntentRouter/route` 字段从 `SUPPORT` 变为 `GENERAL`；Dashboard 的版本演化页也会展示同样的证据。用例在 `metadata` 中设置 `"critical": true` 后，回归清单会单独标记关键用例。
 
 ### 文本型自动演化
 
@@ -399,7 +492,9 @@ mvn -q test
 - **四层规则** —— 结构、行为、一致性、隐式反馈，以及规则比较的边界语义。
 - **运行完整性与恢复** —— 空测试集与重复 case id 在建运行前就被拒绝；数据集、版本身份或执行配置变化会拒绝复用；批次写入被打断后重放未提交的那一批；截断尾部、UTF-8 半字符、缺少换行与再次中断的恢复；中间日志损坏和失败追加不会生成虚假结果；重复 trace id 落为硬失败且不重复记数。
 - **并发** —— 跨进程文件锁（测试会真的启动第二个 JVM 争抢同一把锁）、两个进程并发写不同运行不丢数据、适配器的并发上限。
-- **演化** —— accept / reject / rollback 三类决策、场景门禁、严格配置校验、目标缺值与数值溢出、真实零值和缺失数据的区分、指标覆盖率。
+- **演化** —— accept / reject / rollback 三类决策、场景门禁、绝对质量门禁、回归条数与关键回归、规则通过率、P95 聚合、严格配置校验、目标缺值与数值溢出、真实零值和缺失数据的区分、指标覆盖率。
+- **用例级诊断** —— LCS 步骤对齐、插删步骤不级联、字段/答案/Trace 字段差异、易变字段忽略、缺失 Trace、失败聚类。
+- **外部轨迹** —— 归一化轨迹、OpenInference 扁平属性与 OTLP 数组、Phoenix `traces` 包装、缺失 case 硬失败、目标身份覆盖。
 - **自动演化** —— 时间与调用预算、可重试失败重试一次、破坏性候选回退、检查点续跑复用已落盘候选、候选目录提交失败与遗留目录的恢复、Windows 盘符和文件流路径的拒绝。
 - **进程与容器** —— 超时终止整棵进程树（断言孙进程确实消失）、输出上限与截断标记、容器命令的安全参数。
 - **测试集选择** —— 确定性规则的最低档位、AI 只能提高不能降低、本地/远程输入边界。
@@ -412,4 +507,4 @@ mvn -q test
 - **更强的隔离**：把候选执行换成容器 Runner，框架侧不用改。
 - **换存储**：Java 调用方可注入自己的 `Results` 实现；当前 CLI 的 `--store` 指定本地存储目录。
 - **换 LLM 供应商**：`OpenAiCompatibleReviewer` 走 OpenAI 兼容协议；换协议时实现 `LlmReviewer` 与 `TestSelectionService.JsonReviewer`。
-- **接更多 Trace 来源**：`NormalizedTrace` 是稳定契约，任何能产出它的采集方式都可以接进来。
+- **接更多 Trace 来源**：`NormalizedTrace` 是稳定契约；`trace_file` 已支持归一化 JSON 和 OpenInference/OTLP 导出，其他采集方式实现 `TraceReader` 即可。

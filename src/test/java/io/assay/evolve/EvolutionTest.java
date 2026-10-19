@@ -11,6 +11,7 @@ import io.assay.model.EvolutionCandidate;
 import io.assay.model.EvolutionPolicy;
 import io.assay.model.MetricObjective;
 import io.assay.model.NormalizedTrace;
+import io.assay.model.QualityGate;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.model.ScenarioGate;
@@ -57,7 +58,11 @@ class EvolutionTest {
                     return new NormalizedTrace(
                             Fixtures.str(values.get("trace_id")),
                             Map.of("route", values.get("route")),
-                            List.of(new TraceEvent("Router", "route", 2)),
+                            List.of(
+                                    new TraceEvent("Router", "plan", 1),
+                                    new TraceEvent(
+                                            "Router", "route", "ok", 2, null,
+                                            Map.of("route", values.get("route")))),
                             fields,
                             Map.of(),
                             "skill",
@@ -111,7 +116,8 @@ class EvolutionTest {
                                         "baseline_route", "SUPPORT",
                                         "candidate_route", "SUPPORT",
                                         "baseline_quality", 0.8,
-                                        "candidate_quality", 0.8),
+                                        "candidate_quality", 0.8,
+                                        "critical", true),
                                 "holdout")));
         return datasets;
     }
@@ -361,6 +367,220 @@ class EvolutionTest {
         assertEquals("reject", result.get("decision"));
         assertEquals(
                 List.of("candidate produced no measurable improvement"), Fixtures.stringsOf(result.get("reasons")));
+    }
+
+    /** A rollback should name the case and the first step that diverged, not only the aggregate drop. */
+    @Test
+    void recordsARegressedCaseWithItsFirstDivergence(@TempDir Path root) {
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result =
+                    new EvolutionEngine(
+                                    new EvaluationEngine(adapter("1", false, false), store),
+                                    new EvaluationEngine(adapter("2", true, true), store),
+                                    qualityPolicy())
+                            .run(change(), evolutionCases(), "online", "diagnosis", false);
+        }
+        Reporting.writeEvolutionArtifacts(result, root.resolve("out"));
+
+        Map<String, Object> holdoutComparison =
+                Fixtures.asMap(Fixtures.asMap(result.get("comparisons")).get("holdout"));
+        Map<String, Object> transitions = Fixtures.asMap(holdoutComparison.get("case_transitions"));
+        assertEquals(1, Fixtures.intOf(transitions.get("regressed_count")));
+        assertEquals(0, Fixtures.intOf(transitions.get("recovered_count")));
+
+        Map<String, Object> regression = Fixtures.mapsOf(transitions.get("regressed")).get(0);
+        assertEquals("HOLDOUT", regression.get("case_id"));
+        assertEquals(true, regression.get("critical"));
+        Map<String, Object> first = Fixtures.asMap(regression.get("first_divergence"));
+        assertEquals("step_fields", first.get("category"));
+        assertEquals(2, Fixtures.intOf(first.get("step")));
+        assertTrue(Fixtures.stringsOf(first.get("changed_paths")).contains("route"));
+        assertEquals("SUPPORT", Fixtures.str(Fixtures.asList(first.get("baseline_values")).get(0)));
+        assertEquals("BROKEN", Fixtures.str(Fixtures.asList(first.get("candidate_values")).get(0)));
+
+        Map<String, Object> routeDelta =
+                Fixtures.asMap(Fixtures.asMap(holdoutComparison.get("rule_deltas")).get("route"));
+        assertEquals(1.0, Fixtures.doubleOf(Fixtures.asMap(routeDelta.get("baseline")).get("pass_rate")), 1e-9);
+        assertEquals(0.0, Fixtures.doubleOf(Fixtures.asMap(routeDelta.get("candidate")).get("pass_rate")), 1e-9);
+        assertEquals(-1.0, Fixtures.doubleOf(routeDelta.get("pass_rate_delta")), 1e-9);
+
+        String report = AtomicFiles.readText(root.resolve("out/evolution_report.md"));
+        assertTrue(report.contains("Regressions and first divergence"), report);
+        assertTrue(report.contains("HOLDOUT"), report);
+        assertTrue(report.contains("step_fields"), report);
+        assertTrue(report.contains("Rule pass rates"), report);
+        assertTrue(report.contains("| holdout | `route` | hard | 100.0% | 0.0% | -100.0% |"), report);
+        assertTrue(report.contains("P95 latency samples"), report);
+    }
+
+    @Test
+    void ruleStatsAggregatePassRatesAcrossChecks() {
+        Map<String, Object> summary = Map.of(
+                "results", List.of(
+                        Map.of("hard_pass", true, "checks", List.of(
+                                Map.of("name", "route", "level", "hard", "passed", true)),
+                                "trace", Map.of("events", List.of())),
+                        Map.of("hard_pass", false, "checks", List.of(
+                                Map.of("name", "route", "level", "hard", "passed", false)),
+                                "trace", Map.of("events", List.of()))),
+                "hard_failures", 1,
+                "soft_warnings", 0);
+
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary, List.of());
+        Map<String, Object> route = Fixtures.asMap(Fixtures.asMap(metrics.get("rule_stats")).get("route"));
+
+        assertEquals(2, Fixtures.intOf(route.get("evaluated")));
+        assertEquals(1, Fixtures.intOf(route.get("passed")));
+        assertEquals(0.5, Fixtures.doubleOf(route.get("pass_rate")), 1e-9);
+        assertEquals(0, Fixtures.intOf(route.get("missing")));
+    }
+
+    @Test
+    void p95UsesLinearInterpolationAndStaysMissingWithoutSamples() {
+        assertEquals(9.55, EvolutionEngine.aggregate(List.of(1.0, 10.0), "p95"), 1e-9);
+        assertEquals(5.0, EvolutionEngine.aggregate(List.of(5.0), "p95"), 1e-9);
+        assertNull(EvolutionEngine.aggregate(List.of(), "p95"));
+        assertEquals(9.55, EvolutionEngine.percentile(List.of(10.0, 1.0), 0.95), 1e-9);
+    }
+
+    /** A candidate can match the baseline and still be unacceptable on its own. */
+    @Test
+    void qualityGateAppliesAnAbsolutePassRateFloor(@TempDir Path root) {
+        Map<String, List<EvalCase>> datasets = evolutionCases();
+        EvalCase regression = datasets.get("regression").get(0);
+        Map<String, Object> metadata = new LinkedHashMap<>(regression.metadata());
+        metadata.put("baseline_route", "OTHER");
+        metadata.put("candidate_route", "OTHER");
+        datasets.put(
+                "regression",
+                List.of(new EvalCase(
+                        regression.caseId(), regression.payload(), regression.expected(),
+                        regression.scenario(), metadata, regression.suite())));
+        EvolutionPolicy policy = new EvolutionPolicy(
+                false,
+                false,
+                0,
+                0,
+                0,
+                false,
+                List.of(),
+                List.of(),
+                List.of(new QualityGate(List.of("regression"), 0.9, null, null, 1)));
+
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result =
+                    new EvolutionEngine(
+                                    new EvaluationEngine(adapter("1", false, false), store),
+                                    new EvaluationEngine(adapter("2", true, false), store),
+                                    policy)
+                            .run(change(), datasets, "online", "absolute-floor", false);
+        }
+
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons"))
+                .contains("regression: hard pass rate 0.0% is below the minimum 90.0%"));
+        Reporting.writeEvolutionArtifacts(result, root.resolve("out"));
+        String report = AtomicFiles.readText(root.resolve("out/evolution_report.md"));
+        assertTrue(report.contains("Configured quality gates"), report);
+        assertTrue(report.contains("90.0%"), report);
+    }
+
+    /** Equal pass rates can hide a swap; the regression count catches it. */
+    @Test
+    void qualityGateCountsRegressedCasesWhenTheRateDoesNotMove(@TempDir Path root) {
+        Map<String, List<EvalCase>> datasets = evolutionCases();
+        EvalCase base = datasets.get("holdout").get(0);
+        List<EvalCase> holdout = new ArrayList<>();
+        Map<String, Object> regressedMetadata = new LinkedHashMap<>(base.metadata());
+        regressedMetadata.put("baseline_route", "GENERAL");
+        regressedMetadata.put("candidate_route", "OTHER");
+        holdout.add(new EvalCase(
+                "SWAP-REGRESSED", base.payload(), Map.of("route", "GENERAL"),
+                base.scenario(), regressedMetadata, "holdout"));
+        Map<String, Object> recoveredMetadata = new LinkedHashMap<>(base.metadata());
+        recoveredMetadata.put("baseline_route", "OTHER");
+        recoveredMetadata.put("candidate_route", "SUPPORT");
+        holdout.add(new EvalCase(
+                "SWAP-RECOVERED", base.payload(), Map.of("route", "SUPPORT"),
+                base.scenario(), recoveredMetadata, "holdout"));
+        datasets.put("holdout", holdout);
+        EvolutionPolicy policy = new EvolutionPolicy(
+                false,
+                false,
+                0,
+                0,
+                0,
+                false,
+                List.of(),
+                List.of(),
+                List.of(new QualityGate(List.of("holdout"), null, 0, null, 2)));
+
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result =
+                    new EvolutionEngine(
+                                    new EvaluationEngine(adapter("1", false, false), store),
+                                    new EvaluationEngine(adapter("2", true, false), store),
+                                    policy)
+                            .run(change(), datasets, "online", "swap-gate", false);
+        }
+        Map<String, Object> transitions = Fixtures.asMap(Fixtures.asMap(
+                Fixtures.asMap(result.get("comparisons")).get("holdout")).get("case_transitions"));
+
+        assertEquals(0.5, Fixtures.doubleOf(Fixtures.asMap(Fixtures.asMap(
+                Fixtures.asMap(result.get("comparisons")).get("holdout")).get("candidate")).get("hard_pass_rate")), 1e-9);
+        assertEquals(1, Fixtures.intOf(transitions.get("regressed_count")));
+        assertEquals(1, Fixtures.intOf(transitions.get("recovered_count")));
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons"))
+                .contains("holdout: 1 regressed cases exceed the maximum 0"));
+    }
+
+    @Test
+    void objectiveMaximumIsAnAbsoluteCeiling(@TempDir Path root) {
+        EvolutionPolicy policy = new EvolutionPolicy(
+                false,
+                false,
+                0,
+                0,
+                0,
+                false,
+                List.of(new MetricObjective("latency_p95", "latency_ms", "minimize", "p95", 0, 0, false, 1200.0)),
+                List.of(),
+                List.of());
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result =
+                    new EvolutionEngine(
+                                    new EvaluationEngine(latencyAdapter("1", 2000), store),
+                                    new EvaluationEngine(latencyAdapter("2", 2000), store),
+                                    policy)
+                            .run(change(), evolutionCases(), "online", "absolute-max", false);
+        }
+
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons"))
+                .contains("improvement/latency_p95: 2000.0 exceeds the absolute maximum 1200.0"));
+    }
+
+    private static ProjectAdapter latencyAdapter(String version, double latency) {
+        return new ProjectAdapter(
+                "latency-" + version,
+                (evalCase, context) -> Map.of("trace_id", context.runId() + "-" + evalCase.caseId()),
+                (handle, evalCase) -> new NormalizedTrace(
+                        Fixtures.str(Fixtures.asMap(handle).get("trace_id")),
+                        "ok",
+                        List.of(new TraceEvent("LLM", "call", latency)),
+                        Map.of("latency_ms", latency),
+                        Map.of(),
+                        "agent",
+                        "latency",
+                        version,
+                        Map.of()),
+                List.of(),
+                List.of());
     }
 
     @Test

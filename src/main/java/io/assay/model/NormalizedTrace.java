@@ -34,6 +34,41 @@ public record NormalizedTrace(
         this(traceId, finalOutput, events, fields, Map.of(), "agent", "default", "unknown", Map.of());
     }
 
+    /**
+     * Reads a trace back from its JSON projection.
+     *
+     * <p>This is the contract external runtimes write to: the same field names {@link #toJson()}
+     * emits are accepted here, so an exported trace can be evaluated without a Java adapter. A blank
+     * target identity falls back to the record defaults instead of remaining an empty string.
+     */
+    public static NormalizedTrace fromDict(Map<String, Object> value) {
+        List<TraceEvent> events = new ArrayList<>();
+        Object rawEvents = value.get("events");
+        if (rawEvents instanceof List<?> rows) {
+            for (Object row : rows) {
+                events.add(TraceEvent.fromDict(EvalCase.asMap(row)));
+            }
+        }
+        return new NormalizedTrace(
+                text(value.get("trace_id")),
+                value.get("final_output"),
+                events,
+                EvalCase.asMap(value.get("fields")),
+                EvalCase.asMap(value.get("feedback")),
+                textOrNull(value.get("target_type")),
+                textOrNull(value.get("target_id")),
+                textOrNull(value.get("target_version")),
+                EvalCase.asMap(value.get("raw")));
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String textOrNull(Object value) {
+        return value == null || String.valueOf(value).isBlank() ? null : String.valueOf(value);
+    }
+
     /** The trace as a plain JSON-shaped mapping, which is what the rule paths are read from. */
     @Override
     public Object toJson() {
