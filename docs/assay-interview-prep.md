@@ -1,7 +1,7 @@
 # Assay 面试准备与简历写法
 
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；211 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；211 项核心 Java 测试通过（1 项按环境跳过）+ 14 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
 > 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
 
@@ -24,7 +24,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 3. **评测**：结构层看 Trace 完整性和硬门禁；行为层看步数、重试、延迟、重复步骤和模块错误；一致性层对高价值节点做多次运行；反馈层把隐式负反馈变成人工复核候选。
 4. **演化**：baseline 和 candidate 在 improvement / regression / holdout 三个数据集上跑同一套用例，按策略输出 accept / reject / rollback。新增了场景门禁、绝对质量门禁、规则通过率、P95 和样本覆盖。
 5. **诊断**：对“基线通过、候选失败”的用例，`TraceDiff` 用 LCS 对齐 `module/action`，定位第一处步骤增删、替换、字段变化、报错或最终输出差异；直接复用已经评测过的 Trace，不重跑 Agent。
-6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；211 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
+6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；211 项核心 Java 测试 + 14 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
 
 ### 1.4 5 分钟 / 白板顺序
 
@@ -109,6 +109,7 @@ Candidate run ┘        │                  │
 - **0.7 门禁与统计**：`QualityGate` 绝对门禁（最低通过率、最大回归数、最大关键回归、最小样本）、`MetricObjective.maximum`、P50/P95/P99、规则通过率 `rule_stats` / `rule_deltas`。
 - **0.8 外部轨迹**：`trace_file` 适配器，支持 normalized、OpenInference、OTLP attribute array、Phoenix `traces` / `resourceSpans`；按 `case_id` 校验覆盖，缺失用例硬失败。
 - **Dashboard**：诊断文案中文化、回归用例统计卡、规则表默认只显示变化、类别 badge 分色、关键用例标记。
+- **Dashboard 趋势**：总览新增最近 7 天硬门禁通过率趋势、每日数据表和按测试集健康表；纯前端聚合，不新增依赖。
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
 - **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
 - **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；1,000 条轻量用例 benchmark（约 1,100 cases/s，非生产容量承诺）。
