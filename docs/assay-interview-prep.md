@@ -331,85 +331,46 @@ Candidate run ┘        │                  │
 
 ## 六、简历写法
 
-> 按你给的参考图风格：项目名 + 时间、技术栈、项目简介、核心内容。
-> 如果项目是独立完成，可以写“独立设计并实现”；如果是团队项目，改成“负责核心模块设计与实现”。
+> 格式：项目名 + 时间、技术栈、项目简介、核心内容；独立完成写“独立设计并实现”，团队项目写“负责核心模块设计与实现”。
 
 ### 6.1 通用版（推荐直接放简历）
 
 ```text
 Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
-技术栈：Java 17、Maven Reactor、JUnit 5、JDBC、Spring Boot Starter、Micrometer、OpenTelemetry、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
+技术栈：Java 17、Maven Reactor、JUnit 5、JDBC、Spring Boot Starter、Micrometer、OpenTelemetry、Docker、GitHub Actions
 
-项目简介：面向 Agent/Skill 发布前的质量验证，解决“改完能不能发、退化在哪一步”的问题。通过适配器把不同 Agent 的 Trace 归一化，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断与 accept/reject/rollback 决策；最终收货权保留给人。
+项目简介：面向 Agent 发布前的质量验证，解决“改完能不能发、退化在哪一步”。通过适配器归一化 Trace，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断和 accept/reject/rollback。
 
 核心内容：
-- 设计领域解耦的 ProjectAdapter 四能力契约（调用、Trace 转换、硬门禁、软质量），支持 HTTP、Java 适配器、离线归一化轨迹和 OpenInference/OTLP 导出，核心零运行时依赖。
-- 实现结构/行为/一致性/反馈四层评测与路径化规则引擎，区分硬门禁与软告警；LLM 只产出非权威建议，不参与发布判定。
-- 实现 baseline/candidate 在 improvement/regression/holdout 三个数据集上的演化决策，加入 scenario gates、绝对质量门禁、关键回归计数、规则通过率与 P50/P95/P99，覆盖小样本和“通过率不变但用例一进一出”的隐藏退化。
-- 实现 TraceDiff 首错定位：基于 LCS 对齐 module/action，识别步骤增删、替换、字段变化、报错和最终输出差异，生成用例状态迁移、失败聚类和可追溯证据，不重跑 Agent。
-- 实现运行完整性：`Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、case 内容哈希、跨进程锁、trace id 唯一性校验；异常退出后可恢复且不混跑。
-- 实现 evolve-auto 沙箱与只读 Dashboard：路径逃逸防护、暂存区/manifest/哈希校验、预算与检查点、进程树终止与容器隔离；Dashboard 支持运行/Trace/规则/演化/审计/发布视图。
-- 将主项目、Spring Boot Starter、Micrometer、OTel 扩展统一到 Maven reactor，父 POM 管理 Java/Spring/Micrometer/OTel 版本，根目录 `mvn test` 一次构建全部模块。
-- 实现零依赖 `EvaluationListener` SPI 与可选 Micrometer/OTel 扩展：run/case/batch 生命周期指标和 span，标签不带 run_id/case_id，listener 异常不影响评测；失败 run 通过 `onRunFailed` 关闭 span；Starter 自动注入。
-- 测试与交付：211 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、JDBC 契约、进程树、容器安全参数、范围审计和外部轨迹；Docker 镜像与 GitHub Actions Windows/Linux 双平台。
+- 设计 ProjectAdapter 四能力契约，支持 HTTP、Java、离线和 OpenInference/OTLP 轨迹，核心零运行时依赖。
+- 实现四层评测、硬/软门禁和三数据集演化决策，覆盖关键回归、小样本和“通过率不变但用例一进一出”的隐藏退化。
+- 实现 LCS 首错定位、用例状态迁移和失败聚类，不重跑 Agent。
+- 实现文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁和 trace id 校验。
+- 实现 evolve-auto 沙箱、只读 Dashboard，以及 EvaluationListener + Micrometer/OTel 可观测性。
+- 用 Maven reactor 统一 app 和三个扩展；211 项核心测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
 
-项目成果：核心零运行时依赖；211 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；1,000 条轻量用例约 1,100 cases/s；示例可稳定复现 rollback 与首错定位。
+项目成果：核心零依赖；示例可复现 rollback 与首错；1,000 条轻量用例约 1,100 cases/s。
 ```
 
-### 6.2 偏 Agent 评测 / 质量岗
+### 6.2 按岗位调整顺序
 
-把顺序调整为：
+- **Agent 评测 / 质量岗**：四层评测与门禁 → 三数据集演化 → TraceDiff → 外部轨迹/可观测性 → 恢复/并发。
+- **Java 工程岗**：Maven reactor/零依赖 → 文件/JDBC 存储与恢复 → 并发/隔离 → 规则与决策 → Listener/Micrometer/OTel → 测试/CI。
 
-1. 四层评测 + 硬/软门禁 + 人工复核。
-2. 三数据集演化 + accept/reject/rollback + 场景/质量门禁。
-3. TraceDiff 首错 + 用例状态迁移 + 失败聚类。
-4. 外部轨迹接入（OpenInference/OTLP）+ EvaluationListener/Micrometer/OTel 可观测性。
-5. 运行完整性 + 恢复 + 并发。
-6. 测试与 CI。
+关键词：
 
-关键词：Agent Evaluation、LLM Observability、Trace Normalization、Release Gate、Regression Diagnosis、Human-in-the-loop、Evaluation Dataset、Golden Set、Holdout、P95、Wilson Interval。
+- 评测：Agent Evaluation、Release Gate、Trace Normalization、Regression Diagnosis、Holdout、P95。
+- Java：Maven Reactor、JDBC、Crash Recovery、File Lock、ClassLoader、JUnit 5。
 
-### 6.3 偏 Java 工程岗
+### 6.3 一行版
 
-把顺序调整为：
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；211 项测试，CI 双平台。”
 
-1. Java 17、Maven reactor（app + starter + metrics + otel）、核心零运行时依赖、适配器类加载。
-2. `Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁。
-3. 有界并发、进程树终止、容器隔离、路径安全。
-4. 规则引擎、决策引擎、TraceDiff（LCS）。
-5. JDK HttpServer + 原生前端、只读 Dashboard、Spring Boot Starter。
-6. `EvaluationListener` SPI + Micrometer 指标 + OTel span、基数/父子关系、失败关闭、异常隔离。
-7. 211 项 JUnit 测试 + 4 项 Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试 + Windows/Linux CI。
+### 6.4 注意事项
 
-关键词：Java 17、Maven Reactor、JDBC、Spring Boot Starter、Micrometer、OpenTelemetry、Observability、Metrics Cardinality、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
-
-### 6.4 更短的一行版（空间不够时用）
-
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；211 项测试，Spring Boot Starter，CI 双平台。”
-
-### 6.5 可观测性 bullet（可直接复制）
-
-**通用版：**
-
-> 设计零依赖 `EvaluationListener` 生命周期 SPI（run/case/batch，默认 no-op、异常隔离），实现可选 Micrometer 扩展，输出失败率、case P95、批量落盘延迟等指标；标签只用 suite/source/status，避免 run_id/case_id 基数爆炸；Starter 自动注入。
-
-**偏平台/可观测版：**
-
-> 为评测引擎建立可观测性：核心 SPI 解耦 run/case/batch 事件，Micrometer 扩展覆盖吞吐、失败率、case P95、存储写入延迟；OTel 扩展覆盖 run/case span 和失败关闭；通过有限标签和 Timer/Histogram 控制基数，接入 Actuator/Prometheus；listener 故障不影响发布判定。
-
-**注意**：现在可以写“Micrometer 指标 + OTel run/case/batch span”，但不要写“全链路 Trace”或“adapter/规则级 span”；细粒度 span 仍是下一步。
-
-### 6.6 Maven Reactor / 工程化 bullet（Java 岗可直接复制）
-
-> 将主项目与 Spring Boot Starter、Micrometer、OTel 扩展重构为 Maven reactor：父 POM 统一 Java/Spring/Micrometer/OTel 版本，`app` 通过 enforcer 禁止引入集成框架，根目录 `mvn test` 一次构建四个代码模块并保持 211 项核心测试全绿。
-
-### 6.7 排版建议
-
-- 放在 MiniCode / Ragent 之后，作为“质量保障/工程化”的差异化项目；如果投 AI 平台/评测岗，可以放第一个。
-- 技术栈只写有把握被追问的：Java 17、JUnit 5、HTTP、JSON、原生 JS、GitHub Actions。
-- 不要写“生产级”“支撑百万级”；这个项目是本地/单机工程，诚实写“零依赖、可移植、可复现”更加分。
-- GitHub 链接可选；如果仓库公开，放上去；如果不公开，删掉。
-- 项目时间按实际填；如果仍在迭代，写“2026.10 - 至今”。
+- 放在 MiniCode / Ragent 之后，作为“质量保障/工程化”的差异化项目；投 AI 平台/评测岗可放第一个。
+- 不写“生产级”“百万级”；这个项目是本地/单机工程，写“零依赖、可移植、可复现”更加分。
+- 技术栈只写有把握被追问的；GitHub 链接可选，项目时间按实际填。
 
 ---
 
