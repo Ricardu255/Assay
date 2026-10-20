@@ -14,8 +14,14 @@ import java.util.Map;
  */
 public interface Results extends AutoCloseable {
 
+    /** A held run lock; closing it releases the lock and its underlying resource. */
+    interface RunLock extends AutoCloseable {
+        @Override
+        void close();
+    }
+
     /** Holds the run's cross-process lock for the duration of a suite execution. */
-    ResultStore.Handle lockRun(String runId);
+    RunLock lockRun(String runId);
 
     void startRun(String runId, String adapter, String suite, String source, Map<String, Object> metadata);
 

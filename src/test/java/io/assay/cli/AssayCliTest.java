@@ -153,6 +153,29 @@ class AssayCliTest {
     }
 
     @Test
+    void runCanUseAJDBCStore(@TempDir Path root) {
+        Path cases = writeCases(root, "smoke.jsonl", List.of(echoCase("C1", "hello agent", "ECHO", "hello")));
+        Path output = root.resolve("runs");
+        String store = "jdbc:h2:mem:" + java.util.UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+
+        int code =
+                AssayCli.run(
+                        new String[] {
+                            "run",
+                            "--adapter", "io.assay.examples.EchoAdapter",
+                            "--suite", "smoke",
+                            "--cases", cases.toString(),
+                            "--store", store,
+                            "--output", output.toString()
+                        });
+
+        assertEquals(0, code);
+        Path runDir = output.resolve(readOnlyRunId(output));
+        assertTrue(Files.isRegularFile(runDir.resolve("results.json")));
+        assertTrue(AtomicFiles.readText(runDir.resolve("report.md")).contains("Agent Evaluation Report"));
+    }
+
+    @Test
     void usageErrorsExitWithTwo(@TempDir Path root) {
         assertEquals(2, AssayCli.run(new String[] {}));
         assertEquals(2, AssayCli.run(new String[] {"no-such-command"}));

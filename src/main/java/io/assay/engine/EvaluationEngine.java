@@ -252,7 +252,7 @@ public final class EvaluationEngine {
             throw new IllegalArgumentException("resume requires a stable run_identity for the adapter and target");
         }
         String effectiveRunId = runId != null ? runId : suite + "-" + shortId();
-        try (ResultStore.Handle ignored = store.lockRun(effectiveRunId)) {
+        try (Results.RunLock ignored = store.lockRun(effectiveRunId)) {
             return runSuiteLocked(cases, suite, source, effectiveRunId, resume, caseManifest);
         }
     }

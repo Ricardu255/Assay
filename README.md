@@ -316,7 +316,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 | 数据模型 | `model.*`（不可变 `record`，`CaseResult` 可变） |
 | 评测规则 | `rules.Rules`、`rules.ValueOps`、`rules.RuleConfig` |
 | 评测执行 | `engine.EvaluationEngine`、`engine.CaseLoader` |
-| 结果存储 | `store.Results`（接口）、`store.ResultStore` |
+| 结果存储 | `store.Results`（接口）、`store.ResultStore`、`store.jdbc.JdbcResultStore`、`store.Stores` |
 | 报告产物 | `report.Reporting`、`report.Fmt`、`audit.ScopeAuditReport` |
 | 可选 LLM | `llm.OpenAiCompatibleReviewer`、`llm.OpenAiCompatibleTextEvolver` |
 | 版本演化 | `evolve.EvolutionEngine`、`evolve.TraceDiff` |
@@ -329,6 +329,8 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 
 核心规则不依赖命令行、存储或 LLM；LLM 只产出语义分析、疑似模块、修改建议和 few-shot 候选，永远不参与硬门禁判定。
 
+崩溃恢复、首错诊断和隔离边界的实现细节、故障矩阵与测试见 [docs/engineering-deep-dive.md](docs/engineering-deep-dive.md)；1,000 条轻量用例的本地基线见 [docs/benchmark.md](docs/benchmark.md)。
+
 ## 存储、恢复与并发
 
 结果按运行分目录保存为 JSON：元数据、case 结果和 case 身份清单各一份。case 结果以 JSONL 追加写入、读取时后写覆盖，语义上等价于 upsert。只有最后一行未写完时才允许恢复，下一次追加前会截断该尾部；完整但缺少换行的记录会补上分隔符，UTF-8 字符写到一半也能恢复。中间损坏或缺少 case 身份的记录会明确报错。运行结束时先压缩结果，再保存最终状态。
@@ -339,7 +341,43 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 
 跨进程互斥用文件锁实现：同一条运行或同一个演化循环在同一时刻只能有一个持有者，第二个持有者会立即失败而不是排队。`evolve-auto` 的检查点（`.assay/workspaces/<loop-id>/checkpoint.json`）原子写入，异常、时间预算或调用预算中止后，可以提高预算或修复外部故障再用同样的参数续跑。
 
-存储层只有 `store.Results` 一个接口，引擎只依赖它：想换成 JDBC / SQLite 或对象存储，另写一个实现即可，调用方不用改。
+存储层只有 `store.Results` 一个接口，引擎只依赖它。默认实现是文件存储；需要数据库时可以用 `JdbcResultStore`，`--store` 传入 `jdbc:` URL 即可切换：
+
+```bash
+# 以 H2 为例；驱动不在框架 jar 内，需要自己放到 classpath
+java -cp "target/assay.jar:drivers/h2-2.2.224.jar" io.assay.cli.AssayCli run \
+  --adapter io.assay.examples.EchoAdapter \
+  --suite smoke \
+  --cases examples/cases.example.jsonl \
+  --store "jdbc:h2:./.assay/assay-db" \
+  --output .assay/runs
+```
+
+Windows 的 classpath 分隔符是 `;`。数据库凭据可通过 `ASSAY_DB_USER` / `ASSAY_DB_PASSWORD` 环境变量提供；表结构会在首次打开时自动创建。JDBC 存储用 `assay_lock` 表实现跨进程 run 锁，如果进程在持有锁时崩溃，需要人工清理残留的锁行（或删库重建测试库）——这是当前实现的已知边界，不是自动 TTL。
+
+### Spring Boot Starter（可选）
+
+`extensions/assay-spring-boot-starter` 提供 Spring Boot 自动配置，不改变核心的零依赖设计：
+
+```yaml
+assay:
+  store:
+    type: file        # file | jdbc
+    path: .assay/store
+  workers: 8
+  retries: 0
+  timeout-seconds: 30
+  collect-few-shot: false
+```
+
+它会自动装配 `Results`，并在存在 `ProjectAdapter` bean 时装配 `EvaluationEngine`。选择 `jdbc` 时需要提供一个 `DataSource` bean。构建方式：
+
+```bash
+mvn -q -DskipTests install
+mvn -q -f extensions/assay-spring-boot-starter/pom.xml test
+```
+
+完整说明见 [extensions/assay-spring-boot-starter/README.md](extensions/assay-spring-boot-starter/README.md)。
 
 ## 测试集选择
 

@@ -1,0 +1,6 @@
+.git
+.assay
+target
+docs
+*.md
+!README.md

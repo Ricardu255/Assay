@@ -92,7 +92,7 @@ public final class ResultStore implements Results {
     }
 
     /** Auto-closeable wrapper so callers can use try-with-resources. */
-    public static final class Handle implements AutoCloseable {
+    public static final class Handle implements Results.RunLock {
 
         private final ExclusiveFileLock lock;
 

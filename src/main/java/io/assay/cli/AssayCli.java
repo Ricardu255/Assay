@@ -21,7 +21,8 @@ import io.assay.model.TestSelection;
 import io.assay.report.Reporting;
 import io.assay.review.ReviewSamples;
 import io.assay.selection.TestSelectionService;
-import io.assay.store.ResultStore;
+import io.assay.store.Results;
+import io.assay.store.Stores;
 import io.assay.support.AtomicFiles;
 import io.assay.workspace.TextArtifactWorkspace;
 import io.assay.web.DashboardServer;
@@ -275,7 +276,7 @@ public final class AssayCli {
     }
 
     private static EvaluationEngine engineFor(
-            CommandLine.Namespace args, ResultStore store, String adapterRef, String adapterClass) {
+            CommandLine.Namespace args, Results store, String adapterRef, String adapterClass) {
         ProjectAdapter adapter = AdapterLoader.loadProjectAdapter(adapterRef, adapterClass);
         return new EvaluationEngine(
                 adapter,
@@ -289,7 +290,7 @@ public final class AssayCli {
     }
 
     private static int runSuite(CommandLine.Namespace args) {
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             EvaluationEngine engine = engineFor(args, store, args.string("adapter"), args.string("adapter-class"));
             List<EvalCase> cases = CaseLoader.loadCases(args.path("cases"), args.string("suite"));
             Map<String, Object> summary =
@@ -384,9 +385,8 @@ public final class AssayCli {
                     }
                 }
                 if (!available.isEmpty()) {
-                    try (ResultStore store =
-                            new ResultStore(
-                                    args.provided("store") ? args.path("store") : output.resolve("store"))) {
+                    try (Results store = Stores.open(
+                            args.provided("store") ? args.string("store") : output.resolve("store").toString())) {
                         EvaluationEngine engine =
                                 new EvaluationEngine(
                                         AdapterLoader.loadProjectAdapter(args.string("adapter"), args.string("adapter-class")),
@@ -507,7 +507,7 @@ public final class AssayCli {
             suites.add(new EvaluationEngine.SuiteCases("full", CaseLoader.loadCases(args.path("full"), "full")));
         }
         Map<String, Object> release;
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             release = engineFor(args, store, args.string("adapter"), args.string("adapter-class"))
                     .runRelease(suites, args.string("source"), args.string("release-id"));
         }
@@ -533,7 +533,7 @@ public final class AssayCli {
         datasets.put("holdout", CaseLoader.loadCases(args.path("holdout"), "holdout"));
         EvolutionCandidate change = EvolutionEngine.loadCandidate(args.path("candidate"));
         Map<String, Object> result;
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             result =
                     new EvolutionEngine(
                                     engineFor(
@@ -572,7 +572,7 @@ public final class AssayCli {
         AutoEvolutionAdapter adapter =
                 AdapterLoader.loadAutoEvolutionAdapter(args.string("auto-adapter"), args.string("adapter-class"));
         Map<String, Object> result;
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             result =
                     new AutoEvolutionLoop(
                                     store,
@@ -617,7 +617,7 @@ public final class AssayCli {
     }
 
     private static int review(CommandLine.Namespace args) {
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             store.saveReview(
                     args.string("run-id"), args.string("case-id"), args.string("decision"), args.string("conclusion"));
         }
@@ -629,7 +629,7 @@ public final class AssayCli {
         String kind = args.string("kind");
         String decision = "regression".equals(kind) ? "confirmed_badcase" : "accepted";
         List<Map<String, Object>> results;
-        try (ResultStore store = new ResultStore(args.path("store"))) {
+        try (Results store = Stores.open(args.string("store"))) {
             results = store.listReviewedResults(decision);
         }
         List<Map<String, Object>> rows = new ArrayList<>();
