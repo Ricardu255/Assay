@@ -103,6 +103,20 @@ Candidate run ┘        │                  │
 - `RunIntegrityTest`：空 suite/重复 case、resume 变更、批次重放、版本身份、重复 trace id。
 - `ConcurrencySafetyTest`：真实第二 JVM 抢锁、两进程写不同 run、并发上限。
 
+### 2.8 JDBC 存储：同一套语义的第二个实现
+
+`Results` 不是文件存储的别名：它有 `RunLock` 抽象、run/case/manifest/review/evolution 五类操作。`JdbcResultStore` 用同一套语义实现：
+
+- `assay_run` / `assay_case` / `assay_case_manifest` / `assay_review` / `assay_evolution` / `assay_lock`。
+- `saveCases` 批量 upsert 在一个事务里；失败整体回滚。
+- `startRun(resume=true)` 校验 run 身份和 manifest；缺失、变更、legacy run 都拒绝。
+- `addCaseCheck` 用 `SELECT ... FOR UPDATE` 读改写。
+- `lockRun` 插入 `assay_lock` 行做 run 级互斥；进程崩溃会留下锁行，需要人工清理（已知边界，没有 TTL）。
+
+取舍：核心仍零运行时依赖，JDBC driver 由使用方提供；schema 自动创建，没有迁移框架；`text/boolean/timestamp` 是便携子集，生产要按数据库类型和锁超时验证。
+
+测试：`JdbcResultStoreTest` 5 项 + CLI JDBC 测试 1 项；实际用 H2 跑过完整 `run`。
+
 ---
 
 ## 三、首错诊断：LCS + 字段证据

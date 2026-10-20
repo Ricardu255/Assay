@@ -1,9 +1,9 @@
 # Assay 面试准备与简历写法
 
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven、零运行时依赖；75 个主代码文件、约 1.2 万行主代码、30 个测试文件、约 4,800 行测试；202 项 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven、核心零运行时依赖；77 个主代码文件、约 1.29 万行主代码、31 个测试文件、约 4,900 行测试；208 项 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 3 项 Spring Boot Starter 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
-> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是三块代码级深挖（TraceDiff / 门禁 / 恢复），用于应对“再往下讲一点”的追问。
+> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter），用于应对“再往下讲一点”的追问。
 
 ---
 
@@ -15,7 +15,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 
 ### 1.2 30 秒口述版
 
-“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、零运行时依赖，202 项测试，Windows/Linux CI 都跑通。”
+“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，208 项测试，Windows/Linux CI 都跑通。”
 
 ### 1.3 2 分钟口述版
 
@@ -24,7 +24,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 3. **评测**：结构层看 Trace 完整性和硬门禁；行为层看步数、重试、延迟、重复步骤和模块错误；一致性层对高价值节点做多次运行；反馈层把隐式负反馈变成人工复核候选。
 4. **演化**：baseline 和 candidate 在 improvement / regression / holdout 三个数据集上跑同一套用例，按策略输出 accept / reject / rollback。新增了场景门禁、绝对质量门禁、规则通过率、P95 和样本覆盖。
 5. **诊断**：对“基线通过、候选失败”的用例，`TraceDiff` 用 LCS 对齐 `module/action`，定位第一处步骤增删、替换、字段变化、报错或最终输出差异；直接复用已经评测过的 Trace，不重跑 Agent。
-6. **结果**：零运行时依赖；202 项 Java 测试 + 10 项 Node 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
+6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；208 项 Java 测试 + 10 项 Node 测试 + 3 项 Spring Boot Starter 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
 
 ### 1.4 5 分钟 / 白板顺序
 
@@ -93,7 +93,8 @@ Candidate run ┘        │                  │
 |---|---|---|
 | 核心零运行时依赖 | 可移植、易部署、无供应链负担 | JSON、HTTP Server、存储都要自己写，测试量更大 |
 | `ProjectAdapter` 四能力契约 | 领域解耦，不绑定 LangChain/OTel/厂商 | 适配器需要自己做 Trace 归一化 |
-| 文件存储 + `Results` 接口 | 单机零依赖、断点恢复简单 | 没有分布式锁和水平扩展；换 JDBC 需另写实现 |
+| `Results` 接口 + 文件/JDBC 双实现 | 单机零依赖、断点恢复简单；需要数据库时可切换 | JDBC schema 需自己迁移；锁/事务语义要按数据库验证 |
+| 可选 Spring Boot Starter | 企业集成友好，不污染核心 | Starter 是独立扩展，需要额外构建/发布 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
 | 诊断只做“第一处可见差异” | 可解释、可测试、不重跑 Agent | 不是因果根因，非确定性轨迹可能误报 |
 | 只读 Dashboard | 安全、无需构建、报告不可被界面改写 | 没有在线编辑和多人协作 |
@@ -107,6 +108,9 @@ Candidate run ┘        │                  │
 - **0.7 门禁与统计**：`QualityGate` 绝对门禁（最低通过率、最大回归数、最大关键回归、最小样本）、`MetricObjective.maximum`、P50/P95/P99、规则通过率 `rule_stats` / `rule_deltas`。
 - **0.8 外部轨迹**：`trace_file` 适配器，支持 normalized、OpenInference、OTLP attribute array、Phoenix `traces` / `resourceSpans`；按 `case_id` 校验覆盖，缺失用例硬失败。
 - **Dashboard**：诊断文案中文化、回归用例统计卡、规则表默认只显示变化、类别 badge 分色、关键用例标记。
+- **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
+- **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
+- **交付**：`Dockerfile`、CI starter 测试/镜像构建；1,000 条轻量用例 benchmark（约 1,100 cases/s，非生产容量承诺）。
 
 ---
 
@@ -278,10 +282,11 @@ Candidate run ┘        │                  │
 - 展开：原生 HTML/CSS/JS + 主题变量；`dashboard-core.js` 放校验、diff 解析、诊断文案等纯函数，`node --test` 覆盖；Java 端 `DashboardServerTest` 覆盖路由和产物读取；支持深浅色、键盘导航、URL 状态恢复。
 - 追问：组件复用怎么办？答：当前页面规模不需要组件框架；如果继续扩展，可以再引入构建链。
 
-**G2. 202 项测试怎么组织？最有价值的是哪些？**
+**G2. 208 项测试怎么组织？最有价值的是哪些？**
 
 - 一句话：重点测失败模式，不是只测 happy path。
-- 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、Dashboard。最有价值的是恢复、并发、进程树、路径安全和诊断边界。
+- 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界。
+- 追加：Spring Boot Starter 另有 3 项 `ApplicationContextRunner` 测试，验证文件/JDBC 自动配置和“没有 ProjectAdapter 就不装配 Engine”。
 
 ### H. 取舍与反思
 
@@ -331,7 +336,7 @@ Candidate run ┘        │                  │
 
 ```text
 Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
-技术栈：Java 17、Maven、JUnit 5、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、GitHub Actions
+技术栈：Java 17、Maven、JUnit 5、JDBC、Spring Boot Starter、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
 
 项目简介：面向 Agent/Skill 发布前的质量验证，解决“改完能不能发、退化在哪一步”的问题。通过适配器把不同 Agent 的 Trace 归一化，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断与 accept/reject/rollback 决策；最终收货权保留给人。
 
@@ -340,11 +345,11 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现结构/行为/一致性/反馈四层评测与路径化规则引擎，区分硬门禁与软告警；LLM 只产出非权威建议，不参与发布判定。
 - 实现 baseline/candidate 在 improvement/regression/holdout 三个数据集上的演化决策，加入 scenario gates、绝对质量门禁、关键回归计数、规则通过率与 P50/P95/P99，覆盖小样本和“通过率不变但用例一进一出”的隐藏退化。
 - 实现 TraceDiff 首错定位：基于 LCS 对齐 module/action，识别步骤增删、替换、字段变化、报错和最终输出差异，生成用例状态迁移、失败聚类和可追溯证据，不重跑 Agent。
-- 实现运行完整性：批式落盘、断点恢复、case 内容哈希、跨进程文件锁、trace id 唯一性校验；异常退出后可恢复且不混跑。
+- 实现运行完整性：`Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、case 内容哈希、跨进程锁、trace id 唯一性校验；异常退出后可恢复且不混跑。
 - 实现 evolve-auto 沙箱与只读 Dashboard：路径逃逸防护、暂存区/manifest/哈希校验、预算与检查点、进程树终止与容器隔离；Dashboard 支持运行/Trace/规则/演化/审计/发布视图。
-- 测试与 CI：202 项 Java 测试 + 10 项 Node 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、进程树、容器安全参数、范围审计和外部轨迹；GitHub Actions Windows/Linux 双平台。
+- 测试与交付：208 项 Java 测试 + 10 项 Node 测试 + 3 项 Spring Boot Starter 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、JDBC 契约、进程树、容器安全参数、范围审计和外部轨迹；Docker 镜像与 GitHub Actions Windows/Linux 双平台。
 
-项目成果：零运行时依赖；202 项 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试；示例可稳定复现 rollback 与首错定位。
+项目成果：核心零运行时依赖；208 项 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 3 项 Starter 测试；1,000 条轻量用例约 1,100 cases/s；示例可稳定复现 rollback 与首错定位。
 ```
 
 ### 6.2 偏 Agent 评测 / 质量岗
@@ -364,18 +369,18 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 把顺序调整为：
 
-1. Java 17、零运行时依赖、适配器类加载。
-2. 文件存储、批式落盘、断点恢复、跨进程锁。
+1. Java 17、核心零运行时依赖、适配器类加载。
+2. `Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁。
 3. 有界并发、进程树终止、容器隔离、路径安全。
 4. 规则引擎、决策引擎、TraceDiff（LCS）。
-5. JDK HttpServer + 原生前端、只读 Dashboard。
-6. 202 项 JUnit 测试 + Windows/Linux CI。
+5. JDK HttpServer + 原生前端、只读 Dashboard、Spring Boot Starter。
+6. 208 项 JUnit 测试 + 3 项 Starter 测试 + Windows/Linux CI。
 
-关键词：Java 17、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、GitHub Actions。
+关键词：Java 17、JDBC、Spring Boot Starter、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
 
 ### 6.4 更短的一行版（空间不够时用）
 
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位和发布门禁；202 项测试，CI 双平台。”
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储和发布门禁；208 项测试，Spring Boot Starter，CI 双平台。”
 
 ### 6.5 排版建议
 
@@ -391,7 +396,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 1. **先讲问题，再讲架构**：不要一上来念模块。
 2. **强调“证据”和“人的决定权”**：这是项目和普通评测脚本的区别。
-3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、202 项测试、CI 双平台、示例可复现 rollback”。
+3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、208 项测试、JDBC/Starter 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
 4. **主动说取舍**：文件存储 vs 数据库、LLM 不进硬门禁、诊断是辅助证据。面试官更看重你知道边界。
 5. **准备一个具体 bug**：恢复/半行 UTF-8 或隐藏回归，按 STAR 讲。
 6. **准备一张架构图**：适配器 → 评测 → 演化 → 诊断 → 存储/报告/Dashboard。
@@ -638,13 +643,13 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **可追问**：为什么不用 React？答：零构建、零依赖、Java 直接托管；纯函数用 Node 测试，页面规模不需要组件框架。
 
-### 20. 202 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
+### 20. 208 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
 
 **考察点**：测试是否只覆盖 happy path。
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、Dashboard。最有价值的是恢复、并发、进程树、路径安全和诊断边界，不是“跑通一个 case”。
+测试按失败模式组织：评测闭环、四层规则、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。Starter 另有 3 项上下文测试，验证自动配置和条件装配。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 
@@ -656,11 +661,11 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-不足是单机文件存储、没有多租户/权限、没有生产流量验证、诊断是辅助证据、没有统计显著性检验。数据量大了，先换 `Results` 的 JDBC/对象存储实现，Trace 接入做流式处理，`TraceDiff` 有 300 步上限，结果分页，评测 worker 独立部署，锁换成数据库/分布式锁。
+不足是默认仍是单机文件存储（JDBC 已有，但缺 schema 迁移和分布式锁）、没有多租户/权限、没有生产流量验证、诊断是辅助证据、没有统计显著性检验。数据量大了，用 JDBC/对象存储替换文件存储，Trace 接入做流式处理，`TraceDiff` 有 300 步上限，结果分页，评测 worker 独立部署，锁换成数据库/分布式锁。
 
 非确定性 Agent 仍然可以评，但不能用一次运行下结论：高价值节点多次运行、一致性检查、置信区间、样本覆盖、场景门禁、人工复核；硬门禁只放在稳定信号上。非确定性不是不评测，而是要承认不确定性。
 
-**可追问**：下一步最想做什么？答：数据库存储、Trace 接入服务、趋势看板、校准过的 LLM judge（仍不进硬门禁）、PR 评论和发布流水线集成。
+**可追问**：下一步最想做什么？答：JDBC schema 迁移与分布式锁、Trace 接入服务、趋势看板、校准过的 LLM judge（仍不进硬门禁）、PR 评论和发布流水线集成。
 
 ### 22. 最大的取舍是什么？如果重做会怎么改？讲一个最难的 bug。
 
@@ -668,7 +673,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-最大的取舍是零运行时依赖：换来了可移植、离线、无供应链负担，但也换来了更多自研代码和测试。如果重做，会更早定义 Trace schema/versioning，把决策引擎从 CLI 抽成纯函数，给 `Path`/`ValueOps` 加属性测试，并更早引入数据库存储；但零依赖对本地演示和可移植性仍然有价值。
+最大的取舍是零运行时依赖：换来了可移植、离线、无供应链负担，但也换来了更多自研代码和测试。如果重做，会更早定义 Trace schema/versioning，把决策引擎从 CLI 抽成纯函数，给 `Path`/`ValueOps` 加属性测试，并更早把 JDBC 做成一等存储、补上 schema 迁移和契约测试；但零依赖对本地演示和可移植性仍然有价值。
 
 最难的 bug 是断点恢复：最后一行可能只写了一半，甚至 UTF-8 字符写到一半，简单按行解析会报错或丢数据。做法是只允许最后一行未完成时截断，完整但缺换行补分隔符，UTF-8 半字符恢复，中间损坏明确报错；测试覆盖截断尾部、半字符、缺换行和再次中断，恢复后不会把两次实验混在一起。
 
@@ -676,7 +681,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 ---
 
-## 九、快问快答 10 条
+## 九、快问快答 12 条
 
 1. **为什么不用 YAML？** 核心零依赖，JSON 够用且严格校验更容易；YAML 的隐式类型和解析器依赖会引入风险。
 2. **为什么退出码有 2？** `2` 表示用法错误或需要人工复核；需要人看的运行不能看起来像通过。
@@ -687,11 +692,13 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 7. **怎么处理敏感信息？** 报告本地保存，配置里不写密钥、用环境变量；但这不是完整的 DLP，生产要接脱敏和权限。
 8. **支持多轮会话吗？** Trace 的 events 可以表达多步，但没有 session store；多轮需要适配器提供完整会话轨迹。
 9. **怎么评估评测器本身？** agreement、FP/FN、field accuracy、repeat stability + 人工校准。
-10. **为什么没有数据库？** 零依赖、单机可移植；`Results` 接口预留了 JDBC/对象存储实现。
+10. **为什么默认文件存储，JDBC 怎么选？** 默认文件是为了零依赖、单机可移植；JDBC 已实现，`--store jdbc:...` 切换，driver 由使用方提供。
+11. **JDBC 存储怎么保证和文件存储同语义？** 同一套 `Results` 契约测试：manifest 校验、批量事务、`SELECT FOR UPDATE` 追加检查、run 锁。
+12. **Spring Boot Starter 会不会污染核心？** 不会；Starter 是独立扩展，核心不反向依赖 Spring，且没有 `ProjectAdapter` 就不装配 Engine。
 
 ---
 
-## 十、三个深挖专题：TraceDiff / 门禁 / 恢复
+## 十、五个深挖专题：TraceDiff / 门禁 / 恢复 / JDBC / Starter
 
 > 这一部分用于应对“再往下讲一点”的追问。建议按“输入输出 → 算法 → 边界 → 测试 → 取舍”的顺序讲。
 
@@ -1044,8 +1051,87 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 ---
 
-### 10.4 三个专题的“一句话总结”
+### 10.4 JDBC 存储：把 `Results` 变成真正的存储契约
+
+#### 10.4.1 为什么不是“加一个 DAO”
+
+原来的 `Results.lockRun` 返回 `ResultStore.Handle`，接口和文件锁实现耦合；JDBC 存储不能返回文件锁。所以先把锁抽象成 `Results.RunLock`，再实现 `JdbcResultStore`。这是接口层的修正，不是简单加一张表。
+
+#### 10.4.2 表结构
+
+- `assay_run`：run 元数据、状态、时间、metadata JSON。
+- `assay_case`：`(run_id, case_id)` 主键，payload JSON、hard_pass、soft_warning_count。
+- `assay_case_manifest`：case 内容 SHA-256，用于恢复校验。
+- `assay_review`：人工结论，UUID 主键。
+- `assay_evolution`：演化结果，experiment_id 主键。
+- `assay_lock`：run 级互斥，`run_id` 主键。
+
+#### 10.4.3 语义
+
+- `saveCases` 在一个事务里批量 update/insert，失败整体回滚。
+- `startRun(resume=true)` 校验 adapter/suite/source/metadata，再校验 manifest 的 missing/changed；允许新增 case。
+- `addCaseCheck` 用 `SELECT ... FOR UPDATE` 读改写，避免并发覆盖。
+- `lockRun` 插入 `assay_lock` 行；重复主键 → `already running`；关闭时删除。
+- 进程崩溃会留下锁行，需要人工清理；没有自动 TTL，这是已知边界。
+
+#### 10.4.4 取舍
+
+- 驱动不在框架 jar 内：核心仍零运行时依赖，使用方自己提供 JDBC driver。
+- schema 用 `create table if not exists` 自动创建，没有迁移框架；生产应自己管迁移。
+- `text`/`boolean`/`timestamp` 是便携子集；MySQL 大字段、Postgres 类型、锁超时要按库验证。
+- 没有分布式锁 TTL、没有多租户、没有分页查询；这些是下一步。
+
+#### 10.4.5 测试
+
+- 5 项 `JdbcResultStoreTest`：保存/读取、resume/manifest、锁、审核/演化、追加检查。
+- 1 项 CLI JDBC 测试：`--store jdbc:h2:...` 跑通完整 `run`。
+- 实际用 H2 driver 做过 CLI 冒烟。
+
+#### 10.4.6 追问
+
+- **“为什么不用 JPA？”** 核心零依赖，JDBC 足够；JPA 会引入实体/事务/懒加载复杂度，而且这里的数据是 JSON 文档 + 少量索引列。
+- **“事务边界在哪？”** 一个批次一个事务；`startRun`、`addCaseCheck`、`saveEvolution` 各自一个事务。
+- **“怎么保证恢复不混数据？”** 和文件实现同一套 manifest 校验；缺失/变更/legacy run 都拒绝。
+- **“锁崩溃了怎么办？”** 当前人工清理 `assay_lock`；下一步加 TTL/owner/heartbeat。
+
+---
+
+### 10.5 Spring Boot Starter：集成而不污染核心
+
+#### 10.5.1 定位
+
+`extensions/assay-spring-boot-starter` 是可选模块，不改变核心零依赖。它只做三件事：
+
+1. 根据 `assay.store.type` 装配 `ResultStore` 或 `JdbcResultStore`。
+2. 在存在 `ProjectAdapter` bean 时装配 `EvaluationEngine`。
+3. 提供 `assay.workers`、`assay.timeout-seconds`、`assay.retries` 等配置。
+
+#### 10.5.2 条件装配
+
+- `@ConditionalOnProperty` 区分 file/JDBC。
+- `@ConditionalOnBean(ProjectAdapter.class)`：没有适配器就不创建 Engine，避免框架猜怎么调 Agent。
+- `@ConditionalOnMissingBean`：用户可覆盖任何 bean。
+- `@AutoConfiguration` + `AutoConfiguration.imports`，不依赖组件扫描。
+
+#### 10.5.3 测试
+
+- 文件存储 + 有 Adapter → `ResultStore` + `EvaluationEngine`。
+- JDBC + DataSource → `JdbcResultStore`。
+- 没有 Adapter → 只有 `Results`，没有 `EvaluationEngine`。
+
+#### 10.5.4 追问
+
+- **“Starter 会不会把 Spring 带进核心？”** 不会；Starter 依赖 `assay`，反向不成立。
+- **“为什么不自动装配 Dashboard？”** Dashboard 是可选运行时，涉及端口/生命周期/安全；当前让用户显式启动，避免隐式绑定 8080。
+- **“JDBC 配置怎么给？”** Starter 只消费 `DataSource`，不猜 URL/用户名/密码；连接池和迁移由 Spring 应用负责。
+- **“怎么发布？”** 当前是独立扩展模块；先在根目录 `mvn install`，再构建 starter。后续可进 reactor 或发布到 Maven Central。
+
+---
+
+### 10.6 五个专题的“一句话总结”
 
 - **TraceDiff**：用 LCS 把“哪一步开始不一样”变成可解释的字段证据，而不是一句“失败了”。
 - **门禁**：用用例级、场景级、绝对级、数值级的多层约束，把“测试通过”变成“能不能发”。
 - **恢复**：用批次、manifest、尾部修复和文件锁，保证崩溃后能继续，且不会把两次实验混在一起。
+- **JDBC**：把 `Results` 从“文件实现”提升为可替换契约，代价是迁移/锁/事务要自己负责。
+- **Starter**：把企业集成放外围，核心继续零依赖；没有 `ProjectAdapter` 就不猜怎么调 Agent。
