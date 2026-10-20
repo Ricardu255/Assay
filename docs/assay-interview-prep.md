@@ -3,7 +3,7 @@
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
 > 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；211 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
-> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），面试前可单独过一遍。
+> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
 
 ---
 
@@ -338,7 +338,7 @@ Candidate run ┘        │                  │
 
 ```text
 Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
-技术栈：Java 17、Maven Reactor、JUnit 5、JDBC、Spring Boot Starter、Micrometer、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
+技术栈：Java 17、Maven Reactor、JUnit 5、JDBC、Spring Boot Starter、Micrometer、OpenTelemetry、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
 
 项目简介：面向 Agent/Skill 发布前的质量验证，解决“改完能不能发、退化在哪一步”的问题。通过适配器把不同 Agent 的 Trace 归一化，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断与 accept/reject/rollback 决策；最终收货权保留给人。
 
@@ -373,7 +373,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 把顺序调整为：
 
-1. Java 17、Maven reactor（app + starter + metrics）、核心零运行时依赖、适配器类加载。
+1. Java 17、Maven reactor（app + starter + metrics + otel）、核心零运行时依赖、适配器类加载。
 2. `Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁。
 3. 有界并发、进程树终止、容器隔离、路径安全。
 4. 规则引擎、决策引擎、TraceDiff（LCS）。
@@ -395,11 +395,15 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 **偏平台/可观测版：**
 
-> 为评测引擎建立可观测性：核心 SPI 解耦 run/case/batch 事件，Micrometer 扩展覆盖吞吐、失败率、case P95、存储写入延迟；通过有限标签和 Timer/Histogram 控制基数，接入 Actuator/Prometheus；listener 故障不影响发布判定。
+> 为评测引擎建立可观测性：核心 SPI 解耦 run/case/batch 事件，Micrometer 扩展覆盖吞吐、失败率、case P95、存储写入延迟；OTel 扩展覆盖 run/case span 和失败关闭；通过有限标签和 Timer/Histogram 控制基数，接入 Actuator/Prometheus；listener 故障不影响发布判定。
 
 **注意**：现在可以写“Micrometer 指标 + OTel run/case/batch span”，但不要写“全链路 Trace”或“adapter/规则级 span”；细粒度 span 仍是下一步。
 
-### 6.6 排版建议
+### 6.6 Maven Reactor / 工程化 bullet（Java 岗可直接复制）
+
+> 将主项目与 Spring Boot Starter、Micrometer、OTel 扩展重构为 Maven reactor：父 POM 统一 Java/Spring/Micrometer/OTel 版本，`app` 通过 enforcer 禁止引入集成框架，根目录 `mvn test` 一次构建四个代码模块并保持 211 项核心测试全绿。
+
+### 6.7 排版建议
 
 - 放在 MiniCode / Ragent 之后，作为“质量保障/工程化”的差异化项目；如果投 AI 平台/评测岗，可以放第一个。
 - 技术栈只写有把握被追问的：Java 17、JUnit 5、HTTP、JSON、原生 JS、GitHub Actions。
@@ -1142,7 +1146,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - **“Starter 会不会把 Spring 带进核心？”** 不会；Starter 依赖 `assay`，反向不成立。
 - **“为什么不自动装配 Dashboard？”** Dashboard 是可选运行时，涉及端口/生命周期/安全；当前让用户显式启动，避免隐式绑定 8080。
 - **“JDBC 配置怎么给？”** Starter 只消费 `DataSource`，不猜 URL/用户名/密码；连接池和迁移由 Spring 应用负责。
-- **“怎么发布？”** 已进入 Maven reactor，根目录 `mvn test` 会构建主项目、Starter 和 Micrometer；发布到 Maven Central 仍需额外的发布插件/签名配置。
+- **“怎么发布？”** 已进入 Maven reactor，根目录 `mvn test` 会构建主项目、Starter、Micrometer 和 OTel；发布到 Maven Central 仍需额外的发布插件/签名配置。
 
 ---
 
@@ -1420,3 +1424,84 @@ histogram_quantile(0.95, rate(assay_store_append_seconds_bucket[5m]))
 ### 30 秒回答模板
 
 > “核心通过零依赖的 `EvaluationListener` 发 run/case/batch 生命周期事件，默认 no-op，listener 异常不会影响评测。Micrometer 扩展输出失败率、case P95、批量落盘延迟等指标，标签不带 run_id/case_id；OTel 扩展输出 run/case/batch span，case 挂 run，失败 run 会 recordException 并关闭。测试分别用 SimpleMeterRegistry 和 InMemorySpanExporter，不依赖外部 collector。”
+
+---
+
+## 十二、Maven Reactor 与工程化追问（10 题）
+
+### 1. 为什么主模块叫 `app/`，不叫 `assay/`？
+
+根目录已经有一个 `assay` 启动脚本（macOS/Linux），文件系统里不能再有同名目录。
+
+- artifactId 仍然是 `assay`，jar 是 `app/target/assay.jar`。
+- 启动器、README、CI 都按新路径更新。
+- 取舍：路径不如 `assay/` 直观，但保留了用户已有的 `./assay` 用法。
+
+### 2. 为什么需要 parent POM？
+
+- 统一 Java 17、JUnit、Spring Boot、Micrometer、OTel、H2 版本。
+- 子模块不再重复写版本，减少漂移。
+- `mvn test` 一次构建所有模块，reactor 自动排序。
+- 插件版本也集中在 `pluginManagement`。
+
+### 3. 为什么扩展模块还放在 `extensions/`？
+
+- 目录结构直接把“核心”和“可选集成”分开。
+- Maven 允许 module 路径嵌套，不需要为了 reactor 把目录摊平。
+- 根目录保留 `assay` 启动脚本、`examples/`、`docs/`，不堆满模块目录。
+- 以后发布到 Maven Central，可以保留路径或移动目录，不影响 artifactId。
+
+### 4. `mvn test` 和 `mvn -pl :module -am test` 有什么区别？
+
+- `mvn test`：构建 reactor 内全部模块（app、starter、micrometer、otel）。
+- `-pl :assay-spring-boot-starter`：只选这个模块。
+- `-am`：同时构建它依赖的模块（这里是 app）。
+- 例：`mvn -q -pl :assay-tracing-otel -am test` 只跑 OTel 和它依赖的核心。
+
+### 5. enforcer 怎么保证核心零依赖？
+
+`app/pom.xml` 里配置 `bannedDependencies`：
+
+```xml
+<exclude>org.springframework:*</exclude>
+<exclude>io.micrometer:*</exclude>
+<exclude>io.opentelemetry:*</exclude>
+```
+
+如果有人在 `app` 里加 Spring/Micrometer/OTel 依赖，构建直接失败。核心的运行时依赖仍然只有 JDK；JUnit/H2 是 test scope。
+
+### 6. 为什么 Phase 1 不直接拆 core/cli/store？
+
+- 要移动约 1.3 万行主代码、32 个测试文件。
+- 一些测试访问 package-private 成员，跨模块拆分要重新设计测试边界。
+- 先建 reactor，保证“一条命令构建全部模块、测试数不变”，风险最低。
+- Phase 2 再拆 core/cli/store，SPI 和构建边界已经稳定。
+
+### 7. 多模块后 jar、启动脚本、CI、Docker 怎么改？
+
+- jar：`app/target/assay.jar`。
+- 启动脚本：`assay` / `assay.cmd` 的 fallback 指向 `app/target/assay.jar`。
+- CI：根目录 `mvn clean verify` 覆盖全部模块，不再需要 `mvn install` + 单独 `-f`。
+- Docker：`COPY app/pom.xml`、`COPY app/src`，`mvn -f app/pom.xml package`，只构建运行所需的 app。
+
+### 8. 多模块会不会让构建更慢、更复杂？
+
+- Maven reactor 本身开销很小；扩展模块编译量小。
+- 好处是版本统一、依赖边界可验证、增量构建清楚。
+- 代价是 POM 变多、目录层级变深、IDE 需要重新导入。
+- 对 Assay 这种“核心 + 可选集成”的项目，收益大于成本。
+
+### 9. 为什么用 Maven，不用 Gradle？
+
+- 项目从第一天就是 Maven，CI、脚本、文档都围绕它。
+- Java 生态、enforcer、Surefire、GitHub Actions 的 Maven 缓存都很成熟。
+- 不是断言 Maven 优于 Gradle；换 Gradle 是一次构建系统重写，收益不匹配当前阶段。
+
+### 10. Phase 2 的拆分顺序是什么？
+
+1. `assay-core`：model/rules/engine/evolve/report/store API。
+2. `assay-store-file` / `assay-store-jdbc`：`ResultStore` / `JdbcResultStore`。
+3. `assay-cli`：`AssayCli`、`CommandLine`。
+4. `assay-dashboard`：web + resources。
+
+原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 211 + 4 + 2 + 2 全绿。

@@ -37,12 +37,12 @@
 | 表面信号 | 面试官可能的误读 | 实际情况 |
 |---|---|---|
 | 纯 Java、零依赖 | “没用过 Spring/中间件” | 刻意选择，换取单 jar、离线、可审计；但外围缺少集成证明 |
-| 单 Maven 模块 | “不会做模块化/架构分层” | 包结构清楚，但没有用 Maven 模块固化边界 |
-| 文件存储 | “没做过数据库/事务” | `Results` 接口已抽象，但没有 JDBC 实现 |
+| 多模块只完成 Phase 1 | “没有真正拆包” | 根 reactor 已建；`core/cli/store` 包级拆分留 Phase 2 |
+| JDBC 只有基础实现 | “没做过迁移/分布式锁” | `JdbcResultStore` 已落地；缺 schema migration、分布式锁 TTL |
 | 手写 JSON/HTTP Server | “重复造轮子” | 零依赖约束下的取舍，有测试覆盖；但需要把“为什么”讲清楚 |
-| 没有 OTel span / 内置 exporter | “没做过可观测性” | 已有 EvaluationListener + Micrometer 指标，但没有 OTel span/内置 exporter |
-| 没有压测 | “没验证过规模” | 测试覆盖正确性，但没有吞吐/延迟数字 |
-| 没有 Spring Boot Starter | “不能嵌入企业应用” | CLI 可用，但缺少 Spring 生态入口 |
+| 没有内置 exporter / 细粒度 span | “没做过可观测性” | Micrometer/OTel 已落地；exporter 由使用方提供，adapter/规则 span 未做 |
+| 没有 10k/真实 Agent 压测 | “没验证过规模” | 1,000 条轻量基线；缺 10k/JDBC/真实 Agent 数据 |
+| Starter 已落地 | “不能嵌入企业应用” | 可选模块，不污染核心；发布到 Maven Central 仍需配置 |
 
 **根因不是代码简单，是工程信号藏得太深。** README 先讲功能，没有先讲失败处理、取舍和验证；面试官看不到 1.3 万行里的难点。
 
@@ -365,9 +365,9 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 
 #### 4.5.2 OTel Trace
 
-- 每个 case 一个 span；子 span：adapter.call、rules.evaluate、store.append。
-- 导出到 OTLP；文档给 Jaeger/Phoenix 示例。
-- 不要求核心依赖 OTel；只在 `assay-metrics-otel` 模块。
+- 已实现 run/case/batch span；case 挂 run，失败 run 会关闭 span。
+- adapter.call、rules.evaluate、store.append 的 stage 级子 span 尚未实现。
+- exporter 由使用方提供；不要求核心依赖 OTel；只在 `assay-tracing-otel` 模块。
 
 #### 4.5.3 压测
 
@@ -522,7 +522,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 的 Agent 评测与发布门禁引擎；核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；211 项测试 + 1,000 条轻量基准，CI 双平台。
+> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；211 项测试 + 1,000 条轻量基准，CI 双平台。
 
 ### 8.3 面试三句话
 
