@@ -127,6 +127,35 @@ function artifactTable(records, limit = Infinity) {
       <td class="muted number">${escape(date(item.modified_at))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
+function trendSvg(trend) {
+  const buckets = trend.buckets;
+  const valid = buckets.map((bucket, index) => ({ bucket, index })).filter(({ bucket }) => bucket.passRate !== null);
+  if (!valid.length) return `<p class="muted">最近 ${trend.days} 天没有运行记录。</p>`;
+  const width = 360, height = 132, padX = 10, padTop = 10, padBottom = 24;
+  const chartHeight = height - padTop - padBottom;
+  const x = (index) => padX + (buckets.length <= 1 ? (width - 2 * padX) / 2 : index * (width - 2 * padX) / (buckets.length - 1));
+  const y = (rate) => padTop + (1 - rate) * chartHeight;
+  const line = valid.map(({ bucket, index }, position) => `${position ? "L" : "M"}${x(index).toFixed(1)} ${y(bucket.passRate).toFixed(1)}`).join(" ");
+  const area = valid.length > 1
+    ? `${line} L${x(valid.at(-1).index).toFixed(1)} ${padTop + chartHeight} L${x(valid[0].index).toFixed(1)} ${padTop + chartHeight} Z`
+    : "";
+  const grid = [0, 0.5, 1].map((rate) => `<line x1="${padX}" y1="${y(rate)}" x2="${width - padX}" y2="${y(rate)}" class="trend-grid"/>`).join("");
+  const dots = valid.map(({ bucket, index }) => `<circle cx="${x(index)}" cy="${y(bucket.passRate)}" r="3.5" class="trend-dot"><title>${escape(bucket.label)}：${percent(bucket.passRate)}（${bucket.runs} 次运行）</title></circle>`).join("");
+  const labels = buckets.map((bucket, index) => `<text x="${x(index)}" y="${height - 4}" text-anchor="middle" class="trend-label">${escape(bucket.label)}</text>`).join("");
+  return `<svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="最近 ${trend.days} 天硬门禁通过率">${grid}${area ? `<path d="${area}" class="trend-area"/>` : ""}<path d="${line}" class="trend-line"/>${dots}${labels}</svg>
+    <div class="trend-summary"><span><strong>${integer(trend.totals.runs)}</strong> 次运行</span><span><strong>${integer(trend.totals.caseCount)}</strong> 条用例</span><span><strong>${integer(trend.totals.hardFailures)}</strong> 条硬失败</span></div>
+    <details class="trend-data"><summary>查看每日数据</summary><div class="table-wrap"><table><thead><tr><th>日期</th><th>运行</th><th>用例</th><th>通过率</th><th>失败运行</th></tr></thead><tbody>${buckets.map((bucket) => `<tr><td>${escape(bucket.label)}</td><td class="number">${integer(bucket.runs)}</td><td class="number">${integer(bucket.caseCount)}</td><td class="number">${percent(bucket.passRate)}</td><td class="number">${integer(bucket.failedRuns)}</td></tr>`).join("")}</tbody></table></div></details>`;
+}
+
+function suiteHealthTable(rows) {
+  if (!rows.length) return `<div class="panel-body"><p class="muted">还没有运行记录。</p></div>`;
+  return `<div class="table-wrap"><table class="suite-health-table"><thead><tr><th>测试集</th><th>最近运行</th><th>状态</th><th>通过率</th><th>硬失败</th><th>软告警</th><th>较上次</th></tr></thead><tbody>
+    ${rows.map((row) => {
+      const change = row.delta === null ? "—" : `<span class="trend-delta ${row.delta > 0 ? "positive" : row.delta < 0 ? "negative" : ""}">${delta(row.delta, true)}</span>`;
+      return `<tr><td><strong>${escape(row.suite)}</strong><div class="record-path">${integer(row.runs)} 次运行</div></td><td class="muted number">${row.lastAt ? escape(date(row.lastAt)) : "—"}</td><td>${badge(row.status)}</td><td class="number">${percent(row.passRate)}</td><td class="number">${integer(row.hardFailures)}</td><td class="number">${integer(row.softWarnings)}</td><td>${change}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
 function overview() {
   const runs = items().filter((item) => item.kind === "run");
   const total = runs.reduce((sum, item) => sum + count(item.case_count), 0);
@@ -137,6 +166,8 @@ function overview() {
   const failedRuns = runs.filter((item) => item.status === "failed").length;
   const denominator = Math.max(1, runs.length);
   const recent = filteredItems().slice(0, 8);
+  const trend = AssayUI.runTrend(items(), 7);
+  const health = AssayUI.suiteHealth(items(), 8);
   return `${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
     <div class="stats">${stat("评测运行", integer(runs.length), "包含基线与候选的独立运行")}
       ${stat("硬门禁通过率", total ? percent((total - failures) / total) : "—", `${integer(total)} 条已记录用例`, "positive")}
@@ -151,6 +182,8 @@ function overview() {
           <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="var(--chart-bad)"/></svg>
         ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
         <p class="mini-note">按扫描到的运行汇总。不同版本与数据集的运行分别计数。</p></div></section></div>
+    <section class="panel section-gap"><div class="panel-head"><h2>最近 ${trend.days} 天</h2><span class="muted">硬门禁通过率 · 按用例加权</span></div><div class="panel-body">${trendSvg(trend)}</div></section>
+    <section class="panel section-gap"><div class="panel-head"><h2>按测试集健康</h2><span class="muted">最近运行优先 · 通过率按用例加权</span></div>${suiteHealthTable(health)}</section>
     <div class="artifact-counts">${sections.slice(3).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
 }
 

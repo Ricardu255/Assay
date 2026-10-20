@@ -129,6 +129,68 @@ test("Diagnosis text is localized from structured evidence", () => {
   assert.equal(ui.reasonText("something new"), "something new");
 });
 
+test("Run trends aggregate by local day and ignore runs outside the window", () => {
+  const now = new Date(2026, 9, 21, 12);
+  const stamp = (day, hour = 12) => new Date(2026, 9, day, hour).toISOString();
+  const items = [
+    { kind: "run", modified_at: stamp(21, 10), case_count: 10, hard_failures: 2, soft_warnings: 1, status: "passed", suite: "A" },
+    { kind: "run", modified_at: stamp(21, 9), case_count: 5, hard_failures: 0, status: "passed", suite: "B" },
+    { kind: "run", modified_at: stamp(20, 10), case_count: 4, hard_failures: 4, status: "failed", suite: "A" },
+    { kind: "run", modified_at: stamp(1, 10), case_count: 99, hard_failures: 0, status: "passed", suite: "old" },
+    { kind: "evolution", modified_at: stamp(21, 10), case_count: 7, hard_failures: 7 }
+  ];
+  const trend = ui.runTrend(items, 7, now);
+  assert.equal(trend.days, 7);
+  assert.equal(trend.buckets.length, 7);
+  assert.deepEqual(trend.buckets.map((bucket) => bucket.label), ["10-15", "10-16", "10-17", "10-18", "10-19", "10-20", "10-21"]);
+  const today = trend.buckets.at(-1), yesterday = trend.buckets.at(-2);
+  assert.equal(today.runs, 2);
+  assert.equal(today.caseCount, 15);
+  assert.equal(today.hardFailures, 2);
+  assert.equal(today.softWarnings, 1);
+  assert.equal(today.passRate, 13 / 15);
+  assert.equal(yesterday.passRate, 0);
+  assert.equal(yesterday.failedRuns, 1);
+  assert.equal(trend.totals.runs, 3);
+  assert.equal(trend.totals.caseCount, 19);
+  assert.equal(trend.totals.hardFailures, 6);
+  assert.ok(!trend.buckets.some((bucket) => bucket.label === "10-01"));
+});
+
+test("Suite health picks the latest run and compares its pass rate", () => {
+  const stamp = (day, hour = 12) => new Date(2026, 9, day, hour).toISOString();
+  const health = ui.suiteHealth([
+    { kind: "run", modified_at: stamp(21, 10), case_count: 10, hard_failures: 2, soft_warnings: 1, status: "passed", suite: "A" },
+    { kind: "run", modified_at: stamp(20, 10), case_count: 4, hard_failures: 4, status: "failed", suite: "A" },
+    { kind: "run", modified_at: stamp(21, 9), case_count: 5, hard_failures: 0, status: "passed", suite: "B" },
+    { kind: "run", modified_at: "not-a-date", case_count: 2, hard_failures: 1, status: "failed" }
+  ]);
+  assert.equal(health.length, 3);
+  assert.equal(health[0].suite, "A");
+  assert.equal(health[0].runs, 2);
+  assert.equal(health[0].caseCount, 14);
+  assert.equal(health[0].passRate, 8 / 14);
+  assert.equal(health[0].lastPassRate, 0.8);
+  assert.equal(health[0].previousPassRate, 0);
+  assert.equal(health[0].delta, 0.8);
+  assert.equal(health[0].status, "warning");
+  assert.equal(health[1].suite, "B");
+  assert.equal(health[1].delta, null);
+  assert.equal(ui.suiteHealth([], 8).length, 0);
+  assert.equal(ui.suiteHealth([
+    { kind: "run", modified_at: stamp(21, 10), case_count: 1, hard_failures: 0, status: "passed", suite: "A" }
+  ], 1).length, 1);
+});
+
+test("Run trends return empty buckets instead of throwing on missing data", () => {
+  const trend = ui.runTrend([], 7, new Date(2026, 9, 21, 12));
+  assert.equal(trend.buckets.length, 7);
+  assert.equal(trend.totals.runs, 0);
+  assert.equal(trend.totals.passRate, null);
+  assert.equal(trend.buckets.every((bucket) => bucket.passRate === null), true);
+  assert.deepEqual(ui.suiteHealth([], 8), []);
+});
+
 test("Setup defaults point at the reactor artifact and source layout", () => {
   const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
   assert.match(source, /jar: "app\/target\/assay\.jar"/);

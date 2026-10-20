@@ -289,7 +289,83 @@
     if (found) return `${prefix}指标 ${found[1]} 超过绝对上限 ${found[2]}`;
     return text;
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText };
+  function itemCount(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+  }
+  function rate(caseCount, hardFailures) {
+    return caseCount > 0 ? Math.max(0, Math.min(1, (caseCount - hardFailures) / caseCount)) : null;
+  }
+  function dayKey(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+  function runTrend(items, days = 7, now = new Date()) {
+    const span = Math.max(1, Math.min(31, Number.isFinite(days) ? Math.floor(days) : 7));
+    const end = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const buckets = [], byKey = new Map();
+    for (let offset = span - 1; offset >= 0; offset--) {
+      const date = new Date(end.getFullYear(), end.getMonth(), end.getDate() - offset, 12);
+      const key = dayKey(date);
+      const bucket = { key, label: key.slice(5), runs: 0, caseCount: 0, hardFailures: 0, softWarnings: 0, failedRuns: 0, passRate: null };
+      buckets.push(bucket); byKey.set(key, bucket);
+    }
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!item || item.kind !== "run") continue;
+      const bucket = byKey.get(dayKey(item.modified_at));
+      if (!bucket) continue;
+      const cases = itemCount(item.case_count);
+      const failures = Math.min(cases, itemCount(item.hard_failures));
+      bucket.runs++;
+      bucket.caseCount += cases;
+      bucket.hardFailures += failures;
+      bucket.softWarnings += itemCount(item.soft_warnings);
+      if (item.status === "failed") bucket.failedRuns++;
+    }
+    for (const bucket of buckets) bucket.passRate = rate(bucket.caseCount, bucket.hardFailures);
+    const totals = buckets.reduce((sum, bucket) => ({
+      runs: sum.runs + bucket.runs, caseCount: sum.caseCount + bucket.caseCount,
+      hardFailures: sum.hardFailures + bucket.hardFailures, softWarnings: sum.softWarnings + bucket.softWarnings,
+      failedRuns: sum.failedRuns + bucket.failedRuns
+    }), { runs: 0, caseCount: 0, hardFailures: 0, softWarnings: 0, failedRuns: 0 });
+    totals.passRate = rate(totals.caseCount, totals.hardFailures);
+    return { days: span, buckets, totals };
+  }
+  function suiteHealth(items, limit = 8) {
+    const groups = new Map();
+    for (const item of Array.isArray(items) ? items : []) {
+      if (!item || item.kind !== "run") continue;
+      const suite = String(item.suite || "").trim() || "未命名测试集";
+      const cases = itemCount(item.case_count);
+      const failures = Math.min(cases, itemCount(item.hard_failures));
+      const at = new Date(item.modified_at);
+      const valid = !Number.isNaN(at.getTime());
+      if (!groups.has(suite)) groups.set(suite, { suite, runs: 0, caseCount: 0, hardFailures: 0, softWarnings: 0, lastAt: null, lastStatus: "unknown", lastSoft: 0, history: [] });
+      const group = groups.get(suite);
+      group.runs++;
+      group.caseCount += cases;
+      group.hardFailures += failures;
+      group.softWarnings += itemCount(item.soft_warnings);
+      group.history.push({ at: valid ? at : null, passRate: rate(cases, failures), status: item.status || "unknown" });
+      if (valid && (!group.lastAt || at > group.lastAt)) {
+        group.lastAt = at; group.lastStatus = item.status || "unknown"; group.lastSoft = itemCount(item.soft_warnings);
+      }
+    }
+    const rows = [...groups.values()].map((group) => {
+      group.history.sort((left, right) => (left.at?.getTime() || 0) - (right.at?.getTime() || 0));
+      group.history = group.history.slice(-8);
+      const rates = group.history.map((entry) => entry.passRate).filter((value) => value !== null);
+      const lastRate = rates.at(-1) ?? null, previousRate = rates.at(-2) ?? null;
+      return { ...group, passRate: rate(group.caseCount, group.hardFailures),
+        lastPassRate: lastRate, previousPassRate: previousRate,
+        delta: lastRate !== null && previousRate !== null ? lastRate - previousRate : null,
+        status: group.lastStatus === "passed" && group.lastSoft > 0 ? "warning" : group.lastStatus };
+    });
+    rows.sort((left, right) => (right.lastAt?.getTime() || 0) - (left.lastAt?.getTime() || 0));
+    return rows.slice(0, Math.max(1, Number.isFinite(limit) ? limit : 8));
+  }
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);
