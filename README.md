@@ -30,7 +30,7 @@ mvn -q test
 跑一次端到端评测：
 
 ```bash
-java -jar target/assay.jar run \
+java -jar app/target/assay.jar run \
   --adapter io.assay.examples.EchoAdapter \
   --suite smoke \
   --cases examples/cases.example.jsonl \
@@ -40,18 +40,28 @@ java -jar target/assay.jar run \
 在项目所在电脑上启动只读可视化界面：
 
 ```bash
-java -jar target/assay.jar serve --output .assay/runs --port 8080
+java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 ```
 
 命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本演化、范围审计和发布验证；可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机，查看和导入不会改写报告。
 
 首次接入可打开界面的「开始评测」：选择 **HTTP 接口（推荐，无需写代码）**，填写地址、响应字段和通过条件，下载配置，再选择 JSONL 测试集检查格式、重复 ID 与必需字段，复制适用于 PowerShell 或 Bash 的运行命令。配置生成和文件检查在浏览器内完成；下载文件放到项目根目录，或将路径改为实际位置。命令由用户在项目根目录的另一个终端运行，完成后点击顶部「刷新」查看结果。
 
-前端纯函数检查可用 Node.js 执行：`node --test src/test/js/dashboard.test.cjs`；运行仪表盘本身不需要 Node.js。
+前端纯函数检查可用 Node.js 执行：`node --test app/src/test/js/dashboard.test.cjs`；运行仪表盘本身不需要 Node.js。
 
 运行明细中的 Trace 以步骤卡片展示：失败步骤默认展开，可筛选失败、定位首个失败、展开全部，或复制完整的单步 JSON。步骤额外数据来自适配器记录的 `TraceEvent.fields`；未记录时会明确显示为空。
 
 顶部可选择浅色、深色或跟随系统，选择会保存在当前浏览器。颜色、字号、间距与状态样式统一使用主题变量；系统启用减少动态效果时，界面会关闭过渡和滚动动画。
+
+## 模块结构
+
+```text
+app/                                  # artifact: assay（核心 + CLI + Dashboard + 存储实现）
+extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
+extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
+```
+
+根目录是 Maven reactor，`mvn -q test` 会一次构建三个模块。只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`；`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
@@ -65,7 +75,7 @@ java -jar target/assay.jar serve --output .assay/runs --port 8080
 .\assay.cmd run --adapter examples/http-agent.example.json --suite my-agent --cases examples/http-cases.example.jsonl
 ```
 
-macOS / Linux 将 `.\assay.cmd` 换为 `sh ./assay`。启动器会自动构建；构建后也可使用 `java -jar target/assay.jar run ...`。
+macOS / Linux 将 `.\assay.cmd` 换为 `sh ./assay`。启动器会自动构建；构建后也可使用 `java -jar app/target/assay.jar run ...`。
 
 例如接口接收 `{"message":"hello agent"}`，返回 `{"data":{"answer":"hello"},"route":"ECHO"}`，配置为：
 
@@ -148,7 +158,7 @@ macOS / Linux 将 `.\assay.cmd` 换为 `sh ./assay`。启动器会自动构建�
 运行时使用 `--source offline`：
 
 ```bash
-java -jar target/assay.jar evolve \
+java -jar app/target/assay.jar evolve \
   --baseline-adapter examples/trace-candidate.example.json \
   --candidate-adapter examples/trace-regressed.example.json \
   --candidate examples/evolution.trace-regressed.candidate.json \
@@ -190,26 +200,26 @@ public final class MyAdapter implements ProjectAdapterFactory {
 写完用类名引用：
 
 ```bash
-java -jar target/assay.jar run --adapter com.example.MyAdapter --suite smoke --cases smoke.jsonl
+java -jar app/target/assay.jar run --adapter com.example.MyAdapter --suite smoke --cases smoke.jsonl
 ```
 
 这里有一个 Java 的常规约束：`java -jar` 会忽略 `-cp`，所以主类路径上找不到的适配器要么放在独立的 jar 里（下面的第二种方式），要么改用 `-cp` 方式启动：
 
 ```bash
-java -cp "target/assay.jar:build/classes" io.assay.cli.AssayCli \
+java -cp "app/target/assay.jar:build/classes" io.assay.cli.AssayCli \
   run --adapter com.example.MyAdapter --suite smoke --cases smoke.jsonl
 ```
 
 **适配器单独打包**（推荐，框架与领域项目解耦发布）：在自己的工程里引用框架 jar 编译适配器，然后在 `META-INF/services/io.assay.engine.ProjectAdapterFactory` 里写上实现类名：
 
 ```bash
-java -jar target/assay.jar run --adapter path/to/adapter.jar --suite smoke --cases smoke.jsonl
+java -jar app/target/assay.jar run --adapter path/to/adapter.jar --suite smoke --cases smoke.jsonl
 ```
 
 如果 jar 里注册了多个实现、或者没有注册，用 `--adapter-class`（`evolve` 上是 `--baseline-adapter-class` / `--candidate-adapter-class`）显式指定用哪一个：
 
 ```bash
-java -jar target/assay.jar run \
+java -jar app/target/assay.jar run \
   --adapter path/to/adapter.jar --adapter-class com.example.MyAdapter \
   --suite smoke --cases smoke.jsonl
 ```
@@ -261,10 +271,10 @@ java -jar target/assay.jar run \
 
 ```bash
 # 测试集选择（只跑确定性规则，不调用模型）
-java -jar target/assay.jar select-tests --repository path/to/project
+java -jar app/target/assay.jar select-tests --repository path/to/project
 
 # 演化对比
-java -jar target/assay.jar evolve \
+java -jar app/target/assay.jar evolve \
   --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Baseline' \
   --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
   --candidate examples/evolution.candidate.json \
@@ -274,7 +284,7 @@ java -jar target/assay.jar evolve \
   --holdout examples/evolution.holdout.jsonl
 
 # 自动演化（确定性生成候选，不调用模型）
-java -jar target/assay.jar evolve-auto \
+java -jar app/target/assay.jar evolve-auto \
   --auto-adapter io.assay.examples.IntentRouterAutoEvolution \
   --policy examples/evolution.policy.json \
   --improvement examples/evolution.improvement.jsonl \
@@ -345,7 +355,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 
 ```bash
 # 以 H2 为例；驱动不在框架 jar 内，需要自己放到 classpath
-java -cp "target/assay.jar:drivers/h2-2.2.224.jar" io.assay.cli.AssayCli run \
+java -cp "app/target/assay.jar:drivers/h2-2.2.224.jar" io.assay.cli.AssayCli run \
   --adapter io.assay.examples.EchoAdapter \
   --suite smoke \
   --cases examples/cases.example.jsonl \
@@ -373,8 +383,11 @@ assay:
 它会自动装配 `Results`，并在存在 `ProjectAdapter` bean 时装配 `EvaluationEngine`。选择 `jdbc` 时需要提供一个 `DataSource` bean。构建方式：
 
 ```bash
-mvn -q -DskipTests install
-mvn -q -f extensions/assay-spring-boot-starter/pom.xml test
+# 整个 reactor（主项目 + Starter + Micrometer）
+mvn -q test
+
+# 只构建 Starter 及其依赖
+mvn -q -pl :assay-spring-boot-starter -am test
 ```
 
 完整说明见 [extensions/assay-spring-boot-starter/README.md](extensions/assay-spring-boot-starter/README.md)。
@@ -467,7 +480,7 @@ mvn -q -f extensions/assay-spring-boot-starter/pom.xml test
 `evolve` 不只比较聚合指标，还会把每条用例标记为稳定通过、回归、恢复或持续失败。回归用例会定位第一处可见差异：步骤增删、模块/动作变化、字段变化、步骤报错、最终输出或 Trace 字段变化。诊断直接读取已经评测过的 Trace，不重跑 Agent；每次运行都会变化的字段可以通过用例 `metadata.trace_diff_ignore` 忽略（默认已忽略 span id、父 span id 和时间字段）。
 
 ```bash
-java -jar target/assay.jar evolve \
+java -jar app/target/assay.jar evolve \
   --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
   --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Regressed' \
   --candidate examples/evolution.regressed.candidate.json \
@@ -484,7 +497,7 @@ java -jar target/assay.jar evolve \
 自动演化适配器实现 `AutoEvolutionAdapterFactory`，提供基线文本产物、诊断器、候选生成器和"按产物构建运行适配器"的函数。
 
 ```bash
-java -jar target/assay.jar evolve-auto \
+java -jar app/target/assay.jar evolve-auto \
   --auto-adapter com.example.MyAutoEvolution \
   --policy examples/evolution.policy.json \
   --improvement improvement.jsonl --regression regression.jsonl --holdout holdout.jsonl \

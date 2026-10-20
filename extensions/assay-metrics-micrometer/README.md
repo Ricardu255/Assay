@@ -5,8 +5,9 @@
 ## 构建
 
 ```bash
-mvn -q -DskipTests install
-mvn -q -f extensions/assay-metrics-micrometer/pom.xml test
+mvn -q -pl :assay-metrics-micrometer -am test
+# 或构建全部模块
+mvn -q test
 ```
 
 ## 使用

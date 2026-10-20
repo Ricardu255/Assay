@@ -29,11 +29,11 @@ jobs:
         with:
           node-version: "22"
       - name: Check dashboard logic
-        run: node --test src/test/js/dashboard.test.cjs
+        run: node --test app/src/test/js/dashboard.test.cjs
       - name: Evaluate with the reference adapter
         shell: bash
         run: |
-          java -jar target/assay.jar run \
+          java -jar app/target/assay.jar run \
             --adapter io.assay.examples.EchoAdapter \
             --suite smoke \
             --cases examples/cases.example.jsonl \
@@ -43,7 +43,7 @@ jobs:
       - name: Exercise the evolution workflows
         shell: bash
         run: |
-          java -jar target/assay.jar evolve \
+          java -jar app/target/assay.jar evolve \
             --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Baseline' \
             --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
             --candidate examples/evolution.candidate.json \
@@ -54,7 +54,7 @@ jobs:
             --store .assay/store \
             --output .assay/runs \
             --experiment-id ci-evolution
-          java -jar target/assay.jar evolve-auto \
+          java -jar app/target/assay.jar evolve-auto \
             --auto-adapter io.assay.examples.IntentRouterAutoEvolution \
             --policy examples/evolution.policy.json \
             --improvement examples/evolution.improvement.jsonl \
@@ -63,12 +63,6 @@ jobs:
             --store .assay/store \
             --output .assay/runs \
             --max-rounds 1 --max-candidates-per-round 2 --loop-id ci-loop
-      - name: Build and test the optional extensions
-        if: runner.os == 'Linux'
-        run: |
-          mvn -B --no-transfer-progress -q -DskipTests install
-          mvn -B --no-transfer-progress -q -f extensions/assay-spring-boot-starter/pom.xml test
-          mvn -B --no-transfer-progress -q -f extensions/assay-metrics-micrometer/pom.xml test
       - name: Build container image
         if: runner.os == 'Linux'
         run: docker build -t assay:ci .
@@ -76,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          java -jar target/assay.jar evolve \
+          java -jar app/target/assay.jar evolve \
             --baseline-adapter 'io.assay.examples.IntentRouterAdapters$Candidate' \
             --candidate-adapter 'io.assay.examples.IntentRouterAdapters$Regressed' \
             --candidate examples/evolution.regressed.candidate.json \
@@ -96,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          java -jar target/assay.jar evolve \
+          java -jar app/target/assay.jar evolve \
             --baseline-adapter examples/trace-candidate.example.json \
             --candidate-adapter examples/trace-regressed.example.json \
             --candidate examples/evolution.trace-regressed.candidate.json \

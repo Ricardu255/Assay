@@ -12,7 +12,7 @@
 - [x] P1（存储）：新增 `JdbcResultStore`、`Stores.open`、`Results.RunLock` 抽象；CLI 支持 `--store jdbc:...`；新增 5 项 JDBC 存储测试 + 1 项 CLI JDBC 测试。
 - [x] P2（集成）：新增 `extensions/assay-spring-boot-starter`，提供文件/JDBC 存储自动配置、`EvaluationEngine` 装配和 `EvaluationListener` 注入，4 项上下文测试通过。
 - [x] P2（交付）：新增 `Dockerfile`、`.dockerignore`，CI 增加 starter/metrics 测试和镜像构建。
-- [ ] P1（模块化）：尚未把主项目拆成 Maven 多模块 reactor；当前采用“主项目 + 可选扩展”的过渡形态。
+- [x] P1（模块化，Phase 1）：根 reactor 包含 `app`（artifact `assay`）、Starter、Micrometer；根目录 `mvn test` 一次构建三个模块；enforcer 禁止 `app` 引入 Spring/Micrometer/OTel；`core/cli/store` 包级拆分留 Phase 2。
 - [x] P2（可观测，Micrometer）：新增零依赖 `EvaluationListener` SPI 和 `extensions/assay-metrics-micrometer`，1 项引擎级指标测试通过。
 - [ ] P2（可观测，OTel）：OTel span 模块尚未实现。
 - [x] P0（基准）：新增 [benchmark.md](benchmark.md)，1,000 条轻量用例、8/20 workers 的本地基线（约 1,100 cases/s，明确标注不代表生产容量）。
@@ -149,17 +149,27 @@
 
 #### 4.2.1 目标结构
 
-先拆 4 个模块，不要一次拆太细：
+Phase 1 已落地，先保证“一个 reactor 能构建全部模块”，不急着拆包：
 
 ```text
-assay/
-├── pom.xml                     # parent
-├── assay-core/                 # model, rules, engine, evolve, store API, report, json, support
-├── assay-cli/                  # AssayCli, CommandLine, examples
-├── assay-store-file/           # ResultStore
-├── assay-store-jdbc/           # 新增：JDBC 实现
-├── assay-dashboard/            # web + resources（可后拆）
-└── assay-bom/                  # 可选：依赖版本管理
+assay-parent/
+├── pom.xml                     # parent + dependencyManagement
+├── app/                        # artifact: assay（当前仍包含 core/cli/dashboard/store）
+│   ├── pom.xml
+│   └── src/
+└── extensions/
+    ├── assay-spring-boot-starter/
+    └── assay-metrics-micrometer/
+```
+
+Phase 2 再把 `app/src` 拆成更细的模块：
+
+```text
+assay-core/                     # model, rules, engine, evolve, store API, report, json, support
+assay-cli/                      # AssayCli, CommandLine
+assay-store-file/               # ResultStore
+assay-store-jdbc/               # JdbcResultStore
+assay-dashboard/                # web + resources
 ```
 
 后续可再拆：
@@ -183,12 +193,20 @@ assay-metrics-micrometer/
 
 #### 4.2.3 迁移步骤
 
-1. 建 parent POM，统一 Java 17、JUnit、版本号。
-2. 先把 `io.assay.store.ResultStore` 移到 `assay-store-file`，core 只保留 `Results` 接口。
-3. 把 `AssayCli` 和 `examples` 移到 `assay-cli`。
-4. 把 `web` 和 `resources` 移到 `assay-dashboard`。
-5. 每移一步跑全量测试，保持 `mvn test` 绿。
-6. 最后加 enforcer 规则，防止反向依赖。
+Phase 1（已完成）：
+
+1. 根 `pom.xml` 改为 parent，统一 Java 17、JUnit、Spring Boot、Micrometer 版本。
+2. 主项目移入 `app/`，artifactId 保持 `assay`；根目录的 `assay` 启动脚本不冲突。
+3. Starter 和 Micrometer 扩展现有 POM 加 `<parent>`，由 reactor 统一构建。
+4. `mvn test` 一次跑 210 + 4 + 1 项测试。
+
+Phase 2（待做）：
+
+1. 先把 `io.assay.store.ResultStore` 移到 `assay-store-file`，core 只保留 `Results` 接口。
+2. 把 `AssayCli` 和 `examples` 移到 `assay-cli`。
+3. 把 `web` 和 `resources` 移到 `assay-dashboard`。
+4. 每移一步跑全量测试，保持 `mvn test` 绿。
+5. 最后加 enforcer 规则，防止反向依赖。
 
 **验收**：
 
@@ -314,7 +332,7 @@ assay:
 
 - 一个最小 Spring Boot 示例能启动并跑一条 case。
 - 不引入 Starter 时，核心仍然是零依赖。
-- `mvn -pl assay-spring-boot-starter test` 全绿。
+- `mvn -q -pl :assay-spring-boot-starter -am test` 全绿。
 
 ---
 

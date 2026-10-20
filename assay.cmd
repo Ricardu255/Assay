@@ -24,7 +24,7 @@ if not exist "%ASSAY_JAR%" (
     popd
     exit /b 1
   )
-  set "ASSAY_JAR=target\assay.jar"
+  set "ASSAY_JAR=app\target\assay.jar"
 )
 if "%~1"=="" goto demo
 if /i "%~1"=="demo" goto demo

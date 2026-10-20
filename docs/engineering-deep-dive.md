@@ -223,7 +223,7 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 python scripts/generate_cases.py --count 10000 --output /tmp/assay-cases.jsonl
 
 # 用 EchoAdapter 跑，适配器本身不访问网络
-/usr/bin/time -v java -jar target/assay.jar run \
+/usr/bin/time -v java -jar app/target/assay.jar run \
   --adapter io.assay.examples.EchoAdapter \
   --suite bench \
   --cases /tmp/assay-cases.jsonl \

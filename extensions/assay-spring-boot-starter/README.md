@@ -4,11 +4,12 @@
 
 ## 构建
 
-先在仓库根目录安装核心构件，再构建 starter：
+在仓库根目录用 reactor 构建：
 
 ```bash
-mvn -q -DskipTests install
-mvn -q -f extensions/assay-spring-boot-starter/pom.xml test
+mvn -q -pl :assay-spring-boot-starter -am test
+# 或构建全部模块
+mvn -q test
 ```
 
 ## 配置

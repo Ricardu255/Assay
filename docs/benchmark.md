@@ -23,7 +23,7 @@
 python scripts/generate_cases.py --count 1000 --output .assay/bench/cases.jsonl
 
 # 2. 运行
-java -jar target/assay.jar run \
+java -jar app/target/assay.jar run \
   --adapter io.assay.examples.EchoAdapter \
   --suite bench \
   --cases .assay/bench/cases.jsonl \

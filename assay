@@ -13,7 +13,7 @@ if [ ! -f "$ASSAY_JAR" ]; then
   fi
   echo 'Building Assay...'
   mvn -q -DskipTests package
-  ASSAY_JAR=target/assay.jar
+  ASSAY_JAR=app/target/assay.jar
 fi
 if [ "$#" -eq 0 ] || [ "$1" = demo ]; then
   echo 'Running the bundled example. No API key is needed.'

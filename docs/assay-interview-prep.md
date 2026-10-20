@@ -94,7 +94,7 @@ Candidate run ┘        │                  │
 | 核心零运行时依赖 | 可移植、易部署、无供应链负担 | JSON、HTTP Server、存储都要自己写，测试量更大 |
 | `ProjectAdapter` 四能力契约 | 领域解耦，不绑定 LangChain/OTel/厂商 | 适配器需要自己做 Trace 归一化 |
 | `Results` 接口 + 文件/JDBC 双实现 | 单机零依赖、断点恢复简单；需要数据库时可切换 | JDBC schema 需自己迁移；锁/事务语义要按数据库验证 |
-| 可选 Spring Boot Starter | 企业集成友好，不污染核心 | Starter 是独立扩展，需要额外构建/发布 |
+| 可选 Spring Boot Starter | 企业集成友好，不污染核心 | 扩展模块，已纳入 reactor；发布仍需单独配置 |
 | `EvaluationListener` + Micrometer | 可观测、可扩展，默认 no-op | 指标命名/标签基数需要设计；细粒度 span 还没做 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
 | 诊断只做“第一处可见差异” | 可解释、可测试、不重跑 Agent | 不是因果根因，非确定性轨迹可能误报 |
@@ -338,7 +338,7 @@ Candidate run ┘        │                  │
 
 ```text
 Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
-技术栈：Java 17、Maven、JUnit 5、JDBC、Spring Boot Starter、Micrometer、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
+技术栈：Java 17、Maven Reactor、JUnit 5、JDBC、Spring Boot Starter、Micrometer、JDK HttpServer、JSON/JSONL、原生 HTML/CSS/JS、Docker、GitHub Actions
 
 项目简介：面向 Agent/Skill 发布前的质量验证，解决“改完能不能发、退化在哪一步”的问题。通过适配器把不同 Agent 的 Trace 归一化，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断与 accept/reject/rollback 决策；最终收货权保留给人。
 
@@ -349,6 +349,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现 TraceDiff 首错定位：基于 LCS 对齐 module/action，识别步骤增删、替换、字段变化、报错和最终输出差异，生成用例状态迁移、失败聚类和可追溯证据，不重跑 Agent。
 - 实现运行完整性：`Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、case 内容哈希、跨进程锁、trace id 唯一性校验；异常退出后可恢复且不混跑。
 - 实现 evolve-auto 沙箱与只读 Dashboard：路径逃逸防护、暂存区/manifest/哈希校验、预算与检查点、进程树终止与容器隔离；Dashboard 支持运行/Trace/规则/演化/审计/发布视图。
+- 将主项目、Spring Boot Starter、Micrometer 扩展统一到 Maven reactor，父 POM 管理 Java/Spring/Micrometer 版本，根目录 `mvn test` 一次构建全部模块。
 - 实现零依赖 `EvaluationListener` SPI 与可选 Micrometer 扩展：run/case/batch 生命周期指标，标签不带 run_id/case_id，listener 异常不影响评测；Starter 自动注入。
 - 测试与交付：210 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 1 项 Micrometer 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、JDBC 契约、进程树、容器安全参数、范围审计和外部轨迹；Docker 镜像与 GitHub Actions Windows/Linux 双平台。
 
@@ -372,7 +373,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 把顺序调整为：
 
-1. Java 17、核心零运行时依赖、适配器类加载。
+1. Java 17、Maven reactor（app + starter + metrics）、核心零运行时依赖、适配器类加载。
 2. `Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁。
 3. 有界并发、进程树终止、容器隔离、路径安全。
 4. 规则引擎、决策引擎、TraceDiff（LCS）。
@@ -380,7 +381,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 6. `EvaluationListener` SPI + Micrometer 指标、标签基数控制、listener 异常隔离。
 7. 210 项 JUnit 测试 + 4 项 Starter 测试 + 1 项 Micrometer 测试 + Windows/Linux CI。
 
-关键词：Java 17、JDBC、Spring Boot Starter、Micrometer、Observability、Metrics Cardinality、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
+关键词：Java 17、Maven Reactor、JDBC、Spring Boot Starter、Micrometer、Observability、Metrics Cardinality、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
 
 ### 6.4 更短的一行版（空间不够时用）
 
@@ -1141,7 +1142,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - **“Starter 会不会把 Spring 带进核心？”** 不会；Starter 依赖 `assay`，反向不成立。
 - **“为什么不自动装配 Dashboard？”** Dashboard 是可选运行时，涉及端口/生命周期/安全；当前让用户显式启动，避免隐式绑定 8080。
 - **“JDBC 配置怎么给？”** Starter 只消费 `DataSource`，不猜 URL/用户名/密码；连接池和迁移由 Spring 应用负责。
-- **“怎么发布？”** 当前是独立扩展模块；先在根目录 `mvn install`，再构建 starter。后续可进 reactor 或发布到 Maven Central。
+- **“怎么发布？”** 已进入 Maven reactor，根目录 `mvn test` 会构建主项目、Starter 和 Micrometer；发布到 Maven Central 仍需额外的发布插件/签名配置。
 
 ---
 
