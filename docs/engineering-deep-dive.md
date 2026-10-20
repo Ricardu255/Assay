@@ -117,6 +117,16 @@ Candidate run ┘        │                  │
 
 测试：`JdbcResultStoreTest` 5 项 + CLI JDBC 测试 1 项；实际用 H2 跑过完整 `run`。
 
+### 2.9 可观测性：零依赖 SPI + 可选实现
+
+核心只定义 `EvaluationListener`（run/case/batch 生命周期），默认 no-op，且引擎会吞掉 listener 异常——观测者不能改变评测结果。Micrometer 实现放在 `extensions/assay-metrics-micrometer`：
+
+- `assay.cases`、`assay.case.duration`（suite/status 标签）
+- `assay.batches`、`assay.batch.size`、`assay.store.append`
+- `assay.runs`、`assay.run.duration`（suite/source/status 标签）
+
+标签刻意不带 `run_id` / `case_id`，避免时间序列基数爆炸。Micrometer 依赖只在扩展模块，核心仍然零依赖；Starter 会注入可选的 `EvaluationListener` bean。
+
 ---
 
 ## 三、首错诊断：LCS + 字段证据

@@ -63,11 +63,12 @@ jobs:
             --store .assay/store \
             --output .assay/runs \
             --max-rounds 1 --max-candidates-per-round 2 --loop-id ci-loop
-      - name: Build and test the Spring Boot starter
+      - name: Build and test the optional extensions
         if: runner.os == 'Linux'
         run: |
           mvn -B --no-transfer-progress -q -DskipTests install
           mvn -B --no-transfer-progress -q -f extensions/assay-spring-boot-starter/pom.xml test
+          mvn -B --no-transfer-progress -q -f extensions/assay-metrics-micrometer/pom.xml test
       - name: Build container image
         if: runner.os == 'Linux'
         run: docker build -t assay:ci .

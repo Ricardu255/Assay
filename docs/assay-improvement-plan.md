@@ -10,10 +10,11 @@
 
 - [x] P0：新增 [engineering-deep-dive.md](engineering-deep-dive.md)，README 补充工程深挖入口和 JDBC/Starter 用法。
 - [x] P1（存储）：新增 `JdbcResultStore`、`Stores.open`、`Results.RunLock` 抽象；CLI 支持 `--store jdbc:...`；新增 5 项 JDBC 存储测试 + 1 项 CLI JDBC 测试。
-- [x] P2（集成）：新增 `extensions/assay-spring-boot-starter`，提供文件/JDBC 存储自动配置和 `EvaluationEngine` 装配，3 项上下文测试通过。
-- [x] P2（交付）：新增 `Dockerfile`、`.dockerignore`，CI 增加 starter 测试和镜像构建。
-- [ ] P1（模块化）：尚未把主项目拆成 Maven 多模块 reactor；当前采用“主项目 + 可选 starter 扩展”的过渡形态。
-- [ ] P2（可观测）：`EvaluationListener` SPI / Micrometer / OTel 尚未实现。
+- [x] P2（集成）：新增 `extensions/assay-spring-boot-starter`，提供文件/JDBC 存储自动配置、`EvaluationEngine` 装配和 `EvaluationListener` 注入，4 项上下文测试通过。
+- [x] P2（交付）：新增 `Dockerfile`、`.dockerignore`，CI 增加 starter/metrics 测试和镜像构建。
+- [ ] P1（模块化）：尚未把主项目拆成 Maven 多模块 reactor；当前采用“主项目 + 可选扩展”的过渡形态。
+- [x] P2（可观测，Micrometer）：新增零依赖 `EvaluationListener` SPI 和 `extensions/assay-metrics-micrometer`，1 项引擎级指标测试通过。
+- [ ] P2（可观测，OTel）：OTel span 模块尚未实现。
 - [x] P0（基准）：新增 [benchmark.md](benchmark.md)，1,000 条轻量用例、8/20 workers 的本地基线（约 1,100 cases/s，明确标注不代表生产容量）。
 
 ---
@@ -23,7 +24,7 @@
 ### 1.1 已经具备的工程深度
 
 - Java 17、Maven、JUnit 5；主代码约 1.29 万行，测试约 4,900 行。
-- 208 项 Java 测试 + 10 项 Node 测试 + 3 项 Spring Boot Starter 测试；GitHub Actions Windows/Linux 双平台。
+- 210 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 1 项 Micrometer 测试；GitHub Actions Windows/Linux 双平台。
 - `ProjectAdapter` 四能力契约，支持 HTTP、Java 适配器、离线归一化轨迹、OpenInference/OTLP。
 - 四层评测、硬/软门禁、三数据集演化、场景/质量/目标门禁、规则通过率、P95。
 - `TraceDiff` LCS 首错、用例状态迁移、失败聚类。
@@ -39,7 +40,7 @@
 | 单 Maven 模块 | “不会做模块化/架构分层” | 包结构清楚，但没有用 Maven 模块固化边界 |
 | 文件存储 | “没做过数据库/事务” | `Results` 接口已抽象，但没有 JDBC 实现 |
 | 手写 JSON/HTTP Server | “重复造轮子” | 零依赖约束下的取舍，有测试覆盖；但需要把“为什么”讲清楚 |
-| 没有 OTel/Micrometer | “没做过可观测性” | 有报告和日志，但没有标准指标/Trace 导出 |
+| 没有 OTel span / 内置 exporter | “没做过可观测性” | 已有 EvaluationListener + Micrometer 指标，但没有 OTel span/内置 exporter |
 | 没有压测 | “没验证过规模” | 测试覆盖正确性，但没有吞吐/延迟数字 |
 | 没有 Spring Boot Starter | “不能嵌入企业应用” | CLI 可用，但缺少 Spring 生态入口 |
 
@@ -97,7 +98,7 @@
 2. 它解决什么问题（发布决策，不是观测）
 3. 架构图（适配器 → 评测 → 演化 → 诊断 → 存储/报告）
 4. 三个最难的问题（恢复 / 首错 / 隔离）
-5. 关键数字（208 tests、13k 行、双平台 CI）
+5. 关键数字（210 tests、13k 行、双平台 CI）
 6. 快速开始
 7. 设计取舍（为什么零依赖、为什么文件存储、为什么 LLM 不进硬门禁）
 8. 生产化路线图（JDBC、Starter、OTel）
@@ -497,13 +498,13 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 2. 问题：demo 能跑 ≠ 能发布；观测 ≠ 决策。
 3. 架构图。
 4. 三个工程难点：恢复、首错、隔离。
-5. 关键数字：208 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter 已落地。
+5. 关键数字：210 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter/Micrometer 已落地。
 6. 快速开始。
 7. 设计取舍 + 生产化路线图。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 的 Agent 评测与发布门禁引擎；核心零依赖，外围提供 JDBC 存储与 Spring Boot Starter；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；208 项测试 + 1,000 条轻量基准，CI 双平台。
+> Java 17 的 Agent 评测与发布门禁引擎；核心零依赖，外围提供 JDBC 存储、Spring Boot Starter 与 Micrometer 指标；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；210 项测试 + 1,000 条轻量基准，CI 双平台。
 
 ### 8.3 面试三句话
 

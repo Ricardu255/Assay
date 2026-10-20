@@ -49,6 +49,19 @@ class AssayAdapterConfiguration {
 
 自动配置会注入这个 `ProjectAdapter`，并创建 `EvaluationEngine`。
 
+## 可观测性
+
+如果容器里存在 `EvaluationListener` bean，Starter 会把它传给 `EvaluationEngine`：
+
+```java
+@Bean
+EvaluationListener assayMetrics(MeterRegistry registry) {
+    return new io.assay.metrics.micrometer.MicrometerEvaluationListener(registry);
+}
+```
+
+Micrometer 实现见 [Micrometer 扩展](../assay-metrics-micrometer/README.md)。没有 listener 时使用 no-op，不引入任何指标依赖。
+
 ## 边界
 
 - 不做 schema migration：JDBC 表由 `JdbcResultStore` 首次打开时 `create table if not exists` 创建；生产环境应自己管理迁移。

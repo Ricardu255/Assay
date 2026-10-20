@@ -1,0 +1,126 @@
+package io.assay.engine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.assay.model.CaseResult;
+import io.assay.model.EvalCase;
+import io.assay.model.NormalizedTrace;
+import io.assay.model.ProjectAdapter;
+import io.assay.model.TraceEvent;
+import io.assay.store.ResultStore;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** Observers receive the run/case/batch lifecycle and cannot change the verdict. */
+class EvaluationListenerTest {
+
+    @Test
+    void emitsTheRunLifecycleAndBatchEvents(@TempDir Path root) {
+        List<String> events = new CopyOnWriteArrayList<>();
+        EvaluationListener listener = new EvaluationListener() {
+            @Override
+            public void onRunStarted(String runId, String suite, String source, int caseCount) {
+                events.add("run-start:" + caseCount);
+            }
+
+            @Override
+            public void onCaseStarted(EvalCase evalCase) {
+                events.add("case-start:" + evalCase.caseId());
+            }
+
+            @Override
+            public void onCaseFinished(CaseResult result) {
+                events.add("case-finish:" + result.evalCase().caseId() + ":" + result.hardPass());
+            }
+
+            @Override
+            public void onBatchSaved(int count, long durationNanos) {
+                events.add("batch:" + count);
+            }
+
+            @Override
+            public void onRunFinished(Map<String, Object> summary, long durationNanos) {
+                events.add("run-finish");
+            }
+        };
+
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            Map<String, Object> summary = new EvaluationEngine(
+                            adapter(), store, null, 1, 0, 30, false, null, listener)
+                    .runSuite(cases(), "suite", "online", "listener-run", false);
+
+            assertEquals(2, summary.get("case_count"));
+        }
+
+        assertTrue(events.contains("run-start:2"), events.toString());
+        assertTrue(events.contains("case-start:C1"), events.toString());
+        assertTrue(events.contains("case-start:C2"), events.toString());
+        assertTrue(events.contains("case-finish:C1:true"), events.toString());
+        assertTrue(events.contains("case-finish:C2:true"), events.toString());
+        assertTrue(events.stream().anyMatch(event -> event.startsWith("batch:")), events.toString());
+        assertEquals("run-finish", events.get(events.size() - 1), events.toString());
+    }
+
+    @Test
+    void aBrokenListenerCannotBreakTheEvaluation(@TempDir Path root) {
+        EvaluationListener broken = new EvaluationListener() {
+            @Override
+            public void onRunStarted(String runId, String suite, String source, int caseCount) {
+                throw new IllegalStateException("metrics backend down");
+            }
+
+            @Override
+            public void onCaseStarted(EvalCase evalCase) {
+                throw new IllegalStateException("metrics backend down");
+            }
+
+            @Override
+            public void onCaseFinished(CaseResult result) {
+                throw new IllegalStateException("metrics backend down");
+            }
+
+            @Override
+            public void onBatchSaved(int count, long durationNanos) {
+                throw new IllegalStateException("metrics backend down");
+            }
+
+            @Override
+            public void onRunFinished(Map<String, Object> summary, long durationNanos) {
+                throw new IllegalStateException("metrics backend down");
+            }
+        };
+
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            Map<String, Object> summary = new EvaluationEngine(
+                            adapter(), store, null, 1, 0, 30, false, null, broken)
+                    .runSuite(cases(), "suite", "online", "broken-listener", false);
+
+            assertEquals(2, summary.get("case_count"));
+            assertEquals(0, summary.get("hard_failures"));
+        }
+    }
+
+    private static ProjectAdapter adapter() {
+        return new ProjectAdapter(
+                "listener-test",
+                (evalCase, context) -> Map.of("trace_id", context.runId() + "-" + evalCase.caseId()),
+                (handle, evalCase) -> new NormalizedTrace(
+                        String.valueOf(((Map<?, ?>) handle).get("trace_id")),
+                        "ok",
+                        List.of(new TraceEvent("Agent", "answer")),
+                        Map.of()),
+                List.of(),
+                List.of());
+    }
+
+    private static List<EvalCase> cases() {
+        return List.of(
+                new EvalCase("C1", Map.of("message", "one"), Map.of(), "default", Map.of(), "suite"),
+                new EvalCase("C2", Map.of("message", "two"), Map.of(), "default", Map.of(), "suite"));
+    }
+}

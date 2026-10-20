@@ -47,6 +47,7 @@ public final class EvaluationEngine {
     private final double timeoutSeconds;
     private final boolean collectFewShot;
     private final String runIdentity;
+    private final EvaluationListener listener;
 
     public EvaluationEngine(ProjectAdapter adapter, Results store) {
         this(adapter, store, null, 1, 0, 30, false, null);
@@ -61,6 +62,20 @@ public final class EvaluationEngine {
             double timeoutSeconds,
             boolean collectFewShot,
             String runIdentity) {
+        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity,
+                EvaluationListener.NOOP);
+    }
+
+    public EvaluationEngine(
+            ProjectAdapter adapter,
+            Results store,
+            LlmReviewer reviewer,
+            int workers,
+            int retries,
+            double timeoutSeconds,
+            boolean collectFewShot,
+            String runIdentity,
+            EvaluationListener listener) {
         if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
             throw new IllegalArgumentException("workers must be positive and bounded; retries must be non-negative");
         }
@@ -80,6 +95,7 @@ public final class EvaluationEngine {
         this.timeoutSeconds = timeoutSeconds;
         this.collectFewShot = collectFewShot;
         this.runIdentity = runIdentity;
+        this.listener = listener == null ? EvaluationListener.NOOP : listener;
     }
 
     public int requestedWorkers() {
@@ -150,6 +166,7 @@ public final class EvaluationEngine {
     }
 
     CaseResult evaluateCase(EvalCase evalCase, String runId, String source) {
+        notifyCaseStarted(evalCase);
         try {
             List<NormalizedTrace> traces = collectTraces(evalCase, runId, source);
             NormalizedTrace trace = traces.get(0);
@@ -191,10 +208,11 @@ public final class EvaluationEngine {
             if (collectFewShot && result.hardPass() && result.softWarningCount() == 0) {
                 result.setFewShotCandidate(fewShotCandidate(evalCase, trace, result.llmReview()));
             }
+            notifyCaseFinished(result);
             return result;
         } catch (RuntimeException error) {
             String message = messageOf(error);
-            return new CaseResult(
+            CaseResult failed = new CaseResult(
                     runId,
                     evalCase.suite(),
                     source,
@@ -210,6 +228,48 @@ public final class EvaluationEngine {
                                     "successful execution and readable trace",
                                     "framework or adapter execution failed")),
                     message);
+            notifyCaseFinished(failed);
+            return failed;
+        }
+    }
+
+    private void notifyRunStarted(String runId, String suite, String source, int caseCount) {
+        try {
+            listener.onRunStarted(runId, suite, source, caseCount);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyCaseStarted(EvalCase evalCase) {
+        try {
+            listener.onCaseStarted(evalCase);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyCaseFinished(CaseResult result) {
+        try {
+            listener.onCaseFinished(result);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyBatchSaved(int count, long durationNanos) {
+        try {
+            listener.onBatchSaved(count, durationNanos);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyRunFinished(Map<String, Object> summary, long durationNanos) {
+        try {
+            listener.onRunFinished(summary, durationNanos);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
         }
     }
 
@@ -274,6 +334,8 @@ public final class EvaluationEngine {
         metadata.put("collect_few_shot", collectFewShot);
         metadata.put("run_identity", runIdentity);
         store.startRun(runId, adapter.name(), suite, source, metadata, resume, caseManifest);
+        long runStarted = System.nanoTime();
+        notifyRunStarted(runId, suite, source, cases.size());
 
         List<EvalCase> pending = new ArrayList<>();
         for (EvalCase evalCase : cases) {
@@ -299,7 +361,9 @@ public final class EvaluationEngine {
                 batch.add(finished.get());
                 inFlight--;
                 if (batch.size() >= batchSize) {
+                    long saveStarted = System.nanoTime();
                     store.saveCases(batch);
+                    notifyBatchSaved(batch.size(), System.nanoTime() - saveStarted);
                     batch.clear();
                 }
                 if (remaining.hasNext()) {
@@ -317,7 +381,9 @@ public final class EvaluationEngine {
             pool.shutdownNow();
         }
         if (!batch.isEmpty()) {
+            long saveStarted = System.nanoTime();
             store.saveCases(batch);
+            notifyBatchSaved(batch.size(), System.nanoTime() - saveStarted);
         }
 
         List<Map<String, Object>> results = store.listResults(runId);
@@ -371,6 +437,7 @@ public final class EvaluationEngine {
         summary.put("hard_failures", hardFailures);
         summary.put("soft_warnings", softWarnings);
         summary.put("results", results);
+        notifyRunFinished(summary, System.nanoTime() - runStarted);
         return summary;
     }
 

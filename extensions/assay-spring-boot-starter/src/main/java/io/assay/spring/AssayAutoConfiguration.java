@@ -1,6 +1,7 @@
 package io.assay.spring;
 
 import io.assay.engine.EvaluationEngine;
+import io.assay.engine.EvaluationListener;
 import io.assay.model.ProjectAdapter;
 import io.assay.store.ResultStore;
 import io.assay.store.Results;
@@ -50,7 +51,10 @@ public class AssayAutoConfiguration {
     @ConditionalOnMissingBean
     @ConditionalOnBean(ProjectAdapter.class)
     EvaluationEngine assayEvaluationEngine(
-            ProjectAdapter adapter, Results results, AssayProperties properties) {
+            ProjectAdapter adapter,
+            Results results,
+            AssayProperties properties,
+            ObjectProvider<EvaluationListener> listener) {
         return new EvaluationEngine(
                 adapter,
                 results,
@@ -59,6 +63,7 @@ public class AssayAutoConfiguration {
                 properties.getRetries(),
                 properties.getTimeoutSeconds(),
                 properties.isCollectFewShot(),
-                properties.getRunIdentity());
+                properties.getRunIdentity(),
+                listener.getIfAvailable(() -> EvaluationListener.NOOP));
     }
 }

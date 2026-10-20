@@ -315,7 +315,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 | 领域适配 | `engine.ProjectAdapterFactory`、`engine.AdapterLoader`、`model.ProjectAdapter` |
 | 数据模型 | `model.*`（不可变 `record`，`CaseResult` 可变） |
 | 评测规则 | `rules.Rules`、`rules.ValueOps`、`rules.RuleConfig` |
-| 评测执行 | `engine.EvaluationEngine`、`engine.CaseLoader` |
+| 评测执行 | `engine.EvaluationEngine`、`engine.CaseLoader`、`engine.EvaluationListener` |
 | 结果存储 | `store.Results`（接口）、`store.ResultStore`、`store.jdbc.JdbcResultStore`、`store.Stores` |
 | 报告产物 | `report.Reporting`、`report.Fmt`、`audit.ScopeAuditReport` |
 | 可选 LLM | `llm.OpenAiCompatibleReviewer`、`llm.OpenAiCompatibleTextEvolver` |
@@ -378,6 +378,16 @@ mvn -q -f extensions/assay-spring-boot-starter/pom.xml test
 ```
 
 完整说明见 [extensions/assay-spring-boot-starter/README.md](extensions/assay-spring-boot-starter/README.md)。
+
+### 可观测性（可选）
+
+核心通过零依赖的 `EvaluationListener` 暴露 run / case / batch 生命周期；默认 no-op，不改变评测结果。可选的 [Micrometer 扩展](extensions/assay-metrics-micrometer/README.md) 提供：
+
+- `assay.runs`、`assay.cases`、`assay.case.duration`
+- `assay.batches`、`assay.batch.size`、`assay.store.append`
+- `assay.runs.started`、`assay.run.duration`
+
+标签只包含 `suite` / `source` / `status`，不带 `run_id` / `case_id`，避免时间序列基数爆炸。Starter 会自动注入容器里的 `EvaluationListener` bean。
 
 ## 测试集选择
 

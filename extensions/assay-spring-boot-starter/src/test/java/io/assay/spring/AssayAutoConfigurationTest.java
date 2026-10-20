@@ -3,6 +3,8 @@ package io.assay.spring;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.assay.engine.EvaluationEngine;
+import io.assay.engine.EvaluationListener;
+import io.assay.model.EvalCase;
 import io.assay.model.ProjectAdapter;
 import io.assay.store.ResultStore;
 import io.assay.store.Results;
@@ -11,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.Test;
@@ -52,6 +55,38 @@ class AssayAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(Results.class);
                     assertThat(context.getBean(Results.class)).isInstanceOf(JdbcResultStore.class);
+                });
+    }
+
+    @Test
+    void passesAnEvaluationListenerToTheEngine(@TempDir Path root) {
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger finished = new AtomicInteger();
+        EvaluationListener listener = new EvaluationListener() {
+            @Override
+            public void onCaseStarted(EvalCase evalCase) {
+                started.incrementAndGet();
+            }
+
+            @Override
+            public void onCaseFinished(io.assay.model.CaseResult result) {
+                finished.incrementAndGet();
+            }
+        };
+
+        runner.withPropertyValues("assay.store.path=" + root.toString().replace('\\', '/'))
+                .withBean(EvaluationListener.class, () -> listener)
+                .run(context -> {
+                    EvaluationEngine engine = context.getBean(EvaluationEngine.class);
+                    engine.runSuite(
+                            List.of(new EvalCase("C1", Map.of("message", "hello"), Map.of(), "default",
+                                    Map.of(), "suite")),
+                            "suite",
+                            "online",
+                            "starter-listener",
+                            false);
+                    assertThat(started).hasValue(1);
+                    assertThat(finished).hasValue(1);
                 });
     }
 
