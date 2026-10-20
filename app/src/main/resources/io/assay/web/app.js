@@ -18,7 +18,7 @@ const labels = {
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
-const setup = { mode: "example", shell: "powershell", jar: "target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
+const setup = { mode: "example", shell: "powershell", jar: "app/target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
   endpoint: "", outputPath: "output", tokenEnv: "", operator: "contains", expectedPath: "keyword",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
   validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
@@ -165,7 +165,7 @@ function setupPage() {
       <label class="form-field">通过条件<select data-setup="operator"><option value="contains" ${setup.operator === "contains" ? "selected" : ""}>回答包含期望关键字</option><option value="eq" ${setup.operator === "eq" ? "selected" : ""}>回答与期望值完全相等</option></select></label>
       ${field("expectedPath", "用例 expected 中的期望字段", "默认 keyword；填写 answer 可检查 expected.answer。")}${field("adapter", "HTTP 配置文件路径", "下载后放在项目根目录；文件名需与这里一致。")}
       <div id="setup-http" class="full" aria-live="polite"></div>` : `${field("adapter", "适配器类名或 JAR 路径")}${field("adapterClass", "JAR 内的类名（可选）", "JAR 已注册单个服务实现时可留空。")}
-      <div class="full model-note">自定义适配器实现 ProjectAdapterFactory：调用 Agent、转换 Trace、声明硬门禁与软质量规则。可参考项目内的 src/main/java/io/assay/examples/EchoAdapter.java。</div>`}
+      <div class="full model-note">自定义适配器实现 ProjectAdapterFactory：调用 Agent、转换 Trace、声明硬门禁与软质量规则。可参考项目内的 app/src/main/java/io/assay/examples/EchoAdapter.java。</div>`}
     </div></section><section class="panel"><div class="panel-head"><h2>2 · 检查测试集</h2></div><div class="panel-body form-grid">
       ${field("cases", "JSONL 文件路径", "选择文件只检查内容；请确认此处是它在电脑上的实际路径。")}${field("suite", "测试集名称")}
       <label class="form-field full">选择 JSONL 文件进行检查<input type="file" id="setup-cases" accept=".jsonl,.ndjson,application/x-ndjson,text/plain"></label>

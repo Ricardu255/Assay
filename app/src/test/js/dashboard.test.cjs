@@ -129,6 +129,12 @@ test("Diagnosis text is localized from structured evidence", () => {
   assert.equal(ui.reasonText("something new"), "something new");
 });
 
+test("Setup defaults point at the reactor artifact and source layout", () => {
+  const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
+  assert.match(source, /jar: "app\/target\/assay\.jar"/);
+  assert.match(source, /app\/src\/main\/java\/io\/assay\/examples\/EchoAdapter\.java/);
+});
+
 test("Theme follows the system, persists explicit choices and survives unavailable storage", () => {
   const script = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/theme.js"), "utf8");
   const document = { documentElement: { dataset: {} } }, window = {}, callbacks = [];
