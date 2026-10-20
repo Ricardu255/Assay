@@ -19,16 +19,25 @@
     <h2.version>2.2.224</h2.version>
     <spring-boot.version>3.5.9</spring-boot.version>
     <micrometer.version>1.15.7</micrometer.version>
+    <opentelemetry.version>1.31.0</opentelemetry.version>
   </properties>
 
   <modules>
     <module>app</module>
     <module>extensions/assay-spring-boot-starter</module>
     <module>extensions/assay-metrics-micrometer</module>
+    <module>extensions/assay-tracing-otel</module>
   </modules>
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-bom</artifactId>
+        <version>${opentelemetry.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
       <dependency>
         <groupId>io.assay</groupId>
         <artifactId>assay</artifactId>

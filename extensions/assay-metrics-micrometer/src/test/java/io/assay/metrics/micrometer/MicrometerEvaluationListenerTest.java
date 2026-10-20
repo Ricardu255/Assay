@@ -44,6 +44,18 @@ class MicrometerEvaluationListenerTest {
         assertNotNull(registry.find("assay.run.duration").timer());
     }
 
+    @Test
+    void recordsAFailedRun() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        MicrometerEvaluationListener listener = new MicrometerEvaluationListener(registry);
+
+        listener.onRunStarted("failed-run", "suite", "online", 2);
+        listener.onRunFailed("failed-run", new IllegalStateException("disk full"), 2_000_000);
+
+        assertEquals(1.0, registry.find("assay.runs").tag("status", "failed").counter().count());
+        assertEquals(1, registry.find("assay.run.duration").tag("status", "failed").timer().count());
+    }
+
     private static ProjectAdapter adapter() {
         return new ProjectAdapter(
                 "metrics-test",

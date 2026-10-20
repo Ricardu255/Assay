@@ -59,9 +59,10 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 app/                                  # artifact: assay（核心 + CLI + Dashboard + 存储实现）
 extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
 extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
+extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建三个模块。只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`；`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建四个模块。只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`；`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
@@ -401,6 +402,8 @@ mvn -q -pl :assay-spring-boot-starter -am test
 - `assay.runs.started`、`assay.run.duration`
 
 标签只包含 `suite` / `source` / `status`，不带 `run_id` / `case_id`，避免时间序列基数爆炸。Starter 会自动注入容器里的 `EvaluationListener` bean。
+
+可选的 [OpenTelemetry 扩展](extensions/assay-tracing-otel/README.md) 提供 `assay.run` / `assay.case` / `assay.batch` span：case span 挂在 run span 下，run 失败时会记录错误并关闭 span，不会留下悬挂 span。
 
 ## 测试集选择
 

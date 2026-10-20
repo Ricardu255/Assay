@@ -166,7 +166,7 @@ public final class EvaluationEngine {
     }
 
     CaseResult evaluateCase(EvalCase evalCase, String runId, String source) {
-        notifyCaseStarted(evalCase);
+        notifyCaseStarted(runId, evalCase);
         try {
             List<NormalizedTrace> traces = collectTraces(evalCase, runId, source);
             NormalizedTrace trace = traces.get(0);
@@ -241,9 +241,9 @@ public final class EvaluationEngine {
         }
     }
 
-    private void notifyCaseStarted(EvalCase evalCase) {
+    private void notifyCaseStarted(String runId, EvalCase evalCase) {
         try {
-            listener.onCaseStarted(evalCase);
+            listener.onCaseStarted(runId, evalCase);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
         }
@@ -268,6 +268,14 @@ public final class EvaluationEngine {
     private void notifyRunFinished(Map<String, Object> summary, long durationNanos) {
         try {
             listener.onRunFinished(summary, durationNanos);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyRunFailed(String runId, RuntimeException error, long durationNanos) {
+        try {
+            listener.onRunFailed(runId, error, durationNanos);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
         }
@@ -312,8 +320,14 @@ public final class EvaluationEngine {
             throw new IllegalArgumentException("resume requires a stable run_identity for the adapter and target");
         }
         String effectiveRunId = runId != null ? runId : suite + "-" + shortId();
+        RunState state = new RunState();
         try (Results.RunLock ignored = store.lockRun(effectiveRunId)) {
-            return runSuiteLocked(cases, suite, source, effectiveRunId, resume, caseManifest);
+            return runSuiteLocked(cases, suite, source, effectiveRunId, resume, caseManifest, state);
+        } catch (RuntimeException error) {
+            if (state.started) {
+                notifyRunFailed(effectiveRunId, error, System.nanoTime() - state.startedAtNanos);
+            }
+            throw error;
         }
     }
 
@@ -323,7 +337,8 @@ public final class EvaluationEngine {
             String source,
             String runId,
             boolean resume,
-            Map<String, String> caseManifest) {
+            Map<String, String> caseManifest,
+            RunState state) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("case_count", cases.size());
         metadata.put("workers", workers);
@@ -335,6 +350,8 @@ public final class EvaluationEngine {
         metadata.put("run_identity", runIdentity);
         store.startRun(runId, adapter.name(), suite, source, metadata, resume, caseManifest);
         long runStarted = System.nanoTime();
+        state.started = true;
+        state.startedAtNanos = runStarted;
         notifyRunStarted(runId, suite, source, cases.size());
 
         List<EvalCase> pending = new ArrayList<>();
@@ -540,5 +557,10 @@ public final class EvaluationEngine {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
         return value instanceof Map ? (Map<String, Object>) value : new LinkedHashMap<>();
+    }
+
+    private static final class RunState {
+        private boolean started;
+        private long startedAtNanos;
     }
 }

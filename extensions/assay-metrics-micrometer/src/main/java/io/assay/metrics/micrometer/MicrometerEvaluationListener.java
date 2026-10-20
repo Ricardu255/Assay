@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class MicrometerEvaluationListener implements EvaluationListener {
 
     private final MeterRegistry registry;
-    private final Map<String, Long> runStarts = new ConcurrentHashMap<>();
+    private final Map<String, RunStart> runStarts = new ConcurrentHashMap<>();
     private final ThreadLocal<Long> caseStarts = new ThreadLocal<>();
 
     public MicrometerEvaluationListener(MeterRegistry registry) {
@@ -27,7 +27,7 @@ public final class MicrometerEvaluationListener implements EvaluationListener {
 
     @Override
     public void onRunStarted(String runId, String suite, String source, int caseCount) {
-        runStarts.put(runId, System.nanoTime());
+        runStarts.put(runId, new RunStart(tag(suite), tag(source)));
         registry.counter("assay.runs.started", "suite", tag(suite), "source", tag(source)).increment();
     }
 
@@ -59,15 +59,32 @@ public final class MicrometerEvaluationListener implements EvaluationListener {
     @Override
     public void onRunFinished(Map<String, Object> summary, long durationNanos) {
         String runId = String.valueOf(summary.getOrDefault("run_id", ""));
-        Long started = runStarts.remove(runId);
+        RunStart started = runStarts.remove(runId);
         String status = String.valueOf(summary.getOrDefault("status", "unknown"));
-        String suite = tag(String.valueOf(summary.getOrDefault("suite", "unknown")));
-        String source = tag(String.valueOf(summary.getOrDefault("source", "unknown")));
+        String suite = started != null
+                ? started.suite()
+                : tag(String.valueOf(summary.getOrDefault("suite", "unknown")));
+        String source = started != null
+                ? started.source()
+                : tag(String.valueOf(summary.getOrDefault("source", "unknown")));
+        recordRun(suite, source, status, durationNanos);
+    }
+
+    @Override
+    public void onRunFailed(String runId, RuntimeException error, long durationNanos) {
+        RunStart started = runStarts.remove(runId);
+        String suite = started == null ? "unknown" : started.suite();
+        String source = started == null ? "unknown" : started.source();
+        recordRun(suite, source, "failed", durationNanos);
+    }
+
+    private void recordRun(String suite, String source, String status, long durationNanos) {
         registry.counter("assay.runs", "suite", suite, "source", source, "status", status).increment();
-        if (started != null) {
-            registry.timer("assay.run.duration", "suite", suite, "source", source, "status", status)
-                    .record(Duration.ofNanos(Math.max(0, System.nanoTime() - started)));
-        }
+        registry.timer("assay.run.duration", "suite", suite, "source", source, "status", status)
+                .record(Duration.ofNanos(Math.max(0, durationNanos)));
+    }
+
+    private record RunStart(String suite, String source) {
     }
 
     private static String tag(String value) {

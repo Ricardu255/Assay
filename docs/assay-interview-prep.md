@@ -1,9 +1,9 @@
 # Assay 面试准备与简历写法
 
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；210 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 1 项 Micrometer 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；211 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
-> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（12 题），面试前可单独过一遍。
+> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），面试前可单独过一遍。
 
 ---
 
@@ -15,7 +15,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 
 ### 1.2 30 秒口述版
 
-“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，210 项测试，Windows/Linux CI 都跑通。”
+“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，211 项测试，Windows/Linux CI 都跑通。”
 
 ### 1.3 2 分钟口述版
 
@@ -24,7 +24,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 3. **评测**：结构层看 Trace 完整性和硬门禁；行为层看步数、重试、延迟、重复步骤和模块错误；一致性层对高价值节点做多次运行；反馈层把隐式负反馈变成人工复核候选。
 4. **演化**：baseline 和 candidate 在 improvement / regression / holdout 三个数据集上跑同一套用例，按策略输出 accept / reject / rollback。新增了场景门禁、绝对质量门禁、规则通过率、P95 和样本覆盖。
 5. **诊断**：对“基线通过、候选失败”的用例，`TraceDiff` 用 LCS 对齐 `module/action`，定位第一处步骤增删、替换、字段变化、报错或最终输出差异；直接复用已经评测过的 Trace，不重跑 Agent。
-6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；210 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 1 项 Micrometer 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
+6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；211 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
 
 ### 1.4 5 分钟 / 白板顺序
 
@@ -95,7 +95,7 @@ Candidate run ┘        │                  │
 | `ProjectAdapter` 四能力契约 | 领域解耦，不绑定 LangChain/OTel/厂商 | 适配器需要自己做 Trace 归一化 |
 | `Results` 接口 + 文件/JDBC 双实现 | 单机零依赖、断点恢复简单；需要数据库时可切换 | JDBC schema 需自己迁移；锁/事务语义要按数据库验证 |
 | 可选 Spring Boot Starter | 企业集成友好，不污染核心 | 扩展模块，已纳入 reactor；发布仍需单独配置 |
-| `EvaluationListener` + Micrometer | 可观测、可扩展，默认 no-op | 指标命名/标签基数需要设计；细粒度 span 还没做 |
+| `EvaluationListener` + Micrometer/OTel | 可观测、可扩展，默认 no-op | 指标基数/span 层级需要设计；细粒度 adapter/规则 span 还没做 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
 | 诊断只做“第一处可见差异” | 可解释、可测试、不重跑 Agent | 不是因果根因，非确定性轨迹可能误报 |
 | 只读 Dashboard | 安全、无需构建、报告不可被界面改写 | 没有在线编辑和多人协作 |
@@ -112,7 +112,7 @@ Candidate run ┘        │                  │
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
 - **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
 - **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；1,000 条轻量用例 benchmark（约 1,100 cases/s，非生产容量承诺）。
-- **可观测**：零依赖 `EvaluationListener` SPI（run/case/batch 生命周期，默认 no-op，listener 异常不影响评测）；`extensions/assay-metrics-micrometer` 输出 run/case/batch 指标，标签不含 run_id/case_id。
+- **可观测**：零依赖 `EvaluationListener` SPI（run/case/batch 生命周期，默认 no-op，listener 异常不影响评测）；`extensions/assay-metrics-micrometer` 输出指标（标签不含 run_id/case_id），`extensions/assay-tracing-otel` 输出 run/case/batch span，失败 run 通过 `onRunFailed` 关闭 span。
 
 ---
 
@@ -284,11 +284,11 @@ Candidate run ┘        │                  │
 - 展开：原生 HTML/CSS/JS + 主题变量；`dashboard-core.js` 放校验、diff 解析、诊断文案等纯函数，`node --test` 覆盖；Java 端 `DashboardServerTest` 覆盖路由和产物读取；支持深浅色、键盘导航、URL 状态恢复。
 - 追问：组件复用怎么办？答：当前页面规模不需要组件框架；如果继续扩展，可以再引入构建链。
 
-**G2. 210 项测试怎么组织？最有价值的是哪些？**
+**G2. 211 项测试怎么组织？最有价值的是哪些？**
 
 - 一句话：重点测失败模式，不是只测 happy path。
-- 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界。
-- 追加：Spring Boot Starter 另有 4 项 `ApplicationContextRunner` 测试，验证文件/JDBC 自动配置、listener 注入和“没有 ProjectAdapter 就不装配 Engine”；Micrometer 扩展 1 项引擎级指标测试。
+- 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界。
+- 追加：Spring Boot Starter 另有 4 项 `ApplicationContextRunner` 测试；Micrometer 2 项（成功 + 失败 run）；OTel 2 项（父子 span + 失败关闭）。
 
 ### H. 取舍与反思
 
@@ -349,11 +349,11 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现 TraceDiff 首错定位：基于 LCS 对齐 module/action，识别步骤增删、替换、字段变化、报错和最终输出差异，生成用例状态迁移、失败聚类和可追溯证据，不重跑 Agent。
 - 实现运行完整性：`Results` 抽象、文件/JDBC 双存储、批式落盘、断点恢复、case 内容哈希、跨进程锁、trace id 唯一性校验；异常退出后可恢复且不混跑。
 - 实现 evolve-auto 沙箱与只读 Dashboard：路径逃逸防护、暂存区/manifest/哈希校验、预算与检查点、进程树终止与容器隔离；Dashboard 支持运行/Trace/规则/演化/审计/发布视图。
-- 将主项目、Spring Boot Starter、Micrometer 扩展统一到 Maven reactor，父 POM 管理 Java/Spring/Micrometer 版本，根目录 `mvn test` 一次构建全部模块。
-- 实现零依赖 `EvaluationListener` SPI 与可选 Micrometer 扩展：run/case/batch 生命周期指标，标签不带 run_id/case_id，listener 异常不影响评测；Starter 自动注入。
-- 测试与交付：210 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 1 项 Micrometer 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、JDBC 契约、进程树、容器安全参数、范围审计和外部轨迹；Docker 镜像与 GitHub Actions Windows/Linux 双平台。
+- 将主项目、Spring Boot Starter、Micrometer、OTel 扩展统一到 Maven reactor，父 POM 管理 Java/Spring/Micrometer/OTel 版本，根目录 `mvn test` 一次构建全部模块。
+- 实现零依赖 `EvaluationListener` SPI 与可选 Micrometer/OTel 扩展：run/case/batch 生命周期指标和 span，标签不带 run_id/case_id，listener 异常不影响评测；失败 run 通过 `onRunFailed` 关闭 span；Starter 自动注入。
+- 测试与交付：211 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试，覆盖恢复、并发（真实第二 JVM 抢锁）、JDBC 契约、进程树、容器安全参数、范围审计和外部轨迹；Docker 镜像与 GitHub Actions Windows/Linux 双平台。
 
-项目成果：核心零运行时依赖；210 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Starter 测试 + 1 项 Micrometer 测试；1,000 条轻量用例约 1,100 cases/s；示例可稳定复现 rollback 与首错定位。
+项目成果：核心零运行时依赖；211 项核心 Java 测试通过（1 项按环境跳过）+ 10 项 Node 测试 + 4 项 Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；1,000 条轻量用例约 1,100 cases/s；示例可稳定复现 rollback 与首错定位。
 ```
 
 ### 6.2 偏 Agent 评测 / 质量岗
@@ -363,7 +363,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 1. 四层评测 + 硬/软门禁 + 人工复核。
 2. 三数据集演化 + accept/reject/rollback + 场景/质量门禁。
 3. TraceDiff 首错 + 用例状态迁移 + 失败聚类。
-4. 外部轨迹接入（OpenInference/OTLP）+ EvaluationListener/Micrometer 可观测性。
+4. 外部轨迹接入（OpenInference/OTLP）+ EvaluationListener/Micrometer/OTel 可观测性。
 5. 运行完整性 + 恢复 + 并发。
 6. 测试与 CI。
 
@@ -378,14 +378,14 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 3. 有界并发、进程树终止、容器隔离、路径安全。
 4. 规则引擎、决策引擎、TraceDiff（LCS）。
 5. JDK HttpServer + 原生前端、只读 Dashboard、Spring Boot Starter。
-6. `EvaluationListener` SPI + Micrometer 指标、标签基数控制、listener 异常隔离。
-7. 210 项 JUnit 测试 + 4 项 Starter 测试 + 1 项 Micrometer 测试 + Windows/Linux CI。
+6. `EvaluationListener` SPI + Micrometer 指标 + OTel span、基数/父子关系、失败关闭、异常隔离。
+7. 211 项 JUnit 测试 + 4 项 Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试 + Windows/Linux CI。
 
-关键词：Java 17、Maven Reactor、JDBC、Spring Boot Starter、Micrometer、Observability、Metrics Cardinality、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
+关键词：Java 17、Maven Reactor、JDBC、Spring Boot Starter、Micrometer、OpenTelemetry、Observability、Metrics Cardinality、Concurrency、File Lock、Crash Recovery、ClassLoader、Process Tree、Container Isolation、Path Traversal、JUnit 5、Docker、GitHub Actions。
 
 ### 6.4 更短的一行版（空间不够时用）
 
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer 可观测性；210 项测试，Spring Boot Starter，CI 双平台。”
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；211 项测试，Spring Boot Starter，CI 双平台。”
 
 ### 6.5 可观测性 bullet（可直接复制）
 
@@ -397,7 +397,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 > 为评测引擎建立可观测性：核心 SPI 解耦 run/case/batch 事件，Micrometer 扩展覆盖吞吐、失败率、case P95、存储写入延迟；通过有限标签和 Timer/Histogram 控制基数，接入 Actuator/Prometheus；listener 故障不影响发布判定。
 
-**注意**：不要写“全链路 Trace”或“OTel 已接入”；当前只有 Micrometer 指标，OTel span 是下一步。
+**注意**：现在可以写“Micrometer 指标 + OTel run/case/batch span”，但不要写“全链路 Trace”或“adapter/规则级 span”；细粒度 span 仍是下一步。
 
 ### 6.6 排版建议
 
@@ -413,7 +413,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 1. **先讲问题，再讲架构**：不要一上来念模块。
 2. **强调“证据”和“人的决定权”**：这是项目和普通评测脚本的区别。
-3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、210 项测试、JDBC/Starter/Micrometer 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
+3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、211 项测试、JDBC/Starter/Micrometer/OTel 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
 4. **主动说取舍**：文件存储 vs 数据库、LLM 不进硬门禁、诊断是辅助证据。面试官更看重你知道边界。
 5. **准备一个具体 bug**：恢复/半行 UTF-8 或隐藏回归，按 STAR 讲。
 6. **准备一张架构图**：适配器 → 评测 → 演化 → 诊断 → 存储/报告/Dashboard。
@@ -660,13 +660,13 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **可追问**：为什么不用 React？答：零构建、零依赖、Java 直接托管；纯函数用 Node 测试，页面规模不需要组件框架。
 
-### 20. 210 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
+### 20. 211 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
 
 **考察点**：测试是否只覆盖 happy path。
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。Starter 另有 4 项上下文测试，Micrometer 扩展 1 项引擎级指标测试。
+测试按失败模式组织：评测闭环、四层规则、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。Starter 另有 4 项上下文测试，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 
@@ -716,7 +716,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 ---
 
-## 十、六个深挖专题：TraceDiff / 门禁 / 恢复 / JDBC / Starter / Micrometer
+## 十、七个深挖专题：TraceDiff / 门禁 / 恢复 / JDBC / Starter / Micrometer / OTel
 
 > 这一部分用于应对“再往下讲一点”的追问。建议按“输入输出 → 算法 → 边界 → 测试 → 取舍”的顺序讲。
 
@@ -1171,8 +1171,9 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 #### 10.6.4 测试
 
-- 2 项核心 listener 测试：生命周期事件完整；listener 全部抛异常时评测仍然通过。
-- 1 项 Micrometer 测试：真实引擎跑 2 个 case，断言 run/case/batch 指标。
+- 3 项核心 listener 测试：生命周期事件完整；listener 全部抛异常时评测仍然通过；run 失败触发 `onRunFailed`。
+- 2 项 Micrometer 测试：真实引擎跑 2 个 case 断言指标；失败 run 计入 `status=failed`。
+- 2 项 OTel 测试：run/case 父子 span；存储失败时 run span 以 ERROR 关闭。
 - 4 项 Starter 测试：包含 listener bean 注入。
 
 #### 10.6.5 追问
@@ -1180,11 +1181,65 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - **“为什么不用 AOP？”** 核心不依赖 Spring；SPI 更轻，CLI/测试/其他运行时都能用。
 - **“指标标签会不会爆炸？”** 不带 run_id/case_id；suite/source 是有限集合，且截断到 64 字符。
 - **“listener 拖慢评测怎么办？”** 默认 no-op；Micrometer 只做内存计数，导出由 registry 异步/外部决定；更细的 adapter/规则耗时需要 span，下一步做。
-- **“OTel 呢？”** API 层已经具备接入点；OTel span 模块是下一步，不在核心加依赖。
+- **“OTel 呢？”** 已新增 `extensions/assay-tracing-otel`：run/case/batch span，case 挂 run，失败 run 会关闭 span；OTel 依赖仍只在扩展模块。
 
 ---
 
-### 10.7 六个专题的“一句话总结”
+### 10.7 OTel Tracing：run/case 父子关系与失败关闭
+
+#### 10.7.1 Span 结构
+
+```text
+assay.run
+├── assay.case (C1)
+├── assay.case (C2)
+└── assay.batch
+```
+
+- `assay.run`：run_id、suite、source、case_count、status、duration_ms。
+- `assay.case`：case_id、suite、hard_pass、soft_warnings、status。
+- `assay.batch`：batch.size、duration_ms。
+- case span 通过 `Context.current().with(runSpan)` 挂到 run span 下。
+
+#### 10.7.2 为什么加 `onCaseStarted(runId, evalCase)`
+
+原来的 `onCaseStarted(EvalCase)` 只有 case，没有 run_id；worker 线程无法找到父 run span。新增默认方法：
+
+```java
+default void onCaseStarted(String runId, EvalCase evalCase) {
+    onCaseStarted(evalCase);
+}
+```
+
+引擎调新方法；旧 listener 不用改，仍然收到 `onCaseStarted(EvalCase)`。
+
+#### 10.7.3 失败关闭
+
+`onRunFailed(runId, error, durationNanos)` 在 `runSuite` 失败且已经触发 `onRunStarted` 时调用：
+
+- 从 map 取出 run span；
+- 设置 `assay.status=failed`、`assay.error`；
+- `setStatus(ERROR)`、`recordException`、`end()`；
+- 移除上下文，避免悬挂 span。
+
+OTel 测试模拟 `saveCases` 抛 `disk full`，断言 run span 状态是 ERROR 且已结束。
+
+#### 10.7.4 测试
+
+- 2 项 OTel 测试：成功 run 的 span 数量和父子关系；失败 run 的 span 关闭。
+- 使用 `InMemorySpanExporter`，不依赖 Jaeger/Phoenix。
+- 断言 `caseSpan.getParentSpanId() == runSpan.getSpanId()`。
+
+#### 10.7.5 追问
+
+- **“为什么 batch span 不挂 run？”** 当前 `onBatchSaved` 没有 run_id；可以后续扩回调，或让 listener 从线程上下文拿。先保证 run/case 正确。
+- **“OTel 会不会拖慢？”** span 创建是内存操作，导出由 SDK/processor 决定；默认 sampler 可以关。
+- **“为什么不用 Micrometer Tracing？”** 直接用 OTel API 更明确；Micrometer 指标和 OTel span 分工不同。
+- **“怎么做 adapter/规则 span？”** 需要 stage 级 SPI；当前只做 run/case/batch，避免过度设计。
+
+---
+
+### 10.8 七个专题的“一句话总结”
 
 - **TraceDiff**：用 LCS 把“哪一步开始不一样”变成可解释的字段证据，而不是一句“失败了”。
 - **门禁**：用用例级、场景级、绝对级、数值级的多层约束，把“测试通过”变成“能不能发”。
@@ -1192,10 +1247,11 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - **JDBC**：把 `Results` 从“文件实现”提升为可替换契约，代价是迁移/锁/事务要自己负责。
 - **Starter**：把企业集成放外围，核心继续零依赖；没有 `ProjectAdapter` 就不猜怎么调 Agent。
 - **Listener + Micrometer**：用零依赖 SPI 暴露生命周期，指标实现放扩展；观测失败不能影响评测结果。
+- **OTel**：run/case/batch span，case 挂 run，失败 run 也会关闭 span；核心仍然零依赖。
 
 ---
 
-## 十一、可观测性专项追问（12 题）
+## 十一、可观测性专项追问（13 题）
 
 > 这一节只围绕 `EvaluationListener` + Micrometer。回答顺序建议：**定位 → SPI → 指标 → 基数 → 测试 → 边界 → 下一步**。
 
@@ -1266,7 +1322,7 @@ Micrometer 实现的做法：
 - **Micrometer**：JVM 指标门面 + registry，Spring Boot Actuator 默认集成，适合 counter/timer/gauge。
 - **OpenTelemetry**：metrics + traces + logs 的 API/SDK/协议，适合跨服务 Trace 和供应商中立导出。
 - 两者不是互斥：Micrometer 可以桥接 OTel，OTel 也可以有 Micrometer 桥。
-- 先做 Micrometer 的原因：依赖小、和 Spring Boot 生态近、能最快验证 SPI；OTel span 需要额外的上下文/导出设计，放下一步。
+- 现在两者都已有：Micrometer 出指标，OTel 出 run/case/batch span。先做 Micrometer 是因为依赖小、和 Spring Boot 生态近、能最快验证 SPI；OTel 需要额外的上下文设计，后做但不冲突。
 
 ### 8. 指标能替代报告 / TraceDiff 吗？
 
@@ -1295,13 +1351,14 @@ Starter 用 `ObjectProvider<EvaluationListener>` 注入；没有 bean 时用 `Ev
 
 ### 10. 失败 run 没有 `onRunFinished` 怎么办？
 
-这是当前实现的已知边界：
+已经补了 `onRunFailed(runId, error, durationNanos)`：
 
-- `onRunFinished` 只在成功路径触发；worker 失败、中断、存储异常时可能只有 `onRunStarted`。
-- 结果：`assay.runs.started` 可能大于 `assay.runs`，可以用差值发现“开始了但没正常结束”的 run。
-- 下一步：加 `onRunFailed(runId, error, durationNanos)`，或者用 try/finally + status 统一收口；补 worker 异常/中断测试。
+- `runSuite` 用一个 `RunState` 记录“是否已经触发 onRunStarted”；只有 start 成功后才在 catch 里发 `onRunFailed`。
+- Micrometer 把失败 run 记成 `assay.runs{status="failed"}`，并记录 `assay.run.duration`。
+- OTel 把 run span 设为 ERROR、`recordException`、`end()`，不会留下悬挂 span。
+- 测试覆盖：存储 `saveCases` 抛异常时，核心 listener 收到 failed，Micrometer/OTel 都能断言。
 
-面试时主动说这个边界，比假装“全覆盖”更加分。
+仍然存在的边界：如果 `lockRun` 或 `startRun` 在 `onRunStarted` 之前失败，就没有“已开始”的 run 可失败，不会发 `onRunFailed`；这是有意的，避免把锁冲突算成一次失败评测。
 
 ### 11. 下一步加什么指标？怎么避免“指标很多但没用”？
 
@@ -1345,6 +1402,21 @@ histogram_quantile(0.95, rate(assay_case_duration_seconds_bucket[5m]))
 histogram_quantile(0.95, rate(assay_store_append_seconds_bucket[5m]))
 ```
 
+### 13. OTel span 怎么保证父子关系？失败 run 会不会漏 span？
+
+父子关系：
+
+- 新增默认方法 `onCaseStarted(String runId, EvalCase evalCase)`；旧 listener 仍然收到 `onCaseStarted(EvalCase)`。
+- `onRunStarted` 把 `Context.current().with(runSpan)` 存进 `ConcurrentHashMap`。
+- worker 线程执行 case 时，用 runId 取出父 Context，`spanBuilder("assay.case").setParent(parent)`。
+- 测试断言 `caseSpan.getParentSpanId() == runSpan.getSpanId()`。
+
+失败关闭：
+
+- `onRunFailed` 从 map 取出 run span，设置 `status=failed`、`error`，`setStatus(ERROR)`、`recordException`、`end()`。
+- 测试模拟 `saveCases` 抛 `disk full`，断言 run span 状态 ERROR 且已结束。
+- batch span 当前是独立 span；如果要求严格父子关系，需要把 run_id 加入 batch 回调。
+
 ### 30 秒回答模板
 
-> “核心通过零依赖的 `EvaluationListener` 发 run/case/batch 生命周期事件，默认 no-op，listener 异常不会影响评测。Micrometer 实现放在独立扩展里，输出失败率、case P95、批量落盘延迟等指标；标签只用 suite/source/status，不带 run_id/case_id，避免基数爆炸。测试用 SimpleMeterRegistry 跑真实引擎，不依赖 Prometheus。OTel span 是下一步。”
+> “核心通过零依赖的 `EvaluationListener` 发 run/case/batch 生命周期事件，默认 no-op，listener 异常不会影响评测。Micrometer 扩展输出失败率、case P95、批量落盘延迟等指标，标签不带 run_id/case_id；OTel 扩展输出 run/case/batch span，case 挂 run，失败 run 会 recordException 并关闭。测试分别用 SimpleMeterRegistry 和 InMemorySpanExporter，不依赖外部 collector。”

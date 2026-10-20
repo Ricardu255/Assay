@@ -127,6 +127,8 @@ Candidate run ┘        │                  │
 
 标签刻意不带 `run_id` / `case_id`，避免时间序列基数爆炸。Micrometer 依赖只在扩展模块，核心仍然零依赖；Starter 会注入可选的 `EvaluationListener` bean。
 
+OTel 实现放在 `extensions/assay-tracing-otel`：`assay.run` 下挂 `assay.case`，失败 run 通过 `onRunFailed` 记录异常并关闭 span；`assay.batch` 记录批量落盘。SDK/exporter 由使用方提供，核心和 `app` 仍不依赖 OTel。
+
 ---
 
 ## 三、首错诊断：LCS + 字段证据

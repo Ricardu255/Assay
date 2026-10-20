@@ -61,7 +61,16 @@ EvaluationListener assayMetrics(MeterRegistry registry) {
 }
 ```
 
-Micrometer 实现见 [Micrometer 扩展](../assay-metrics-micrometer/README.md)。没有 listener 时使用 no-op，不引入任何指标依赖。
+同一接口也可以接 OpenTelemetry：
+
+```java
+@Bean
+EvaluationListener assayTracing(Tracer tracer) {
+    return new io.assay.tracing.otel.OtelEvaluationListener(tracer);
+}
+```
+
+Micrometer 实现见 [Micrometer 扩展](../assay-metrics-micrometer/README.md)，OTel 实现见 [OTel 扩展](../assay-tracing-otel/README.md)。没有 listener 时使用 no-op，不引入任何指标/Trace 依赖。
 
 ## 边界
 

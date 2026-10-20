@@ -1,6 +1,7 @@
 package io.assay.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.model.CaseResult;
@@ -9,6 +10,9 @@ import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TraceEvent;
 import io.assay.store.ResultStore;
+import io.assay.store.Results;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -103,6 +107,50 @@ class EvaluationListenerTest {
             assertEquals(2, summary.get("case_count"));
             assertEquals(0, summary.get("hard_failures"));
         }
+    }
+
+    @Test
+    void reportsAFailedRunAfterItStarted(@TempDir Path root) {
+        List<String> events = new CopyOnWriteArrayList<>();
+        EvaluationListener listener = new EvaluationListener() {
+            @Override
+            public void onRunStarted(String runId, String suite, String source, int caseCount) {
+                events.add("started");
+            }
+
+            @Override
+            public void onRunFinished(Map<String, Object> summary, long durationNanos) {
+                events.add("finished");
+            }
+
+            @Override
+            public void onRunFailed(String runId, RuntimeException error, long durationNanos) {
+                events.add("failed");
+            }
+        };
+
+        try (ResultStore delegate = new ResultStore(root.resolve("store"))) {
+            Results failing = (Results) Proxy.newProxyInstance(
+                    Results.class.getClassLoader(),
+                    new Class<?>[] {Results.class},
+                    (proxy, method, args) -> {
+                        if (method.getName().equals("saveCases")) {
+                            throw new IllegalStateException("disk full");
+                        }
+                        try {
+                            return method.invoke(delegate, args);
+                        } catch (InvocationTargetException error) {
+                            throw error.getCause();
+                        }
+                    });
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> new EvaluationEngine(adapter(), failing, null, 1, 0, 30, false, null, listener)
+                            .runSuite(cases(), "suite", "online", "failed-listener", false));
+        }
+
+        assertEquals(List.of("started", "failed"), events);
     }
 
     private static ProjectAdapter adapter() {
