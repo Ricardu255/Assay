@@ -42,7 +42,15 @@ class OtelEvaluationListenerTest {
 
             try (ResultStore store = new ResultStore(root.resolve("store"))) {
                 Map<String, Object> summary = new EvaluationEngine(
-                                adapter(), store, null, 1, 0, 30, false, null, listener)
+                                adapter(),
+                                store,
+                                (evalCase, traces, checks, collectFewShot) -> Map.of("summary", "ok"),
+                                1,
+                                0,
+                                30,
+                                true,
+                                null,
+                                listener)
                         .runSuite(cases(), "suite", "online", "otel-run", false);
                 assertEquals(2, summary.get("case_count"));
             }
@@ -65,7 +73,11 @@ class OtelEvaluationListenerTest {
                 assertNotNull(caseSpan.getAttributes().get(AttributeKey.stringKey("assay.case_id")));
                 assertEquals(StatusCode.OK, caseSpan.getStatus().getStatusCode());
             }
-            assertTrue(spans.stream().anyMatch(span -> span.getName().equals("assay.batch")));
+            SpanData batch = spans.stream()
+                    .filter(span -> span.getName().equals("assay.batch"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(run.getSpanId(), batch.getParentSpanId());
 
             List<SpanData> adapters = spans.stream()
                     .filter(span -> span.getName().equals("assay.adapter"))
@@ -73,17 +85,25 @@ class OtelEvaluationListenerTest {
             List<SpanData> rules = spans.stream()
                     .filter(span -> span.getName().equals("assay.rules"))
                     .toList();
+            List<SpanData> llms = spans.stream()
+                    .filter(span -> span.getName().equals("assay.llm"))
+                    .toList();
             List<SpanData> stores = spans.stream()
                     .filter(span -> span.getName().equals("assay.store"))
                     .toList();
             assertEquals(2, adapters.size());
             assertEquals(2, rules.size());
+            assertEquals(2, llms.size());
             assertEquals(1, stores.size());
             for (SpanData stage : adapters) {
                 assertEquals(StatusCode.OK, stage.getStatus().getStatusCode());
                 assertCaseParent(stage, cases);
             }
             for (SpanData stage : rules) {
+                assertEquals(StatusCode.OK, stage.getStatus().getStatusCode());
+                assertCaseParent(stage, cases);
+            }
+            for (SpanData stage : llms) {
                 assertEquals(StatusCode.OK, stage.getStatus().getStatusCode());
                 assertCaseParent(stage, cases);
             }

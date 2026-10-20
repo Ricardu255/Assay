@@ -131,15 +131,26 @@ class EvaluationListenerTest {
         };
 
         try (ResultStore store = new ResultStore(root.resolve("store"))) {
-            new EvaluationEngine(adapter(), store, null, 1, 0, 30, false, null, listener)
+            new EvaluationEngine(
+                            adapter(),
+                            store,
+                            (evalCase, traces, checks, collectFewShot) -> Map.of("summary", "ok"),
+                            1,
+                            0,
+                            30,
+                            true,
+                            null,
+                            listener)
                     .runSuite(List.of(cases().get(0)), "suite", "online", "stage-run", false);
         }
 
         assertEquals(1, events.stream().filter((event) -> event.equals("start:ADAPTER")).count());
         assertEquals(1, events.stream().filter((event) -> event.equals("start:RULES")).count());
+        assertEquals(1, events.stream().filter((event) -> event.equals("start:LLM")).count());
         assertEquals(1, events.stream().filter((event) -> event.equals("start:STORE")).count());
         assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:ADAPTER:true:")));
         assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:RULES:true:")));
+        assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:LLM:true:")));
         assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:STORE:true:")));
     }
 

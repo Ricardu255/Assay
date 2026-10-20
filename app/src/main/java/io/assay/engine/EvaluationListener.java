@@ -39,6 +39,7 @@ public interface EvaluationListener {
     enum Stage {
         ADAPTER,
         RULES,
+        LLM,
         STORE
     }
 
@@ -57,6 +58,11 @@ public interface EvaluationListener {
             long durationNanos,
             RuntimeException error,
             Map<String, Object> attributes) {
+    }
+
+    /** Run-aware batch hook; the default keeps older listeners working. */
+    default void onBatchSaved(String runId, int count, long durationNanos) {
+        onBatchSaved(count, durationNanos);
     }
 
     default void onBatchSaved(int count, long durationNanos) {

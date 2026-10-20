@@ -136,10 +136,23 @@ public final class OtelEvaluationListener implements EvaluationListener {
 
     @Override
     public void onBatchSaved(int count, long durationNanos) {
-        Span span = tracer.spanBuilder("assay.batch")
+        batchSpan(null, count, durationNanos);
+    }
+
+    @Override
+    public void onBatchSaved(String runId, int count, long durationNanos) {
+        batchSpan(runId, count, durationNanos);
+    }
+
+    private void batchSpan(String runId, int count, long durationNanos) {
+        var builder = tracer.spanBuilder("assay.batch")
                 .setAttribute(BATCH_SIZE, (long) count)
-                .setAttribute(DURATION_MS, durationNanos / 1_000_000)
-                .startSpan();
+                .setAttribute(DURATION_MS, durationNanos / 1_000_000);
+        Context parent = runId == null ? null : runContexts.get(runId);
+        if (parent != null) {
+            builder.setParent(parent);
+        }
+        Span span = builder.startSpan();
         span.setStatus(StatusCode.OK);
         span.end();
     }

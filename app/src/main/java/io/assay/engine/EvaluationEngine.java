@@ -240,6 +240,8 @@ public final class EvaluationEngine {
                 }
             }
             if (reviewer != null && shouldReview) {
+                notifyStageStarted(runId, EvaluationListener.Stage.LLM, evalCase);
+                long llmStarted = System.nanoTime();
                 try {
                     result.setLlmReview(
                             reviewer.analyze(
@@ -247,7 +249,21 @@ public final class EvaluationEngine {
                                     traces,
                                     checks,
                                     collectFewShot && result.hardPass() && result.softWarningCount() == 0));
+                    notifyStageFinished(
+                            runId,
+                            EvaluationListener.Stage.LLM,
+                            evalCase,
+                            System.nanoTime() - llmStarted,
+                            null,
+                            Map.of("collect_few_shot", collectFewShot));
                 } catch (RuntimeException error) {
+                    notifyStageFinished(
+                            runId,
+                            EvaluationListener.Stage.LLM,
+                            evalCase,
+                            System.nanoTime() - llmStarted,
+                            error,
+                            Map.of("collect_few_shot", collectFewShot));
                     // LLM analysis never changes evaluation truth.
                     Map<String, Object> failure = new LinkedHashMap<>();
                     failure.put("error", String.valueOf(error));
@@ -343,7 +359,7 @@ public final class EvaluationEngine {
                     duration,
                     null,
                     Map.of("count", batch.size()));
-            notifyBatchSaved(batch.size(), duration);
+            notifyBatchSaved(runId, batch.size(), duration);
         } catch (RuntimeException error) {
             notifyStageFinished(
                     runId,
@@ -356,9 +372,9 @@ public final class EvaluationEngine {
         }
     }
 
-    private void notifyBatchSaved(int count, long durationNanos) {
+    private void notifyBatchSaved(String runId, int count, long durationNanos) {
         try {
-            listener.onBatchSaved(count, durationNanos);
+            listener.onBatchSaved(runId, count, durationNanos);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
         }

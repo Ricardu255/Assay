@@ -95,7 +95,7 @@ Candidate run ┘        │                  │
 | `ProjectAdapter` 四能力契约 | 领域解耦，不绑定 LangChain/OTel/厂商 | 适配器需要自己做 Trace 归一化 |
 | `Results` 接口 + 文件/JDBC 双实现 | 单机零依赖、断点恢复简单；需要数据库时可切换 | JDBC schema 需自己迁移；锁/事务语义要按数据库验证 |
 | 可选 Spring Boot Starter | 企业集成友好，不污染核心 | 扩展模块，已纳入 reactor；发布仍需单独配置 |
-| `EvaluationListener` + Micrometer/OTel | 可观测、可扩展，默认 no-op | 指标基数/span 层级需要设计；adapter/rules/store 子 span 已做，LLM span 未做 |
+| `EvaluationListener` + Micrometer/OTel | 可观测、可扩展，默认 no-op | 指标基数/span 层级需要设计；adapter/rules/llm/store 子 span 已做 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
 | 诊断只做“第一处可见差异” | 可解释、可测试、不重跑 Agent | 不是因果根因，非确定性轨迹可能误报 |
 | 只读 Dashboard | 安全、无需构建、报告不可被界面改写 | 没有在线编辑和多人协作 |
@@ -1146,7 +1146,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 - **“为什么不用 AOP？”** 核心不依赖 Spring；SPI 更轻，CLI/测试/其他运行时都能用。
 - **“指标标签会不会爆炸？”** 不带 run_id/case_id；suite/source 是有限集合，且截断到 64 字符。
-- **“listener 拖慢评测怎么办？”** 默认 no-op；Micrometer 只做内存计数，导出由 registry 异步/外部决定；更细的 adapter/rules/store 耗时已由 stage span 覆盖，LLM 调用仍未覆盖。
+- **“listener 拖慢评测怎么办？”** 默认 no-op；Micrometer 只做内存计数，导出由 registry 异步/外部决定；更细的 adapter/rules/store 耗时已由 stage span 覆盖，LLM review 也已加 `assay.llm` span。
 - **“OTel 呢？”** 已新增 `extensions/assay-tracing-otel`：run/case/batch span，case 挂 run，失败 run 会关闭 span；OTel 依赖仍只在扩展模块。
 
 ---
@@ -1159,10 +1159,12 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 assay.run
 ├── assay.case (C1)
 │   ├── assay.adapter
-│   └── assay.rules
+│   ├── assay.rules
+│   └── assay.llm
 ├── assay.case (C2)
 │   ├── assay.adapter
-│   └── assay.rules
+│   ├── assay.rules
+│   └── assay.llm
 ├── assay.store
 └── assay.batch
 ```
@@ -1171,8 +1173,9 @@ assay.run
 - `assay.case`：case_id、suite、hard_pass、soft_warnings、status。
 - `assay.adapter`：attempt；挂 case。
 - `assay.rules`：checks、trace_count；挂 case。
+- `assay.llm`：collect_few_shot；挂 case。
 - `assay.store`：count；挂 run。
-- `assay.batch`：batch.size、duration_ms。
+- `assay.batch`：batch.size、duration_ms；挂 run。
 - case span 通过 `Context.current().with(runSpan)` 挂到 run span 下。
 
 #### 10.7.2 为什么加 `onCaseStarted(runId, evalCase)`
@@ -1209,7 +1212,7 @@ OTel 测试模拟 `saveCases` 抛 `disk full`，断言 run span 状态是 ERROR 
 - **“为什么 batch span 不挂 run？”** 当前 `onBatchSaved` 没有 run_id；可以后续扩回调，或让 listener 从线程上下文拿。先保证 run/case 正确。
 - **“OTel 会不会拖慢？”** span 创建是内存操作，导出由 SDK/processor 决定；默认 sampler 可以关。
 - **“为什么不用 Micrometer Tracing？”** 直接用 OTel API 更明确；Micrometer 指标和 OTel span 分工不同。
-- **“怎么做 adapter/规则 span？”** 已加 `Stage` 级 SPI：`ADAPTER` / `RULES` / `STORE`；adapter/rules 挂 case，store 挂 run。stage 的 `onStageStarted/Finished` 与 case 生命周期解耦，listener 仍是 no-op 默认。
+- **“怎么做 adapter/规则 span？”** 已加 `Stage` 级 SPI：`ADAPTER` / `RULES` / `LLM` / `STORE`；adapter/rules/llm 挂 case，store 和 batch 挂 run。stage 的 `onStageStarted/Finished` 与 case 生命周期解耦，listener 仍是 no-op 默认。
 
 ---
 

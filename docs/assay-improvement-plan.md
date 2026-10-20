@@ -15,7 +15,7 @@
 - [x] P1（模块化，Phase 1）：根 reactor 包含 `app`（artifact `assay`）、Starter、Micrometer、OTel；根目录 `mvn test` 一次构建四个模块；enforcer 禁止 `app` 引入 Spring/Micrometer/OTel；`core/cli/store` 包级拆分留 Phase 2。
 - [x] P2（可观测，Micrometer）：新增零依赖 `EvaluationListener` SPI 和 `extensions/assay-metrics-micrometer`，2 项测试通过。
 - [x] P2（可观测，OTel）：新增 `extensions/assay-tracing-otel`，run/case/batch span 和失败 run 收口，2 项测试通过。
-- [x] P2（可观测，Stage span）：新增 `ADAPTER` / `RULES` / `STORE` 阶段回调；adapter/rules 挂 case，store 挂 run；核心 Stage 测试 + OTel 父子断言通过。
+- [x] P2（可观测，Stage span）：新增 `ADAPTER` / `RULES` / `LLM` / `STORE` 阶段回调；adapter/rules/llm 挂 case，store/batch 挂 run；核心 Stage 测试 + OTel 父子断言通过。
 - [x] P0（基准）：新增 [benchmark.md](benchmark.md)，1,000 条轻量用例、8/20 workers 的本地基线（约 1,100 cases/s，明确标注不代表生产容量）。
 
 ---
@@ -41,7 +41,7 @@
 | 多模块只完成 Phase 1 | “没有真正拆包” | 根 reactor 已建；`core/cli/store` 包级拆分留 Phase 2 |
 | JDBC 只有基础实现 | “没做过迁移/分布式锁” | `JdbcResultStore` 已落地；缺 schema migration、分布式锁 TTL |
 | 手写 JSON/HTTP Server | “重复造轮子” | 零依赖约束下的取舍，有测试覆盖；但需要把“为什么”讲清楚 |
-| 没有内置 exporter / LLM span | “没做过可观测性” | Micrometer/OTel 和 adapter/rules/store stage span 已落地；exporter 由使用方提供，LLM span 未做 |
+| 没有内置 exporter | “没做过可观测性” | Micrometer/OTel 和 adapter/rules/llm/store stage span 已落地；exporter 由使用方提供 |
 | 没有 10k/真实 Agent 压测 | “没验证过规模” | 1,000 条轻量基线；缺 10k/JDBC/真实 Agent 数据 |
 | Starter 已落地 | “不能嵌入企业应用” | 可选模块，不污染核心；发布到 Maven Central 仍需配置 |
 
@@ -367,7 +367,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 #### 4.5.2 OTel Trace
 
 - 已实现 run/case/batch span；case 挂 run，失败 run 会关闭 span。
-- adapter / rules / store 的 stage 子 span 已实现；LLM review span 尚未实现。
+- adapter / rules / llm / store 的 stage 子 span 已实现；batch span 已挂到 run。
 - exporter 由使用方提供；不要求核心依赖 OTel；只在 `assay-tracing-otel` 模块。
 
 #### 4.5.3 压测
