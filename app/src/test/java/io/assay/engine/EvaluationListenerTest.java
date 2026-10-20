@@ -110,6 +110,40 @@ class EvaluationListenerTest {
     }
 
     @Test
+    void emitsAdapterRulesAndStoreStages(@TempDir Path root) {
+        List<String> events = new CopyOnWriteArrayList<>();
+        EvaluationListener listener = new EvaluationListener() {
+            @Override
+            public void onStageStarted(String runId, Stage stage, EvalCase evalCase) {
+                events.add("start:" + stage);
+            }
+
+            @Override
+            public void onStageFinished(
+                    String runId,
+                    Stage stage,
+                    EvalCase evalCase,
+                    long durationNanos,
+                    RuntimeException error,
+                    Map<String, Object> attributes) {
+                events.add("finish:" + stage + ":" + (error == null) + ":" + attributes);
+            }
+        };
+
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            new EvaluationEngine(adapter(), store, null, 1, 0, 30, false, null, listener)
+                    .runSuite(List.of(cases().get(0)), "suite", "online", "stage-run", false);
+        }
+
+        assertEquals(1, events.stream().filter((event) -> event.equals("start:ADAPTER")).count());
+        assertEquals(1, events.stream().filter((event) -> event.equals("start:RULES")).count());
+        assertEquals(1, events.stream().filter((event) -> event.equals("start:STORE")).count());
+        assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:ADAPTER:true:")));
+        assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:RULES:true:")));
+        assertTrue(events.stream().anyMatch((event) -> event.startsWith("finish:STORE:true:")));
+    }
+
+    @Test
     void reportsAFailedRunAfterItStarted(@TempDir Path root) {
         List<String> events = new CopyOnWriteArrayList<>();
         EvaluationListener listener = new EvaluationListener() {

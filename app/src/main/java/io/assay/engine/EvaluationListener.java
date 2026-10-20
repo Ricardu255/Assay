@@ -35,6 +35,30 @@ public interface EvaluationListener {
     default void onCaseFinished(CaseResult result) {
     }
 
+    /** A unit of work inside a case or run, used for child spans and stage metrics. */
+    enum Stage {
+        ADAPTER,
+        RULES,
+        STORE
+    }
+
+    default void onStageStarted(String runId, Stage stage, EvalCase evalCase) {
+    }
+
+    /**
+     * @param evalCase the case for adapter/rules stages; {@code null} for run-scoped store work
+     * @param error the failure, or {@code null} on success
+     * @param attributes small, bounded attributes (for example {@code count} or {@code checks})
+     */
+    default void onStageFinished(
+            String runId,
+            Stage stage,
+            EvalCase evalCase,
+            long durationNanos,
+            RuntimeException error,
+            Map<String, Object> attributes) {
+    }
+
     default void onBatchSaved(int count, long durationNanos) {
     }
 

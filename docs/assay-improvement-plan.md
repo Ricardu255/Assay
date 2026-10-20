@@ -15,6 +15,7 @@
 - [x] P1（模块化，Phase 1）：根 reactor 包含 `app`（artifact `assay`）、Starter、Micrometer、OTel；根目录 `mvn test` 一次构建四个模块；enforcer 禁止 `app` 引入 Spring/Micrometer/OTel；`core/cli/store` 包级拆分留 Phase 2。
 - [x] P2（可观测，Micrometer）：新增零依赖 `EvaluationListener` SPI 和 `extensions/assay-metrics-micrometer`，2 项测试通过。
 - [x] P2（可观测，OTel）：新增 `extensions/assay-tracing-otel`，run/case/batch span 和失败 run 收口，2 项测试通过。
+- [x] P2（可观测，Stage span）：新增 `ADAPTER` / `RULES` / `STORE` 阶段回调；adapter/rules 挂 case，store 挂 run；核心 Stage 测试 + OTel 父子断言通过。
 - [x] P0（基准）：新增 [benchmark.md](benchmark.md)，1,000 条轻量用例、8/20 workers 的本地基线（约 1,100 cases/s，明确标注不代表生产容量）。
 
 ---
@@ -24,7 +25,7 @@
 ### 1.1 已经具备的工程深度
 
 - Java 17、Maven、JUnit 5；主代码约 1.29 万行，测试约 4,900 行。
-- 211 项核心 Java 测试 + 10 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+- 212 项核心 Java 测试 + 14 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 - `ProjectAdapter` 四能力契约，支持 HTTP、Java 适配器、离线归一化轨迹、OpenInference/OTLP。
 - 四层评测、硬/软门禁、三数据集演化、场景/质量/目标门禁、规则通过率、P95。
 - `TraceDiff` LCS 首错、用例状态迁移、失败聚类。
@@ -40,7 +41,7 @@
 | 多模块只完成 Phase 1 | “没有真正拆包” | 根 reactor 已建；`core/cli/store` 包级拆分留 Phase 2 |
 | JDBC 只有基础实现 | “没做过迁移/分布式锁” | `JdbcResultStore` 已落地；缺 schema migration、分布式锁 TTL |
 | 手写 JSON/HTTP Server | “重复造轮子” | 零依赖约束下的取舍，有测试覆盖；但需要把“为什么”讲清楚 |
-| 没有内置 exporter / 细粒度 span | “没做过可观测性” | Micrometer/OTel 已落地；exporter 由使用方提供，adapter/规则 span 未做 |
+| 没有内置 exporter / LLM span | “没做过可观测性” | Micrometer/OTel 和 adapter/rules/store stage span 已落地；exporter 由使用方提供，LLM span 未做 |
 | 没有 10k/真实 Agent 压测 | “没验证过规模” | 1,000 条轻量基线；缺 10k/JDBC/真实 Agent 数据 |
 | Starter 已落地 | “不能嵌入企业应用” | 可选模块，不污染核心；发布到 Maven Central 仍需配置 |
 
@@ -98,7 +99,7 @@
 2. 它解决什么问题（发布决策，不是观测）
 3. 架构图（适配器 → 评测 → 演化 → 诊断 → 存储/报告）
 4. 三个最难的问题（恢复 / 首错 / 隔离）
-5. 关键数字（211 tests、13k 行、双平台 CI）
+5. 关键数字（212 tests、13k 行、双平台 CI）
 6. 快速开始
 7. 设计取舍（为什么零依赖、为什么文件存储、为什么 LLM 不进硬门禁）
 8. 生产化路线图（JDBC、Starter、OTel）
@@ -198,7 +199,7 @@ Phase 1（已完成）：
 1. 根 `pom.xml` 改为 parent，统一 Java 17、JUnit、Spring Boot、Micrometer 版本。
 2. 主项目移入 `app/`，artifactId 保持 `assay`；根目录的 `assay` 启动脚本不冲突。
 3. Starter 和 Micrometer 扩展现有 POM 加 `<parent>`，由 reactor 统一构建。
-4. `mvn test` 一次跑 211 + 4 + 2 + 2 项测试。
+4. `mvn test` 一次跑 212 + 4 + 2 + 2 项测试。
 
 Phase 2（待做）：
 
@@ -366,7 +367,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 #### 4.5.2 OTel Trace
 
 - 已实现 run/case/batch span；case 挂 run，失败 run 会关闭 span。
-- adapter.call、rules.evaluate、store.append 的 stage 级子 span 尚未实现。
+- adapter / rules / store 的 stage 子 span 已实现；LLM review span 尚未实现。
 - exporter 由使用方提供；不要求核心依赖 OTel；只在 `assay-tracing-otel` 模块。
 
 #### 4.5.3 压测
@@ -516,13 +517,13 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 2. 问题：demo 能跑 ≠ 能发布；观测 ≠ 决策。
 3. 架构图。
 4. 三个工程难点：恢复、首错、隔离。
-5. 关键数字：211 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter/Micrometer/OTel 已落地。
+5. 关键数字：212 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter/Micrometer/OTel/stage span 已落地。
 6. 快速开始。
 7. 设计取舍 + 生产化路线图。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；211 项测试 + 1,000 条轻量基准，CI 双平台。
+> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；212 项测试 + 1,000 条轻量基准，CI 双平台。
 
 ### 8.3 面试三句话
 

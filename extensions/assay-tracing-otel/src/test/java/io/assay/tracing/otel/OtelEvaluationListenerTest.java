@@ -66,6 +66,29 @@ class OtelEvaluationListenerTest {
                 assertEquals(StatusCode.OK, caseSpan.getStatus().getStatusCode());
             }
             assertTrue(spans.stream().anyMatch(span -> span.getName().equals("assay.batch")));
+
+            List<SpanData> adapters = spans.stream()
+                    .filter(span -> span.getName().equals("assay.adapter"))
+                    .toList();
+            List<SpanData> rules = spans.stream()
+                    .filter(span -> span.getName().equals("assay.rules"))
+                    .toList();
+            List<SpanData> stores = spans.stream()
+                    .filter(span -> span.getName().equals("assay.store"))
+                    .toList();
+            assertEquals(2, adapters.size());
+            assertEquals(2, rules.size());
+            assertEquals(1, stores.size());
+            for (SpanData stage : adapters) {
+                assertEquals(StatusCode.OK, stage.getStatus().getStatusCode());
+                assertCaseParent(stage, cases);
+            }
+            for (SpanData stage : rules) {
+                assertEquals(StatusCode.OK, stage.getStatus().getStatusCode());
+                assertCaseParent(stage, cases);
+            }
+            assertEquals(run.getSpanId(), stores.get(0).getParentSpanId());
+            assertEquals(2L, stores.get(0).getAttributes().get(AttributeKey.longKey("count")));
         } finally {
             provider.close();
         }
@@ -108,6 +131,15 @@ class OtelEvaluationListenerTest {
         } finally {
             provider.close();
         }
+    }
+
+    private static void assertCaseParent(SpanData stage, List<SpanData> cases) {
+        String caseId = stage.getAttributes().get(AttributeKey.stringKey("assay.case_id"));
+        SpanData parent = cases.stream()
+                .filter(candidate -> caseId.equals(candidate.getAttributes().get(AttributeKey.stringKey("assay.case_id"))))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(parent.getSpanId(), stage.getParentSpanId());
     }
 
     private static ProjectAdapter adapter() {

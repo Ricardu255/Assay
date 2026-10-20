@@ -403,7 +403,7 @@ mvn -q -pl :assay-spring-boot-starter -am test
 
 标签只包含 `suite` / `source` / `status`，不带 `run_id` / `case_id`，避免时间序列基数爆炸。Starter 会自动注入容器里的 `EvaluationListener` bean。
 
-可选的 [OpenTelemetry 扩展](extensions/assay-tracing-otel/README.md) 提供 `assay.run` / `assay.case` / `assay.batch` span：case span 挂在 run span 下，run 失败时会记录错误并关闭 span，不会留下悬挂 span。
+可选的 [OpenTelemetry 扩展](extensions/assay-tracing-otel/README.md) 提供 `assay.run` / `assay.case` / `assay.batch` span，以及 `assay.adapter` / `assay.rules` / `assay.store` stage 子 span：adapter/rules 挂 case，store 挂 run；run 失败时会记录错误并关闭 span，不会留下悬挂 span。
 
 ## 测试集选择
 

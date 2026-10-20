@@ -116,6 +116,31 @@ public final class EvaluationEngine {
     }
 
     private NormalizedTrace readOneTrace(EvalCase evalCase, String runId, String source, int attempt) {
+        notifyStageStarted(runId, EvaluationListener.Stage.ADAPTER, evalCase);
+        long started = System.nanoTime();
+        try {
+            NormalizedTrace trace = readOneTraceUnchecked(evalCase, runId, source, attempt);
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.ADAPTER,
+                    evalCase,
+                    System.nanoTime() - started,
+                    null,
+                    Map.of("attempt", attempt));
+            return trace;
+        } catch (RuntimeException error) {
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.ADAPTER,
+                    evalCase,
+                    System.nanoTime() - started,
+                    error,
+                    Map.of("attempt", attempt));
+            throw error;
+        }
+    }
+
+    private NormalizedTrace readOneTraceUnchecked(EvalCase evalCase, String runId, String source, int attempt) {
         RunContext context = new RunContext(runId, evalCase.suite(), source, attempt, timeoutSeconds);
         Object handle;
         if ("online".equals(source)) {
@@ -165,11 +190,11 @@ public final class EvaluationEngine {
         return traces;
     }
 
-    CaseResult evaluateCase(EvalCase evalCase, String runId, String source) {
-        notifyCaseStarted(runId, evalCase);
+    private List<CheckResult> evaluateRules(
+            String runId, EvalCase evalCase, List<NormalizedTrace> traces, NormalizedTrace trace) {
+        notifyStageStarted(runId, EvaluationListener.Stage.RULES, evalCase);
+        long started = System.nanoTime();
         try {
-            List<NormalizedTrace> traces = collectTraces(evalCase, runId, source);
-            NormalizedTrace trace = traces.get(0);
             List<CheckResult> checks =
                     Rules.structureChecks(evalCase, trace, adapter.hardGates(), adapter.softQuality());
             checks.addAll(Rules.behaviorChecks(evalCase, trace));
@@ -177,6 +202,32 @@ public final class EvaluationEngine {
             allRules.addAll(adapter.softQuality());
             checks.addAll(Rules.consistencyChecks(traces, allRules));
             checks.addAll(Rules.feedbackChecks(trace));
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.RULES,
+                    evalCase,
+                    System.nanoTime() - started,
+                    null,
+                    Map.of("checks", checks.size(), "trace_count", traces.size()));
+            return checks;
+        } catch (RuntimeException error) {
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.RULES,
+                    evalCase,
+                    System.nanoTime() - started,
+                    error,
+                    Map.of("trace_count", traces.size()));
+            throw error;
+        }
+    }
+
+    CaseResult evaluateCase(EvalCase evalCase, String runId, String source) {
+        notifyCaseStarted(runId, evalCase);
+        try {
+            List<NormalizedTrace> traces = collectTraces(evalCase, runId, source);
+            NormalizedTrace trace = traces.get(0);
+            List<CheckResult> checks = evaluateRules(runId, evalCase, traces, trace);
             CaseResult result = new CaseResult(runId, evalCase.suite(), source, evalCase, trace, checks);
 
             boolean shouldReview = collectFewShot;
@@ -254,6 +305,54 @@ public final class EvaluationEngine {
             listener.onCaseFinished(result);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyStageStarted(String runId, EvaluationListener.Stage stage, EvalCase evalCase) {
+        try {
+            listener.onStageStarted(runId, stage, evalCase);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyStageFinished(
+            String runId,
+            EvaluationListener.Stage stage,
+            EvalCase evalCase,
+            long durationNanos,
+            RuntimeException error,
+            Map<String, Object> attributes) {
+        try {
+            listener.onStageFinished(runId, stage, evalCase, durationNanos, error, attributes);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void saveBatch(String runId, List<CaseResult> batch) {
+        notifyStageStarted(runId, EvaluationListener.Stage.STORE, null);
+        long started = System.nanoTime();
+        try {
+            store.saveCases(batch);
+            long duration = System.nanoTime() - started;
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.STORE,
+                    null,
+                    duration,
+                    null,
+                    Map.of("count", batch.size()));
+            notifyBatchSaved(batch.size(), duration);
+        } catch (RuntimeException error) {
+            notifyStageFinished(
+                    runId,
+                    EvaluationListener.Stage.STORE,
+                    null,
+                    System.nanoTime() - started,
+                    error,
+                    Map.of("count", batch.size()));
+            throw error;
         }
     }
 
@@ -378,9 +477,7 @@ public final class EvaluationEngine {
                 batch.add(finished.get());
                 inFlight--;
                 if (batch.size() >= batchSize) {
-                    long saveStarted = System.nanoTime();
-                    store.saveCases(batch);
-                    notifyBatchSaved(batch.size(), System.nanoTime() - saveStarted);
+                    saveBatch(runId, batch);
                     batch.clear();
                 }
                 if (remaining.hasNext()) {
@@ -398,9 +495,7 @@ public final class EvaluationEngine {
             pool.shutdownNow();
         }
         if (!batch.isEmpty()) {
-            long saveStarted = System.nanoTime();
-            store.saveCases(batch);
-            notifyBatchSaved(batch.size(), System.nanoTime() - saveStarted);
+            saveBatch(runId, batch);
         }
 
         List<Map<String, Object>> results = store.listResults(runId);
