@@ -14,31 +14,13 @@
   <artifactId>assay</artifactId>
   <packaging>jar</packaging>
 
-  <name>Assay CLI and Dashboard</name>
-  <description>Command line, adapters, sandbox, dashboard, and the executable distribution</description>
+  <name>Assay Distribution</name>
+  <description>Executable distribution assembled from CLI, dashboard, core, and stores</description>
 
   <dependencies>
     <dependency>
       <groupId>io.assay</groupId>
-      <artifactId>assay-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.assay</groupId>
-      <artifactId>assay-store-file</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.assay</groupId>
-      <artifactId>assay-store-jdbc</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.h2database</groupId>
-      <artifactId>h2</artifactId>
-      <scope>test</scope>
+      <artifactId>assay-cli</artifactId>
     </dependency>
   </dependencies>
 

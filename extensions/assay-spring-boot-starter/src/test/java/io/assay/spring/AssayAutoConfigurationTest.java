@@ -6,7 +6,7 @@ import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
 import io.assay.model.EvalCase;
 import io.assay.model.ProjectAdapter;
-import io.assay.store.ResultStore;
+import io.assay.store.file.ResultStore;
 import io.assay.store.Results;
 import io.assay.store.jdbc.JdbcResultStore;
 import java.nio.file.Path;

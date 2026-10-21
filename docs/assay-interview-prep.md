@@ -348,7 +348,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现 LCS 首错定位、用例状态迁移和失败聚类，不重跑 Agent。
 - 实现文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁和 trace id 校验。
 - 实现 evolve-auto 沙箱、只读 Dashboard，以及 EvaluationListener + Micrometer/OTel 可观测性。
-- 用 Maven reactor 统一 core、两个 store、app 和三个扩展；212 项核心测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
+- 用 Maven reactor 统一 core、两个 store、dashboard、cli、app 分发和三个扩展；212 项测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
 
 项目成果：核心零依赖；示例可复现 rollback 与首错；1,000 条轻量用例约 1,100 cases/s。
 ```
@@ -1402,12 +1402,12 @@ histogram_quantile(0.95, rate(assay_store_append_seconds_bucket[5m]))
 
 ## 十二、Maven Reactor 与工程化追问（10 题）
 
-### 1. 为什么主模块叫 `app/`，不叫 `assay/`？
+### 1. 为什么分发模块叫 `app/`，不叫 `assay/`？
 
 根目录已经有一个 `assay` 启动脚本（macOS/Linux），文件系统里不能再有同名目录。
 
-- artifactId 仍然是 `assay`，jar 是 `app/target/assay.jar`。
-- 启动器、README、CI 都按新路径更新。
+- `app` 只负责 shade 分发，artifactId 仍是 `assay`，jar 是 `app/target/assay.jar`。
+- 实际代码在 `assay-core` / `assay-store-*` / `assay-dashboard` / `assay-cli`。
 - 取舍：路径不如 `assay/` 直观，但保留了用户已有的 `./assay` 用法。
 
 ### 2. 为什么需要 parent POM？
@@ -1448,14 +1448,14 @@ histogram_quantile(0.95, rate(assay_store_append_seconds_bucket[5m]))
 - 要移动约 1.3 万行主代码、32 个测试文件。
 - 一些测试访问 package-private 成员，跨模块拆分要重新设计测试边界。
 - 先建 reactor，保证“一条命令构建全部模块、测试数不变”，风险最低。
-- Phase 2A 已拆出 core + file/jdbc store；CLI/Dashboard 留到 Phase 2B，避免一次改太多。
+- Phase 2A 拆出 core + file/jdbc store；Phase 2B 已拆出 dashboard/cli，app 只保留分发。
 
 ### 7. 多模块后 jar、启动脚本、CI、Docker 怎么改？
 
 - jar：`app/target/assay.jar`。
 - 启动脚本：`assay` / `assay.cmd` 的 fallback 指向 `app/target/assay.jar`。
 - CI：根目录 `mvn clean verify` 覆盖全部模块，不再需要 `mvn install` + 单独 `-f`。
-- Docker：复制 core / 两个 store / app / 扩展 POM，执行 `mvn -pl :assay -am package`，只构建运行所需的模块。
+- Docker：复制 core / 两个 store / dashboard / cli / app / 扩展 POM，执行 `mvn -pl :assay -am package`，只构建运行所需的模块。
 
 ### 8. 多模块会不会让构建更慢、更复杂？
 
@@ -1477,9 +1477,10 @@ Phase 2A（已完成）：
 1. `assay-core`：model/rules/engine/evolve/report/store API。
 2. `assay-store-file` / `assay-store-jdbc`：`ResultStore` / `JdbcResultStore`。
 
-Phase 2B（待做）：
+Phase 2B（已完成）：
 
-3. `assay-cli`：`AssayCli`、`CommandLine`。
-4. `assay-dashboard`：web + resources。
+3. `assay-dashboard`：web + resources。
+4. `assay-cli`：`AssayCli`、adapters、sandbox、audit、selection、review。
+5. `app`：只保留 shade 分发；测试随包迁移。
 
 原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 212 + 4 + 2 + 2 全绿。

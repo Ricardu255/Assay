@@ -1,7 +1,6 @@
 package io.assay.engine;
 
 import io.assay.json.Json;
-import io.assay.llm.LlmReviewer;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
 import io.assay.model.EvalCase;

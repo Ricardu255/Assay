@@ -7,7 +7,7 @@ import io.assay.support.Immutable;
  * The four capabilities a domain project supplies.
  *
  * <p>A domain adapter is an ordinary class — or a bundle of lambdas — compiled once and referenced by
- * class name or by a {@code ServiceLoader} registration. {@link io.assay.engine.AdapterLoader}
+ * class name or by a {@code ServiceLoader} registration. {@link io.assay.cli.AdapterLoader}
  * resolves that reference.
  */
 public record ProjectAdapter(

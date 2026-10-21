@@ -12,7 +12,7 @@
 - [x] P1（存储）：新增 `JdbcResultStore`、`Stores.open`、`Results.RunLock` 抽象；CLI 支持 `--store jdbc:...`；新增 5 项 JDBC 存储测试 + 1 项 CLI JDBC 测试。
 - [x] P2（集成）：新增 `extensions/assay-spring-boot-starter`，提供文件/JDBC 存储自动配置、`EvaluationEngine` 装配和 `EvaluationListener` 注入，4 项上下文测试通过。
 - [x] P2（交付）：新增 `Dockerfile`、`.dockerignore`，CI 用根 reactor 的 `clean verify` 覆盖全部模块，并构建镜像。
-- [x] P1（模块化，Phase 2A）：根 reactor 包含 `assay-core`、`assay-store-file`、`assay-store-jdbc`、`app` 和三个扩展；`mvn test` 一次构建；`app` 用 shade 产出单 jar；Phase 2B 再拆 CLI/Dashboard。
+- [x] P1（模块化，Phase 2B）：拆出 `assay-dashboard`、`assay-cli`；`app` 只做分发 shade；测试随包迁入各模块；`io.assay.store` / `llm` / `engine` 的 split package 已清理。
 - [x] P2（可观测，Micrometer）：新增零依赖 `EvaluationListener` SPI 和 `extensions/assay-metrics-micrometer`，2 项测试通过。
 - [x] P2（可观测，OTel）：新增 `extensions/assay-tracing-otel`，run/case/batch span 和失败 run 收口，2 项测试通过。
 - [x] P2（可观测，Stage span）：新增 `ADAPTER` / `RULES` / `LLM` / `STORE` 阶段回调；adapter/rules/llm 挂 case，store/batch 挂 run；核心 Stage 测试 + OTel 父子断言通过。
@@ -150,27 +150,21 @@
 
 #### 4.2.1 目标结构
 
-Phase 2A 已落地：core 和两个存储实现独立，app 保留 CLI/Dashboard 并产出 shaded jar：
+Phase 2B 已落地：核心、存储、Dashboard、CLI 独立，app 只负责分发：
 
 ```text
 assay-parent/
 ├── pom.xml                     # parent + dependencyManagement
 ├── assay-core/                 # model, rules, engine, evolve, report, json, support, Results
-├── assay-store-file/           # ResultStore
-├── assay-store-jdbc/           # JdbcResultStore
-├── app/                        # CLI, Dashboard, adapters, sandbox；shade 成 assay.jar
+├── assay-store-file/           # io.assay.store.file.ResultStore
+├── assay-store-jdbc/           # io.assay.store.jdbc.JdbcResultStore
+├── assay-dashboard/            # web + resources
+├── assay-cli/                  # CLI, adapters, sandbox, audit, selection, review
+├── app/                        # distribution：shade 成 assay.jar
 └── extensions/
     ├── assay-spring-boot-starter/
     ├── assay-metrics-micrometer/
     └── assay-tracing-otel/
-```
-
-Phase 2B 可继续把 app 拆成：
-
-```text
-assay-cli/                      # AssayCli, CommandLine
-assay-dashboard/                # web + resources
-assay-adapter-http/
 ```
 
 后续可再拆：
@@ -187,7 +181,9 @@ assay-metrics-micrometer/
 
 - `assay-core` 只依赖 JDK，不依赖 Spring/存储实现。
 - `assay-store-file` / `assay-store-jdbc` 依赖 `assay-core`。
-- `app` 依赖 core + 两个 store；shade 成单 jar。
+- `assay-dashboard` 依赖 `assay-core`。
+- `assay-cli` 依赖 core + 两个 store + dashboard。
+- `app` 依赖 `assay-cli`，只负责 shade 分发。
 - `assay-spring-boot-starter` 依赖 core + 两个 store + Spring Boot autoconfigure。
 - 用 `maven-enforcer-plugin` 禁止 `app` 引入 Spring/Micrometer/OTel。
 
@@ -202,17 +198,19 @@ Phase 1（已完成）：
 
 Phase 2A（已完成）：
 
-1. `io.assay.store.ResultStore` 移入 `assay-store-file`，core 只保留 `Results` 接口。
+1. `io.assay.store.file.ResultStore` 移入 `assay-store-file`，core 只保留 `Results` 接口。
 2. `JdbcResultStore` 移入 `assay-store-jdbc`。
 3. model/rules/engine/evolve/report/json/support/metrics 移入 `assay-core`。
 4. app 通过 shade 产出可执行的 `app/target/assay.jar`。
 5. 212 + 4 + 2 + 2 项测试全绿。
 
-Phase 2B（待做）：
+Phase 2B（已完成）：
 
-1. 把 `AssayCli` 和 `examples` 移到 `assay-cli`。
-2. 把 `web` 和 `resources` 移到 `assay-dashboard`。
-3. 每移一步跑全量测试，保持 `mvn test` 绿。
+1. `web` 和静态资源移入 `assay-dashboard`。
+2. `AssayCli`、adapters、sandbox、audit、selection、review 移入 `assay-cli`。
+3. 测试随包迁移：core 29、store-file 36、store-jdbc 5、dashboard 4、cli 138。
+4. `ResultStore` 改为 `io.assay.store.file`，`Stores` 移入 `io.assay.cli`，`LlmReviewer` 移入 `io.assay.engine`。
+5. `app` 只保留 shade 分发。
 
 **验收**：
 

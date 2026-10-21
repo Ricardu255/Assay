@@ -10,7 +10,7 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TraceEvent;
-import io.assay.store.ResultStore;
+import io.assay.store.file.ResultStore;
 import io.assay.store.Results;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.StatusCode;

@@ -47,7 +47,7 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 
 首次接入可打开界面的「开始评测」：选择 **HTTP 接口（推荐，无需写代码）**，填写地址、响应字段和通过条件，下载配置，再选择 JSONL 测试集检查格式、重复 ID 与必需字段，复制适用于 PowerShell 或 Bash 的运行命令。配置生成和文件检查在浏览器内完成；下载文件放到项目根目录，或将路径改为实际位置。命令由用户在项目根目录的另一个终端运行，完成后点击顶部「刷新」查看结果。
 
-前端纯函数检查可用 Node.js 执行：`node --test app/src/test/js/dashboard.test.cjs`；运行仪表盘本身不需要 Node.js。
+前端纯函数检查可用 Node.js 执行：`node --test assay-dashboard/src/test/js/dashboard.test.cjs`；运行仪表盘本身不需要 Node.js。
 
 运行明细中的 Trace 以步骤卡片展示：失败步骤默认展开，可筛选失败、定位首个失败、展开全部，或复制完整的单步 JSON。步骤额外数据来自适配器记录的 `TraceEvent.fields`；未记录时会明确显示为空。
 
@@ -59,13 +59,15 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 assay-core/                            # 领域模型、规则、评测引擎、演化、存储接口
 assay-store-file/                      # 文件存储 ResultStore
 assay-store-jdbc/                      # JDBC 存储 JdbcResultStore
-app/                                   # CLI、Dashboard、适配器、沙箱；产出 assay.jar
+assay-dashboard/                       # 只读 Dashboard 与静态资源
+assay-cli/                             # CLI、适配器、沙箱、审计、选择、review
+app/                                   # 分发模块：shade 成 assay.jar
 extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
 extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建七个代码模块。`app` 通过 shade 把 core 和两个 store 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建九个代码模块。`app` 通过 shade 把 core、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
