@@ -16,7 +16,8 @@ import java.util.Set;
 public final class RuleConfig {
 
     private static final Set<String> OPERATORS =
-            Set.of("eq", "ne", "contains", "not_contains", "min", "max", "in", "exists");
+            Set.of("eq", "ne", "contains", "not_contains", "min", "max", "in", "exists",
+                    "sequence_contains", "sequence_eq");
     private static final Set<String> OPTIONS =
             Set.of("name", "actual", "operator", "expected", "value", "message", "suspected_modules");
 
@@ -52,6 +53,11 @@ public final class RuleConfig {
             }
             if ("exists".equals(operator) && (rule.containsKey("expected") || rule.containsKey("value"))) {
                 throw new IllegalArgumentException("exists rule does not use expected or value: " + name);
+            }
+            if (operator.startsWith("sequence_") && rule.containsKey("value")) {
+                if (!(rule.get("value") instanceof List<?> sequence) || sequence.isEmpty()) {
+                    throw new IllegalArgumentException("sequence value must be a non-empty array: " + name);
+                }
             }
             List<String> modules = new ArrayList<>();
             Object suspects = rule.getOrDefault("suspected_modules", List.of());

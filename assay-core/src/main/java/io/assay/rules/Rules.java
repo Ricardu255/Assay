@@ -30,20 +30,116 @@ public final class Rules {
                 rule.expected() != null
                         ? ValueOps.readPath(evalCase.expected(), rule.expected())
                         : rule.value();
-        boolean passed = matches(rule.operator(), actual, expected);
+        SequenceResult sequenceResult = isSequence(rule.operator())
+                ? sequence(rule.operator(), actual, expected)
+                : null;
+        boolean passed = sequenceResult != null ? sequenceResult.passed() : matches(rule.operator(), actual, expected);
+        Object actualValue = sequenceResult != null
+                ? sequenceResult.actual()
+                : actual == ValueOps.MISSING ? null : actual;
+        Object expectedValue = sequenceResult != null
+                ? sequenceResult.expected()
+                : expected == ValueOps.MISSING ? null : expected;
         String message =
                 !rule.message().isEmpty()
                         ? rule.message()
-                        : passed ? "passed" : rule.actual() + " failed " + rule.operator();
+                        : passed
+                                ? "passed"
+                                : sequenceResult != null
+                                        ? sequenceResult.message()
+                                        : rule.actual() + " failed " + rule.operator();
         return new CheckResult(
                 "structure",
                 level,
                 rule.name(),
                 passed,
-                actual == ValueOps.MISSING ? null : actual,
-                expected == ValueOps.MISSING ? null : expected,
+                actualValue,
+                expectedValue,
                 message,
                 rule.suspectedModules());
+    }
+
+    private static boolean isSequence(String operator) {
+        return "sequence_contains".equals(operator) || "sequence_eq".equals(operator);
+    }
+
+    private static SequenceResult sequence(String operator, Object actual, Object expected) {
+        if (!(actual instanceof List<?> actualItems)) {
+            return new SequenceResult(false, "expected a sequence for " + operator, List.of(), List.of());
+        }
+        if (!(expected instanceof List<?> expectedItems) || expectedItems.isEmpty()) {
+            return new SequenceResult(false, "expected sequence must be a non-empty array", keys(actualItems), List.of());
+        }
+        List<String> actualKeys = keys(actualItems);
+        List<String> expectedKeys = keys(expectedItems);
+        if ("sequence_eq".equals(operator)) {
+            for (int index = 0; index < Math.max(actualKeys.size(), expectedKeys.size()); index++) {
+                if (index >= actualKeys.size()) {
+                    return new SequenceResult(
+                            false, "missing step " + (index + 1) + ": " + expectedKeys.get(index), actualKeys, expectedKeys);
+                }
+                if (index >= expectedKeys.size()) {
+                    return new SequenceResult(
+                            false, "unexpected step " + (index + 1) + ": " + actualKeys.get(index), actualKeys, expectedKeys);
+                }
+                if (!actualKeys.get(index).equals(expectedKeys.get(index))) {
+                    return new SequenceResult(
+                            false,
+                            "step " + (index + 1) + " expected " + expectedKeys.get(index) + " but was "
+                                    + actualKeys.get(index),
+                            actualKeys,
+                            expectedKeys);
+                }
+            }
+            return new SequenceResult(true, "passed", actualKeys, expectedKeys);
+        }
+        int matched = 0;
+        for (String item : actualKeys) {
+            if (matched < expectedKeys.size() && item.equals(expectedKeys.get(matched))) {
+                matched++;
+            }
+        }
+        if (matched < expectedKeys.size()) {
+            return new SequenceResult(
+                    false,
+                    "missing ordered step: " + expectedKeys.get(matched) + "; actual: " + String.join(" -> ", actualKeys),
+                    actualKeys,
+                    expectedKeys);
+        }
+        return new SequenceResult(true, "passed", actualKeys, expectedKeys);
+    }
+
+    private static List<String> keys(List<?> values) {
+        List<String> keys = new ArrayList<>();
+        for (Object value : values) {
+            keys.add(stepKey(value));
+        }
+        return keys;
+    }
+
+    private static String stepKey(Object value) {
+        if (value instanceof String text) {
+            return text;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Object module = map.get("module");
+            Object action = map.get("action");
+            if (module != null || action != null) {
+                return (module == null ? "" : String.valueOf(module)) + "/" + (action == null ? "" : String.valueOf(action));
+            }
+            Object step = map.get("step");
+            if (step != null) {
+                return String.valueOf(step);
+            }
+            Object tool = map.get("tool");
+            if (tool != null) {
+                return String.valueOf(tool);
+            }
+        }
+        return String.valueOf(value);
+    }
+
+    private record SequenceResult(boolean passed, String message, List<String> actual, List<String> expected) {
     }
 
     /** An unsupported operator is a programming error; a type mismatch is a failed check. */

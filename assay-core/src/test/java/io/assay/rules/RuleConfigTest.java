@@ -32,6 +32,26 @@ class RuleConfigTest {
     }
 
     @Test
+    void parsesSequenceRulesAndRejectsMalformedSequences() {
+        List<Rule> rules = RuleConfig.parse(
+                List.of(Map.of(
+                        "name", "chain",
+                        "actual", "events",
+                        "operator", "sequence_contains",
+                        "value", List.of("Router/route", "Tool/search"))),
+                "hard_gates");
+        assertEquals("sequence_contains", rules.get(0).operator());
+        assertEquals(List.of("Router/route", "Tool/search"), rules.get(0).value());
+
+        assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
+                List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", List.of())),
+                "hard_gates"));
+        assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
+                List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", "Router/route")),
+                "hard_gates"));
+    }
+
+    @Test
     void rejectsMalformedRulesWithTheAdapterMessages() {
         assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(Map.of(), "hard_gates"));
         assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
