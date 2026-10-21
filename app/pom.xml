@@ -14,15 +14,22 @@
   <artifactId>assay</artifactId>
   <packaging>jar</packaging>
 
-  <name>Assay Core and CLI</name>
-  <description>Agent evaluation, diagnosis, human review, regression, and controlled version evolution</description>
+  <name>Assay CLI and Dashboard</name>
+  <description>Command line, adapters, sandbox, dashboard, and the executable distribution</description>
 
-  <!--
-    The framework core has no runtime dependencies: JSON is handled by the in-tree codec in
-    io.assay.json, and storage uses plain files or an optional JDBC driver supplied by the caller.
-    JUnit and H2 are test-scoped only.
-  -->
   <dependencies>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-file</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-jdbc</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -56,6 +63,27 @@
             </manifest>
           </archive>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>io.assay.cli.AssayCli</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

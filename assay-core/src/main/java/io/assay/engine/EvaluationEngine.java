@@ -10,7 +10,6 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.RunContext;
 import io.assay.model.TraceEvent;
 import io.assay.rules.Rules;
-import io.assay.store.ResultStore;
 import io.assay.store.Results;
 import java.util.ArrayList;
 import java.util.Iterator;

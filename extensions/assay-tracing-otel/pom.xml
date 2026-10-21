@@ -20,13 +20,18 @@
   <dependencies>
     <dependency>
       <groupId>io.assay</groupId>
-      <artifactId>assay</artifactId>
+      <artifactId>assay-core</artifactId>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-api</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-file</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>
       <artifactId>opentelemetry-sdk-testing</artifactId>

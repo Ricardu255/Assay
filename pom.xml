@@ -23,6 +23,9 @@
   </properties>
 
   <modules>
+    <module>assay-core</module>
+    <module>assay-store-file</module>
+    <module>assay-store-jdbc</module>
     <module>app</module>
     <module>extensions/assay-spring-boot-starter</module>
     <module>extensions/assay-metrics-micrometer</module>
@@ -41,6 +44,21 @@
       <dependency>
         <groupId>io.assay</groupId>
         <artifactId>assay</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.assay</groupId>
+        <artifactId>assay-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.assay</groupId>
+        <artifactId>assay-store-file</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.assay</groupId>
+        <artifactId>assay-store-jdbc</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

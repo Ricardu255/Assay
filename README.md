@@ -56,13 +56,16 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 ## 模块结构
 
 ```text
-app/                                  # artifact: assay（核心 + CLI + Dashboard + 存储实现）
+assay-core/                            # 领域模型、规则、评测引擎、演化、存储接口
+assay-store-file/                      # 文件存储 ResultStore
+assay-store-jdbc/                      # JDBC 存储 JdbcResultStore
+app/                                   # CLI、Dashboard、适配器、沙箱；产出 assay.jar
 extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
 extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建四个模块。只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`；`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建七个代码模块。`app` 通过 shade 把 core 和两个 store 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
