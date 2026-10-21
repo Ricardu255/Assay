@@ -438,11 +438,47 @@ function scenarioTable(results) {
   }).join("")}</tbody></table></div>`;
 }
 
+function ruleHistoryPanel(data) {
+  const points = array(data.points);
+  if (!points.length) {
+    return `<p class="muted">没有历史数据。旧 run 可能没有 rule_stats，或这个 suite 还没有新 run。</p>`;
+  }
+  const valid = points.map((point, index) => ({ point, index }))
+    .filter(({ point }) => number(point.pass_rate) !== null);
+  const width = 360, height = 132, padX = 10, padTop = 10, padBottom = 24;
+  const chartHeight = height - padTop - padBottom;
+  const x = (index) => padX + (points.length <= 1 ? (width - 2 * padX) / 2 : index * (width - 2 * padX) / (points.length - 1));
+  const y = (rate) => padTop + (1 - rate) * chartHeight;
+  const line = valid.map(({ point, index }, position) => `${position ? "L" : "M"}${x(index).toFixed(1)} ${y(number(point.pass_rate)).toFixed(1)}`).join(" ");
+  const dots = valid.map(({ point, index }) => `<circle cx="${x(index)}" cy="${y(number(point.pass_rate))}" r="3.5" class="trend-dot"><title>${escape(date(point.modified_at))}：${percent(point.pass_rate)}</title></circle>`).join("");
+  const labels = points.map((point, index) => `<text x="${x(index)}" y="${height - 4}" text-anchor="middle" class="trend-label">${escape(date(point.modified_at).slice(0, 5))}</text>`).join("");
+  return `<div class="rule-history-head"><strong>${escape(data.rule)}</strong><span class="muted">最近 ${points.length} 次 · ${escape(data.suite || "全部 suite")}</span></div>
+    <svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(data.rule)} 最近通过率">${[0, 0.5, 1].map((rate) => `<line x1="${padX}" y1="${y(rate)}" x2="${width - padX}" y2="${y(rate)}" class="trend-grid"/>`).join("")}<path d="${line}" class="trend-line"/>${dots}${labels}</svg>
+    <div class="table-wrap"><table><thead><tr><th>Run</th><th>时间</th><th>通过率</th><th>评测数</th><th>缺失</th></tr></thead><tbody>
+      ${points.map((point) => `<tr><td><button class="record-name" data-artifact="${escape(point.id)}">${escape(point.run_id)}</button></td><td class="muted number">${escape(date(point.modified_at))}</td><td class="number">${percent(point.pass_rate)}</td><td class="number">${integer(point.evaluated)}</td><td class="number">${integer(point.missing)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+async function loadRuleHistory(rule) {
+  const panel = $("rule-history-panel");
+  if (!panel) return;
+  const context = current();
+  const suite = String(object(context?.payload).suite || "");
+  panel.innerHTML = `<p class="muted">正在读取规则历史…</p>`;
+  try {
+    const data = await request(`/api/rule-history?rule=${encodeURIComponent(rule)}&suite=${encodeURIComponent(suite)}&limit=20`);
+    if (current() !== context || !$("rule-history-panel")) return;
+    $("rule-history-panel").innerHTML = ruleHistoryPanel(data);
+  } catch (error) {
+    if (current() === context && $("rule-history-panel")) $("rule-history-panel").innerHTML = `<p class="error-box">读取失败：${escape(error.message)}</p>`;
+  }
+}
+
 function ruleStatsTable(payload) {
   const rows = AssayUI.ruleStats(payload);
   if (!rows.length) return `<div class="panel-body"><p class="muted">本次运行没有规则统计。</p></div>`;
-  return `<div class="table-wrap"><table class="rule-stats-table"><thead><tr><th>规则</th><th>层级</th><th>评测数</th><th>通过</th><th>通过率</th><th>缺失</th></tr></thead><tbody>
-    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td class="number ${row.passRate === null ? "muted" : row.passRate < 1 ? "negative" : "positive"}">${percent(row.passRate)}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="rule-stats-table"><thead><tr><th>规则</th><th>层级</th><th>评测数</th><th>通过</th><th>通过率</th><th>缺失</th><th>历史</th></tr></thead><tbody>
+    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td class="number ${row.passRate === null ? "muted" : row.passRate < 1 ? "negative" : "positive"}">${percent(row.passRate)}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td><td><button class="link-button" data-rule-history="${escape(row.name)}">查看趋势</button></td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderRun(context) {
@@ -454,7 +490,7 @@ function renderRun(context) {
   const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
   if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
   if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
-  if (state.tab === "rules") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div>${ruleStatsTable(payload)}</section>`;
+  if (state.tab === "rules") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div>${ruleStatsTable(payload)}<div id="rule-history-panel" class="rule-history-panel"></div></section>`;
   return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
     <input type="search" id="case-search" placeholder="搜索用例或场景" aria-label="搜索用例或场景" value="${escape(state.caseQuery)}"><select id="case-filter" aria-label="筛选用例状态">${[["all", "全部状态"], ["failed", "仅硬失败"], ["warning", "仅软告警"], ["passed", "全部通过"]].map(([value, title]) => `<option value="${value}" ${state.caseFilter === value ? "selected" : ""}>${title}</option>`).join("")}</select></div>
     <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><div id="case-resizer" class="split-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="case-list trace-detail" aria-label="调整用例与 Trace 宽度，左右键调节，双击或 Enter 平分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div><section class="panel" id="trace-detail" ${traceCollapsed ? "hidden" : ""}></section></div></div></div>`;
@@ -730,6 +766,7 @@ document.addEventListener("click", async (event) => {
   } else if (target.hasAttribute("data-load-patch")) await loadAuditPatch(current());
   else if (target.dataset.diffMode) { current().diffMode = target.dataset.diffMode; renderAuditPatch(current()); }
   else if (target.dataset.finding !== undefined) await locateFinding(Number(target.dataset.finding));
+  else if (target.dataset.ruleHistory) await loadRuleHistory(target.dataset.ruleHistory);
   else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
     const closed = state.stack.pop(); if (current()) resetCaseView(current().payload); render(true);

@@ -84,6 +84,71 @@ public final class ArtifactCatalog {
         return Json.parseObject(readText(reportPath(id), MAX_FILE_BYTES));
     }
 
+    /** Returns the latest points for one rule, optionally filtered to a suite. */
+    public Map<String, Object> ruleHistory(String rule, String suite, int limit) throws IOException {
+        String ruleName = query(rule, "rule", 128);
+        String suiteFilter = suite == null || suite.isBlank() ? "" : query(suite, "suite", 128);
+        int max = Math.max(1, Math.min(100, limit));
+        List<Map<String, Object>> points = new ArrayList<>();
+        if (Files.isDirectory(root)) {
+            List<Path> files = new ArrayList<>();
+            try (Stream<Path> walk = Files.walk(root, 16)) {
+                walk.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                        && "run".equals(KINDS.get(path.getFileName().toString()))).forEach(files::add);
+            }
+            for (Path file : files) {
+                Map<String, Object> payload;
+                try {
+                    payload = Json.parseObject(readText(file, MAX_FILE_BYTES));
+                } catch (IOException | RuntimeException error) {
+                    continue;
+                }
+                String payloadSuite = String.valueOf(payload.getOrDefault("suite", ""));
+                if (!suiteFilter.isEmpty() && !suiteFilter.equals(payloadSuite)) {
+                    continue;
+                }
+                Map<String, Object> row = asMap(asMap(payload.get("rule_stats")).get(ruleName));
+                if (row.isEmpty()) {
+                    continue;
+                }
+                String relative = root.relativize(file).toString().replace('\\', '/');
+                Map<String, Object> point = new LinkedHashMap<>();
+                point.put("id", Base64.getUrlEncoder().withoutPadding()
+                        .encodeToString(relative.getBytes(StandardCharsets.UTF_8)));
+                point.put("run_id", payload.getOrDefault("run_id", relative));
+                point.put("suite", payloadSuite);
+                point.put("source", payload.getOrDefault("source", ""));
+                point.put("modified_at", Files.getLastModifiedTime(file).toInstant().toString());
+                point.put("case_count", payload.getOrDefault("case_count", 0));
+                point.put("level", row.get("level"));
+                point.put("evaluated", row.get("evaluated"));
+                point.put("passed", row.get("passed"));
+                point.put("pass_rate", row.get("pass_rate"));
+                point.put("missing", row.get("missing"));
+                points.add(point);
+            }
+        }
+        points.sort(Comparator.comparing((Map<String, Object> point) -> String.valueOf(point.get("modified_at"))));
+        int matched = points.size();
+        if (points.size() > max) {
+            points = new ArrayList<>(points.subList(points.size() - max, points.size()));
+        }
+        return Map.of("rule", ruleName, "suite", suiteFilter, "matched", matched, "points", points);
+    }
+
+    private static String query(String value, String field, int maxLength) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty() || text.length() > maxLength || text.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(field + " must be a non-empty, bounded value");
+        }
+        return text;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+    }
+
     /** Only the fixed patch next to an audit report is exposed, never arbitrary workspace files. */
     public Map<String, Object> readAuditPatch(String id) throws IOException {
         Path report = reportPath(id);

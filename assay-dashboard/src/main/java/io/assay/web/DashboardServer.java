@@ -70,6 +70,10 @@ public final class DashboardServer implements AutoCloseable {
             try {
                 if ("/api/catalog".equals(path)) {
                     sendJson(exchange, 200, catalog.list());
+                } else if ("/api/rule-history".equals(path)) {
+                    Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
+                    int limit = query.containsKey("limit") ? Integer.parseInt(query.get("limit")) : 20;
+                    sendJson(exchange, 200, catalog.ruleHistory(query.get("rule"), query.get("suite"), limit));
                 } else if (path.startsWith("/api/artifacts/")) {
                     sendJson(exchange, 200, catalog.read(path.substring("/api/artifacts/".length())));
                 } else if (path.startsWith("/api/audit-patch/")) {
@@ -94,6 +98,22 @@ public final class DashboardServer implements AutoCloseable {
                 sendJson(exchange, 500, Map.of("error", "could not read report artifacts"));
             }
         }
+    }
+
+    private static Map<String, String> query(String raw) {
+        Map<String, String> values = new java.util.LinkedHashMap<>();
+        if (raw == null || raw.isEmpty()) {
+            return values;
+        }
+        for (String part : raw.split("&")) {
+            int separator = part.indexOf('=');
+            String key = separator < 0 ? part : part.substring(0, separator);
+            String value = separator < 0 ? "" : part.substring(separator + 1);
+            values.put(
+                    java.net.URLDecoder.decode(key, StandardCharsets.UTF_8),
+                    java.net.URLDecoder.decode(value, StandardCharsets.UTF_8));
+        }
+        return values;
     }
 
     private static void sendJson(HttpExchange exchange, int status, Object value) throws IOException {

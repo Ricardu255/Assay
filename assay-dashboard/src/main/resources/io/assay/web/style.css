@@ -73,6 +73,10 @@ p { margin: 0; }
 .badge.soft { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
 .badge.candidate { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
 .rule-stats-table td:first-child { min-width: 180px; }
+.rule-history-panel { padding: 18px 20px; border-top: 1px solid var(--line); }
+.rule-history-panel:empty { display: none; }
+.rule-history-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 10px; }
+.rule-history-head strong { font-size: var(--font-sm); }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: var(--font-sm); text-align: left; }
 th { background: var(--surface-subtle); color: var(--muted); font-size: var(--font-xs); font-weight: 550; padding: 12px 18px; white-space: nowrap; }
