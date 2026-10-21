@@ -365,7 +365,21 @@
     rows.sort((left, right) => (right.lastAt?.getTime() || 0) - (left.lastAt?.getTime() || 0));
     return rows.slice(0, Math.max(1, Number.isFinite(limit) ? limit : 8));
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth };
+  function ruleStats(payload) {
+    const raw = payload && payload.rule_stats;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    return Object.entries(raw).map(([name, value]) => {
+      const row = value && typeof value === "object" ? value : {};
+      const evaluated = Number.isFinite(Number(row.evaluated)) ? Number(row.evaluated) : 0;
+      const passed = Number.isFinite(Number(row.passed)) ? Number(row.passed) : 0;
+      const passRate = row.pass_rate === null || row.pass_rate === undefined || !Number.isFinite(Number(row.pass_rate))
+        ? null : Number(row.pass_rate);
+      return { name: String(name), level: String(row.level || "unknown"), evaluated, passed,
+        missing: Number.isFinite(Number(row.missing)) ? Number(row.missing) : 0, passRate };
+    }).sort((left, right) => (left.passRate ?? 2) - (right.passRate ?? 2)
+      || right.evaluated - left.evaluated || left.name.localeCompare(right.name));
+  }
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);

@@ -8,6 +8,7 @@ import io.assay.model.EvolutionPolicy;
 import io.assay.model.MetricObjective;
 import io.assay.model.QualityGate;
 import io.assay.model.ScenarioGate;
+import io.assay.report.RuleStats;
 import io.assay.rules.ValueOps;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
@@ -367,7 +368,7 @@ public final class EvolutionEngine {
             objectiveCoverage.put(objective.name(), coverage(samples.size(), caseCount));
         }
 
-        Map<String, Object> ruleStats = ruleStatsJson(ruleStats(results), caseCount);
+        Map<String, Object> ruleStats = RuleStats.fromResults(results, caseCount);
 
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("case_count", caseCount);
@@ -559,45 +560,6 @@ public final class EvolutionEngine {
         return value == null ? "" : String.valueOf(value);
     }
 
-    /** Aggregates every named check across a run, so a rule's pass rate is comparable across versions. */
-    private static Map<String, RuleStat> ruleStats(List<Object> results) {
-        Map<String, RuleStat> stats = new TreeMap<>();
-        for (Object rawResult : results) {
-            for (Object rawCheck : asList(asMap(rawResult).get("checks"))) {
-                Map<String, Object> check = asMap(rawCheck);
-                String name = String.valueOf(check.getOrDefault("name", "")).trim();
-                if (name.isEmpty() || "null".equals(name)) {
-                    continue;
-                }
-                RuleStat stat = stats.computeIfAbsent(name, key -> new RuleStat());
-                stat.evaluated++;
-                if (Boolean.TRUE.equals(check.get("passed"))) {
-                    stat.passed++;
-                }
-                String level = String.valueOf(check.getOrDefault("level", "")).trim();
-                if (!level.isEmpty() && (stat.level == null || "hard".equals(level))) {
-                    stat.level = level;
-                }
-            }
-        }
-        return stats;
-    }
-
-    private static Map<String, Object> ruleStatsJson(Map<String, RuleStat> stats, int caseCount) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        for (Map.Entry<String, RuleStat> entry : stats.entrySet()) {
-            RuleStat stat = entry.getValue();
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("level", stat.level == null ? "unknown" : stat.level);
-            row.put("evaluated", stat.evaluated);
-            row.put("passed", stat.passed);
-            row.put("pass_rate", stat.evaluated == 0 ? null : (double) stat.passed / stat.evaluated);
-            row.put("missing", Math.max(0, caseCount - stat.evaluated));
-            result.put(entry.getKey(), row);
-        }
-        return result;
-    }
-
     private static Map<String, Object> compareRuleStats(
             Map<String, Object> baseline, Map<String, Object> candidate) {
         Set<String> names = new TreeSet<>(baseline.keySet());
@@ -619,13 +581,6 @@ public final class EvolutionEngine {
             result.put(name, row);
         }
         return result;
-    }
-
-    /** One rule's samples within a run. */
-    private static final class RuleStat {
-        private String level;
-        private int evaluated;
-        private int passed;
     }
 
     /** Reads one numeric metric out of a normalized trace, or null when the trace does not carry it. */

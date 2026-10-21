@@ -64,6 +64,8 @@ class AssayCliTest {
         assertTrue(Files.isRegularFile(runDir.resolve("review_queue.jsonl")));
         assertTrue(Files.isRegularFile(runDir.resolve("few_shot_candidates.jsonl")));
         assertTrue(AtomicFiles.readText(runDir.resolve("report.md")).contains("Agent Evaluation Report"));
+        assertTrue(AtomicFiles.readText(runDir.resolve("report.md")).contains("Rule pass rates"));
+        assertTrue(Json.parseObject(AtomicFiles.readText(runDir.resolve("results.json"))).containsKey("rule_stats"));
         assertTrue(AtomicFiles.readText(runDir.resolve("few_shot_candidates.jsonl")).contains("C1"));
     }
 

@@ -53,6 +53,9 @@ public final class Reporting {
     /** Writes {@code results.json}, {@code report.md}, {@code scenario_stats.json}, and the queues. */
     public static void writeRunArtifacts(Map<String, Object> summary, Path outputDir) {
         AtomicFiles.createDirectories(outputDir);
+        Map<String, Object> ruleStats = RuleStats.fromResults(
+                asList(summary.get("results")), intValue(summary.get("case_count")));
+        summary.put("rule_stats", ruleStats);
         AtomicFiles.writeText(outputDir.resolve("results.json"), Json.write(summary, 2) + "\n");
 
         Map<String, Integer> moduleCounts = new LinkedHashMap<>();
@@ -151,6 +154,22 @@ public final class Reporting {
             row.put("hard_pass_rate", (double) stats.get("hard_passes") / stats.get("cases"));
             row.put("confidence_95", List.of(interval[0], interval[1]));
             targetScenarios.put(entry.getKey(), row);
+        }
+
+        if (!ruleStats.isEmpty()) {
+            report.add("");
+            report.add("## Rule pass rates");
+            report.add("");
+            report.add("| Rule | Level | Evaluated | Passed | Rate | Missing |");
+            report.add("|---|---|---:|---:|---:|---:|");
+            for (Map.Entry<String, Object> entry : ruleStats.entrySet()) {
+                Map<String, Object> row = asMap(entry.getValue());
+                Object rate = row.get("pass_rate");
+                report.add("| `" + entry.getKey() + "` | " + row.get("level") + " | "
+                        + intValue(row.get("evaluated")) + " | " + intValue(row.get("passed")) + " | "
+                        + (rate instanceof Number number ? Fmt.percent1(number.doubleValue()) : "—") + " | "
+                        + intValue(row.get("missing")) + " |");
+            }
         }
 
         report.add("");

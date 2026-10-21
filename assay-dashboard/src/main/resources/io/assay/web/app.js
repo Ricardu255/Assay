@@ -12,6 +12,7 @@ const labels = {
   insufficient_evidence: "证据不足", no_obvious_issue: "未发现明显问题", clear_out_of_scope: "明确越界",
   suspected_out_of_scope: "疑似越界", reasonable_related: "合理关联", low: "低风险", medium: "中风险", high: "高风险",
   improvement: "改善集", regression: "回归集", holdout: "留出集", not_run: "未运行", related: "相关",
+  hard: "硬门禁", soft: "软质量", candidate: "复核信号",
   step_added: "新增步骤", step_removed: "缺失步骤", step_changed: "步骤变更", step_reordered: "步骤顺序",
   step_fields: "字段变化", step_error: "步骤报错", step_status: "状态变化", final_output: "最终输出",
   trace_fields: "Trace 字段", missing_trace: "缺少 Trace", no_visible_divergence: "无可见差异"
@@ -377,7 +378,7 @@ async function restoreLocation() {
         } else break;
       }
       if (current().item.kind === "run") {
-        if (["cases", "scenarios", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
+        if (["cases", "scenarios", "rules", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
         if (["all", "passed", "warning", "failed"].includes(params.get("filter"))) state.caseFilter = params.get("filter");
         state.caseQuery = (params.get("caseQuery") || "").slice(0, 1000);
         const selected = array(current().payload.results).findIndex((result) => object(result.case).case_id === params.get("case"));
@@ -437,15 +438,23 @@ function scenarioTable(results) {
   }).join("")}</tbody></table></div>`;
 }
 
+function ruleStatsTable(payload) {
+  const rows = AssayUI.ruleStats(payload);
+  if (!rows.length) return `<div class="panel-body"><p class="muted">本次运行没有规则统计。</p></div>`;
+  return `<div class="table-wrap"><table class="rule-stats-table"><thead><tr><th>规则</th><th>层级</th><th>评测数</th><th>通过</th><th>通过率</th><th>缺失</th></tr></thead><tbody>
+    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td class="number ${row.passRate === null ? "muted" : row.passRate < 1 ? "negative" : "positive"}">${percent(row.passRate)}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
 function renderRun(context) {
   const payload = context.payload, results = array(payload.results);
   const failures = results.filter((result) => result.hard_pass !== true).length;
   const soft = results.reduce((sum, result) => sum + count(result.soft_warning_count), 0);
   const header = `${detailHeader(context)}<div class="stats">${stat("用例数量", integer(results.length), payload.suite || "当前数据集")}${stat("硬门禁通过率", results.length ? percent((results.length - failures) / results.length) : "—", `${results.length - failures} 条通过`, "positive")}${stat("硬失败", integer(failures), "规则或执行失败", failures ? "negative" : "")}${stat("复核信号", integer(soft), "软告警与复核候选", soft ? "warning-text" : "")}</div>
-    <div class="tabs" role="tablist" aria-label="运行详情">${[["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["raw", "原始数据"]].map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
+    <div class="tabs" role="tablist" aria-label="运行详情">${[["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["rules", "规则统计"], ["raw", "原始数据"]].map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
   const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
   if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
   if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
+  if (state.tab === "rules") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div>${ruleStatsTable(payload)}</section>`;
   return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
     <input type="search" id="case-search" placeholder="搜索用例或场景" aria-label="搜索用例或场景" value="${escape(state.caseQuery)}"><select id="case-filter" aria-label="筛选用例状态">${[["all", "全部状态"], ["failed", "仅硬失败"], ["warning", "仅软告警"], ["passed", "全部通过"]].map(([value, title]) => `<option value="${value}" ${state.caseFilter === value ? "selected" : ""}>${title}</option>`).join("")}</select></div>
     <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><div id="case-resizer" class="split-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="case-list trace-detail" aria-label="调整用例与 Trace 宽度，左右键调节，双击或 Enter 平分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div><section class="panel" id="trace-detail" ${traceCollapsed ? "hidden" : ""}></section></div></div></div>`;
@@ -801,8 +810,8 @@ document.addEventListener("keydown", (event) => {
     const position = Math.max(0, Math.min(cases.length - 1, next));
     if (cases[position]) { state.caseIndex = cases[position].index; state.casePage = Math.floor(position / 50); renderCaseRows(); syncLocation(); focusCase(); }
   } else if (event.target.matches('[role="tab"]') && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-    event.preventDefault(); const tabs = ["cases", "scenarios", "raw"], index = tabs.indexOf(state.tab);
-    state.tab = tabs[event.key === "Home" ? 0 : event.key === "End" ? 2 : (index + (event.key === "ArrowLeft" ? -1 : 1) + 3) % 3];
+    event.preventDefault(); const tabs = ["cases", "scenarios", "rules", "raw"], index = tabs.indexOf(state.tab);
+    state.tab = tabs[event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length];
     render(); $(`tab-${state.tab}`).focus();
   }
 });

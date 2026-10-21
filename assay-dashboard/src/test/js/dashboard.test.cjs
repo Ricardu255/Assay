@@ -191,6 +191,20 @@ test("Run trends return empty buckets instead of throwing on missing data", () =
   assert.deepEqual(ui.suiteHealth([], 8), []);
 });
 
+test("Rule stats sort the worst pass rate first and preserve missing data", () => {
+  const rows = ui.ruleStats({ rule_stats: {
+    route: { level: "hard", evaluated: 4, passed: 2, pass_rate: 0.5, missing: 1 },
+    tone: { level: "soft", evaluated: 2, passed: 0, pass_rate: 0, missing: 3 },
+    never: { level: "hard", evaluated: 0, passed: 0, pass_rate: null, missing: 4 }
+  } });
+  assert.deepEqual(rows.map((row) => row.name), ["tone", "route", "never"]);
+  assert.equal(rows[0].level, "soft");
+  assert.equal(rows[0].passRate, 0);
+  assert.equal(rows[2].passRate, null);
+  assert.equal(rows[2].missing, 4);
+  assert.deepEqual(ui.ruleStats({}), []);
+});
+
 test("Setup defaults point at the reactor artifact and source layout", () => {
   const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
   assert.match(source, /jar: "app\/target\/assay\.jar"/);

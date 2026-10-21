@@ -1,7 +1,7 @@
 # Assay 面试准备与简历写法
 
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；212 项核心 Java 测试通过（1 项按环境跳过）+ 14 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；214 项核心 Java 测试通过（1 项按环境跳过）+ 15 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
 > 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
 
@@ -15,7 +15,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 
 ### 1.2 30 秒口述版
 
-“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，212 项测试，Windows/Linux CI 都跑通。”
+“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，214 项测试，Windows/Linux CI 都跑通。”
 
 ### 1.3 2 分钟口述版
 
@@ -24,7 +24,7 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 3. **评测**：结构层看 Trace 完整性和硬门禁；行为层看步数、重试、延迟、重复步骤和模块错误；一致性层对高价值节点做多次运行；反馈层把隐式负反馈变成人工复核候选。
 4. **演化**：baseline 和 candidate 在 improvement / regression / holdout 三个数据集上跑同一套用例，按策略输出 accept / reject / rollback。新增了场景门禁、绝对质量门禁、规则通过率、P95 和样本覆盖。
 5. **诊断**：对“基线通过、候选失败”的用例，`TraceDiff` 用 LCS 对齐 `module/action`，定位第一处步骤增删、替换、字段变化、报错或最终输出差异；直接复用已经评测过的 Trace，不重跑 Agent。
-6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；212 项核心 Java 测试 + 14 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
+6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；214 项核心 Java 测试 + 15 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
 
 ### 1.4 5 分钟 / 白板顺序
 
@@ -110,6 +110,7 @@ Candidate run ┘        │                  │
 - **0.8 外部轨迹**：`trace_file` 适配器，支持 normalized、OpenInference、OTLP attribute array、Phoenix `traces` / `resourceSpans`；按 `case_id` 校验覆盖，缺失用例硬失败。
 - **Dashboard**：诊断文案中文化、回归用例统计卡、规则表默认只显示变化、类别 badge 分色、关键用例标记。
 - **Dashboard 趋势**：总览新增最近 7 天硬门禁通过率趋势、每日数据表和按测试集健康表；纯前端聚合，不新增依赖。
+- **运行规则统计**：`RuleStats` 把每次 run 的 checks 聚合为 `rule_stats`，写进 `results.json` 和 `report.md`；运行页新增规则统计 tab。
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
 - **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
 - **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；1,000 条轻量用例 benchmark（约 1,100 cases/s，非生产容量承诺）。
@@ -285,7 +286,7 @@ Candidate run ┘        │                  │
 - 展开：原生 HTML/CSS/JS + 主题变量；`dashboard-core.js` 放校验、diff 解析、诊断文案等纯函数，`node --test` 覆盖；Java 端 `DashboardServerTest` 覆盖路由和产物读取；支持深浅色、键盘导航、URL 状态恢复。
 - 追问：组件复用怎么办？答：当前页面规模不需要组件框架；如果继续扩展，可以再引入构建链。
 
-**G2. 212 项测试怎么组织？最有价值的是哪些？**
+**G2. 214 项测试怎么组织？最有价值的是哪些？**
 
 - 一句话：重点测失败模式，不是只测 happy path。
 - 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界。
@@ -348,7 +349,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现 LCS 首错定位、用例状态迁移和失败聚类，不重跑 Agent。
 - 实现文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁和 trace id 校验。
 - 实现 evolve-auto 沙箱、只读 Dashboard，以及 EvaluationListener + Micrometer/OTel 可观测性。
-- 用 Maven reactor 统一 core、两个 store、dashboard、cli、app 分发和三个扩展；212 项测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
+- 用 Maven reactor 统一 core、两个 store、dashboard、cli、app 分发和三个扩展；214 项测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
 
 项目成果：核心零依赖；示例可复现 rollback 与首错；1,000 条轻量用例约 1,100 cases/s。
 ```
@@ -365,7 +366,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 ### 6.3 一行版
 
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；212 项测试，CI 双平台。”
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；214 项测试，CI 双平台。”
 
 ### 6.4 注意事项
 
@@ -379,7 +380,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 1. **先讲问题，再讲架构**：不要一上来念模块。
 2. **强调“证据”和“人的决定权”**：这是项目和普通评测脚本的区别。
-3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、212 项测试、JDBC/Starter/Micrometer/OTel 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
+3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、214 项测试、JDBC/Starter/Micrometer/OTel 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
 4. **主动说取舍**：文件存储 vs 数据库、LLM 不进硬门禁、诊断是辅助证据。面试官更看重你知道边界。
 5. **准备一个具体 bug**：恢复/半行 UTF-8 或隐藏回归，按 STAR 讲。
 6. **准备一张架构图**：适配器 → 评测 → 演化 → 诊断 → 存储/报告/Dashboard。
@@ -626,7 +627,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **可追问**：为什么不用 React？答：零构建、零依赖、Java 直接托管；纯函数用 Node 测试，页面规模不需要组件框架。
 
-### 20. 212 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
+### 20. 214 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
 
 **考察点**：测试是否只覆盖 happy path。
 
@@ -1483,4 +1484,4 @@ Phase 2B（已完成）：
 4. `assay-cli`：`AssayCli`、adapters、sandbox、audit、selection、review。
 5. `app`：只保留 shade 分发；测试随包迁移。
 
-原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 212 + 4 + 2 + 2 全绿。
+原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 214 + 4 + 2 + 2 全绿。

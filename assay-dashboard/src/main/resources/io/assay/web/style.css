@@ -69,6 +69,10 @@ p { margin: 0; }
 .badge.step_removed, .badge.step_error, .badge.missing_trace { color: var(--bad-text); background: var(--bad-bg); border-color: var(--bad-border); }
 .badge.step_fields, .badge.step_changed, .badge.step_status, .badge.final_output, .badge.trace_fields { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
 .badge.no_visible_divergence { color: var(--text-secondary); background: var(--surface-subtle); border-color: var(--line); }
+.badge.hard { color: var(--bad-text); background: var(--bad-bg); border-color: var(--bad-border); }
+.badge.soft { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
+.badge.candidate { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
+.rule-stats-table td:first-child { min-width: 180px; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: var(--font-sm); text-align: left; }
 th { background: var(--surface-subtle); color: var(--muted); font-size: var(--font-xs); font-weight: 550; padding: 12px 18px; white-space: nowrap; }
