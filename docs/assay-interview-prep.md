@@ -73,17 +73,13 @@ Candidate run ┘        │                  │
 
 | 模块 | 职责 |
 |---|---|
-| `engine` | 适配器加载、用例加载、评测执行、release 编排 |
-| `model` | `NormalizedTrace`、`TraceEvent`、`Rule`、`EvalCase`、`EvolutionPolicy`、`QualityGate` |
-| `rules` | 路径读取、规则匹配、四层检查、规则配置解析 |
-| `evolve` | 三数据集演化、决策、规则统计、`TraceDiff` 首错 |
-| `autoevolve` | 沙箱内诊断、生成候选、评测、检查点 |
-| `store` | `Results` 接口、JSONL 存储、锁、恢复 |
-| `report` | Markdown/JSON 产物 |
-| `trace` / `opentrace` / `http` | 外部轨迹接入 |
-| `process` / `workspace` | 进程、容器、文本候选沙箱 |
-| `audit` / `diff` / `selection` | 范围审计、Git Diff、测试集选择 |
-| `web` | 只读 Dashboard |
+| `assay-core` | `model`、`engine`、`rules`、`evolve`、`report`、`json`、`support`、`metrics`、`Results` 接口 |
+| `assay-store-file` | `io.assay.store.file.ResultStore`、JSONL 落盘、锁、恢复 |
+| `assay-store-jdbc` | `JdbcResultStore`、事务、`SELECT FOR UPDATE`、JDBC 契约 |
+| `assay-dashboard` | 只读 Dashboard、静态资源、`/api/catalog`、`/api/rule-history` |
+| `assay-cli` | `AssayCli`、adapters、`autoevolve`、`process`、`workspace`、`audit`、`diff`、`selection` |
+| `app` | 纯分发模块；shade 成 `app/target/assay.jar` |
+| `extensions/*` | Starter、Micrometer、OTel，均不反向污染 core |
 
 ---
 
@@ -93,7 +89,9 @@ Candidate run ┘        │                  │
 |---|---|---|
 | 核心零运行时依赖 | 可移植、易部署、无供应链负担 | JSON、HTTP Server、存储都要自己写，测试量更大 |
 | `ProjectAdapter` 四能力契约 | 领域解耦，不绑定 LangChain/OTel/厂商 | 适配器需要自己做 Trace 归一化 |
+| 内建工具链序列规则 | 顺序、参数、嵌套块可审计，避免脚本引擎的安全/移植问题 | DSL 变大，复杂逻辑仍需适配器暴露结构化字段 |
 | `Results` 接口 + 文件/JDBC 双实现 | 单机零依赖、断点恢复简单；需要数据库时可切换 | JDBC schema 需自己迁移；锁/事务语义要按数据库验证 |
+| Maven reactor 拆分 | core 零依赖、扩展可选、边界可验证 | POM/目录更多，测试要随包迁移 |
 | 可选 Spring Boot Starter | 企业集成友好，不污染核心 | 扩展模块，已纳入 reactor；发布仍需单独配置 |
 | `EvaluationListener` + Micrometer/OTel | 可观测、可扩展，默认 no-op | 指标基数/span 层级需要设计；adapter/rules/llm/store 子 span 已做 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
@@ -113,6 +111,7 @@ Candidate run ┘        │                  │
 - **运行规则统计**：`RuleStats` 把每次 run 的 checks 聚合为 `rule_stats`，写进 `results.json` 和 `report.md`；运行页新增规则统计 tab。
 - **规则历史趋势**：`/api/rule-history` 按 suite 返回最近 N 次运行的规则通过率；运行页可点「查看趋势」，用折线、评测数和缺失样本判断退化、抖动或覆盖率变化。
 - **工具链序列规则**：新增 `sequence_contains` / `sequence_eq`，按 `events` 的 `module/action` 断言工具调用顺序；支持 `args` 参数匹配和嵌套连续块，失败时指出缺失步骤、参数差异或首个顺序不匹配，运行页用步骤 chips 展示。
+- **0.9 模块化**：拆成 core、store-file、store-jdbc、dashboard、cli 和 app 分发六个代码模块，加三个扩展；测试随包迁移，`app/target/assay.jar` 仍可直接运行。
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
 - **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
 - **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；10,000 条合成用例的文件/JDBC 与多步参考 Agent 基准（文件约 2,500～3,700 cases/s；外部真实 Agent 未跑，非生产容量承诺）。
@@ -346,35 +345,62 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 项目简介：面向 Agent 发布前的质量验证，解决“改完能不能发、退化在哪一步”。通过适配器归一化 Trace，执行四层评测和基线/候选三数据集对比，输出硬门禁、首错诊断和 accept/reject/rollback。
 
 核心内容：
-- 设计 ProjectAdapter 四能力契约，支持 HTTP、Java、离线和 OpenInference/OTLP 轨迹，核心零运行时依赖。
-- 实现四层评测、硬/软门禁和三数据集演化决策，覆盖关键回归、小样本和“通过率不变但用例一进一出”的隐藏退化。
-- 实现 LCS 首错定位、用例状态迁移和失败聚类，不重跑 Agent。
+- 设计 ProjectAdapter 四能力契约与 NormalizedTrace，支持 HTTP、Java、离线和 OpenInference/OTLP 轨迹，核心零运行时依赖。
+- 实现四层评测、硬/软门禁和 improvement/regression/holdout 三数据集演化决策，覆盖关键回归、小样本和“通过率不变但用例一进一出”的隐藏退化。
+- 实现工具链序列规则：有序子序列/严格一致、args 参数子集、嵌套连续块；配合 LCS 首错定位和用例状态迁移，诊断不重跑 Agent。
 - 实现文件/JDBC 双存储、批式落盘、断点恢复、跨进程锁和 trace id 校验。
-- 实现 evolve-auto 沙箱、只读 Dashboard，以及 EvaluationListener + Micrometer/OTel 可观测性。
-- 用 Maven reactor 统一 core、两个 store、dashboard、cli、app 分发和三个扩展；226 项测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
+- 实现规则通过率与跨 run 历史趋势、只读 Dashboard、evolve-auto 沙箱，以及 EvaluationListener + Micrometer/OTel 可观测性。
+- 用 Maven reactor 拆分 core、两个 store、dashboard、cli 和 app 分发六个代码模块，加三个扩展；226 项 Java 测试 + 16 项 Node 测试，10k 合成用例文件/JDBC 基准（文件约 2,500～3,700 cases/s）。
 
-项目成果：核心零依赖；示例可复现 rollback 与首错；10,000 条用例的文件/JDBC 基准，文件约 2,500～3,700 cases/s。
+项目成果：核心零依赖；示例可复现 rollback 与首错；外部真实 Agent 未压测，不把参考 Agent 数字当生产容量。
 ```
 
 ### 6.2 按岗位调整顺序
 
-- **Agent 评测 / 质量岗**：四层评测与门禁 → 三数据集演化 → TraceDiff → 外部轨迹/可观测性 → 恢复/并发。
-- **Java 工程岗**：Maven reactor/零依赖 → 文件/JDBC 存储与恢复 → 并发/隔离 → 规则与决策 → Listener/Micrometer/OTel → 测试/CI。
+- **Agent 评测 / 质量岗**：四层评测与门禁 → 三数据集演化 → 工具链序列规则（顺序/参数/嵌套）→ 规则历史趋势 → TraceDiff → 外部轨迹/可观测性。
+- **Java 工程岗**：Maven reactor/零依赖 → 模块拆分 → 文件/JDBC 存储与恢复 → 并发/隔离 → Listener/Micrometer/OTel → 10k 基准与 CI。
+- **平台 / 全栈岗**：Dashboard 规则统计与趋势 → 零构建前端 → CLI/HTTP 接入 → 存储与恢复 → 可观测性。
 
 关键词：
 
-- 评测：Agent Evaluation、Release Gate、Trace Normalization、Regression Diagnosis、Holdout、P95。
-- Java：Maven Reactor、JDBC、Crash Recovery、File Lock、ClassLoader、JUnit 5。
+- 评测：Agent Evaluation、Release Gate、Trace Normalization、Tool-Chain Sequence、Rule Trend、Regression Diagnosis、Holdout、P95。
+- Java：Maven Reactor、JDBC、Crash Recovery、File Lock、ClassLoader、JUnit 5、Benchmark。
 
 ### 6.3 一行版
 
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、首错定位、文件/JDBC 存储、发布门禁和 Micrometer/OTel 可观测性；226 项测试，CI 双平台。”
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、工具链序列规则、规则历史趋势、首错定位、文件/JDBC 存储和 Micrometer/OTel 可观测性；226 项测试 + 10k 合成用例基准，CI 双平台。”
 
 ### 6.4 注意事项
 
 - 放在 MiniCode / Ragent 之后，作为“质量保障/工程化”的差异化项目；投 AI 平台/评测岗可放第一个。
 - 不写“生产级”“百万级”；这个项目是本地/单机工程，写“零依赖、可移植、可复现”更加分。
 - 技术栈只写有把握被追问的；GitHub 链接可选，项目时间按实际填。
+- 每条 bullet 尽量是“问题 → 动作 → 证据”，不要只列模块名。
+
+### 6.5 可替换 bullet 库
+
+结果型：
+
+- 226 项 Java 测试 + 16 项 Node 测试，覆盖恢复、并发、JDBC 契约、序列规则和 Dashboard；10k 合成用例文件/JDBC 基准 0 硬失败。
+- 文件存储约 2,500～3,700 cases/s，H2 JDBC 约 1,750～2,500 cases/s；明确区分参考 Agent 与真实外部 Agent。
+
+技术型：
+
+- 实现工具链序列规则：`sequence_contains/sequence_eq`、args 参数子集、嵌套连续块，失败时输出缺失步骤/参数差异/首个乱序。
+- 实现 `rule_stats` 与 `/api/rule-history`：把单次规则通过率扩展为按 suite 的跨 run 趋势，前端用折线 + evaluated/missing 判断退化、抖动和覆盖率变化。
+- 拆分 core/store-file/store-jdbc/dashboard/cli/app 六个代码模块，app 只做 shade 分发；测试随包迁移，jar 入口不变。
+
+可靠性型：
+
+- 实现批式落盘、断点恢复、跨进程锁和 trace id 校验，避免重跑混入旧结果。
+- 用零依赖 Listener + 可选 Micrometer/OTel 扩展输出 run/case/batch 与 adapter/rules/llm/store 阶段信号。
+
+### 6.6 不要写什么
+
+- 不写“生产级”“百万级 QPS”“真实 LLM 基准已跑”；当前是本地 10k 合成基准，外部真实 Agent 未跑。
+- 不写“准确率 99%”；没有生产标注集和统计显著性检验。
+- 不把参考 Agent 的吞吐写成真实 Agent 吞吐；模型/网络延迟会主导真实场景。
+- 不写没做过的多租户、权限、分布式调度；这些是明确的边界。
 
 ---
 
@@ -487,11 +513,18 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 **回答**：
 
-规则是数据，才能序列化、审计、给 HTTP 用户零代码配置。`actual` 从 Trace 读路径，`expected` 从用例的 `expected` 读路径，或者用固定 `value`；操作符支持 `eq/ne/contains/not_contains/min/max/in/exists`。这让路由、字段、答案包含、长度、延迟这类判断都能声明。
+规则是数据，才能序列化、审计、给 HTTP 用户零代码配置。`actual` 从 Trace 读路径，`expected` 从用例的 `expected` 读路径，或者用固定 `value`；操作符支持 `eq/ne/contains/not_contains/min/max/in/exists`，以及 `sequence_contains/sequence_eq`。
 
-工具链和参数这种复杂逻辑，推荐让适配器在 `readTrace` 里暴露成结构化字段，比如 `fields.tool_chain`、`fields.tool_arguments.query_order.order_id`，再用普通规则比较。这样框架不需要引入脚本引擎，也不会把领域逻辑写死。
+工具链不再要求适配器手工拍平：序列规则默认取 `events` 的 `module/action` 作为步骤 key；步骤可带 `args`，按事件 `fields` 做子集匹配；嵌套数组表示必须连续的步骤块。例如：
 
-**可追问**：为什么不做 `sequence_eq` 之类的算子？答：可以加，但会增加规则引擎复杂度；当前通过适配器归一化已经能表达，优先保持核心简单。
+```json
+{"name":"tool_chain","actual":"events","operator":"sequence_contains",
+ "value":["Router/route",[{"step":"Tool/search","args":{"query":"refund"}},"Tool/answer"]]}
+```
+
+失败时给出缺失步骤、参数差异或首个顺序不匹配，运行页用步骤 chips 展示实际/期望序列。
+
+**可追问：为什么不做脚本引擎？** 脚本会带来执行安全、可审计性和跨语言移植问题；当前规则已经覆盖路由、字段、包含、范围、工具顺序和参数子集。更复杂的领域逻辑仍可由适配器暴露成结构化字段，而不是把 DSL 变成通用编程语言。
 
 ### 9. 缺失指标为什么保留 `null`，不补 0？覆盖率怎么用？
 
@@ -635,7 +668,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。Starter 另有 4 项上下文测试，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
+测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 226 项分布：core 42、store-file 36、store-jdbc 5、dashboard 5、cli 138；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 
@@ -647,7 +680,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-不足是默认仍是单机文件存储（JDBC 已有，但缺 schema 迁移和分布式锁）、没有多租户/权限、没有生产流量验证、诊断是辅助证据、没有统计显著性检验。数据量大了，用 JDBC/对象存储替换文件存储，Trace 接入做流式处理，`TraceDiff` 有 300 步上限，结果分页，评测 worker 独立部署，锁换成数据库/分布式锁。
+不足是默认仍是单机文件存储（JDBC 已有，但缺 schema 迁移和分布式锁）、没有多租户/权限、没有真实生产流量验证、诊断是辅助证据、没有统计显著性检验。已有 10k 合成用例的文件/JDBC 和多步参考 Agent 基准，但外部真实 LLM/HTTP Agent 未跑；因此只承诺“本地可复现”，不承诺生产容量。数据量再大，用 JDBC/对象存储替换文件存储，Trace 接入做流式处理，`TraceDiff` 有 300 步上限，结果分页，评测 worker 独立部署，锁换成数据库/分布式锁。
 
 非确定性 Agent 仍然可以评，但不能用一次运行下结论：高价值节点多次运行、一致性检查、置信区间、样本覆盖、场景门禁、人工复核；硬门禁只放在稳定信号上。非确定性不是不评测，而是要承认不确定性。
 

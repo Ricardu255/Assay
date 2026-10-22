@@ -529,7 +529,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；226 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
+> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；core 零运行时依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；226 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
 
 ### 8.3 面试三句话
 

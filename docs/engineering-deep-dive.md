@@ -184,6 +184,8 @@ OTel 实现放在 `extensions/assay-tracing-otel`：`assay.run` 下挂 `assay.ca
 | 数值目标 | 延迟、Token、成本、业务字段 |
 | 演化决策 | accept / reject / rollback |
 
+用例级硬门禁也支持工具链序列：`sequence_contains` 检查有序子序列，`sequence_eq` 要求完全一致；步骤可选 `args` 按事件 `fields` 做子集匹配，嵌套数组表示连续块。它仍然是纯数据规则，不引入脚本引擎。
+
 ### 4.2 决策顺序
 
 1. 版本身份不匹配 → rollback
@@ -221,20 +223,11 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 ## 六、Benchmark 方法
 
 ```bash
-# 生成 10,000 条合成 case（示例脚本，可按需替换）
-python scripts/generate_cases.py --count 10000 --output /tmp/assay-cases.jsonl
-
-# 用 EchoAdapter 跑，适配器本身不访问网络
-/usr/bin/time -v java -jar app/target/assay.jar run \
-  --adapter io.assay.examples.EchoAdapter \
-  --suite bench \
-  --cases /tmp/assay-cases.jsonl \
-  --store .assay/bench/store \
-  --output .assay/bench/runs \
-  --workers 20
+# 一条命令构建、生成 10,000 条 case、跑 file/JDBC × echo/agent
+python scripts/benchmark.py --count 10000 --workers 20
 ```
 
-记录：总耗时、cases/s、P50/P95、恢复耗时、存储写入耗时、峰值内存。
+脚本把结果写到 `target/bench/results.json`。记录：总耗时、cases/s、恢复耗时、存储写入耗时、峰值内存；当前还没有逐 case 墙钟 P50/P95，不要伪造。
 不要在没有固定环境的情况下比较不同机器；压测脚本和结果应进 `docs/benchmark.md`。
 
 ---
