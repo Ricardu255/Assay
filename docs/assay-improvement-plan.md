@@ -19,7 +19,7 @@
 - [x] P2（运行页规则统计）：新增 `RuleStats` 共享聚合，`results.json` / `report.md` 输出 `rule_stats`；运行页增加规则统计 tab。
 - [x] P2（规则历史趋势）：新增 `/api/rule-history`，按 suite 返回最近 20 次运行；运行页支持查看单条规则的通过率、评测数和缺失样本趋势。
 - [x] P3（工具链序列规则）：新增 `sequence_contains` / `sequence_eq`，按 `events` 的 `module/action` 断言工具调用顺序；支持 `args` 参数匹配、嵌套连续块和运行页步骤 chips。
-- [x] P0（基准）：新增 [benchmark.md](benchmark.md)，1,000 条轻量用例、8/20 workers 的本地基线（约 1,100 cases/s，明确标注不代表生产容量）。
+- [x] P0（基准）：新增 [benchmark.md](benchmark.md) 和 `scripts/benchmark.py`，10,000 条用例、文件/JDBC、单步/多步参考 Agent 四种组合；文件约 2,500～3,700 cases/s，H2 JDBC 约 1,750～2,500 cases/s，明确标注外部真实 Agent 未跑。
 
 ---
 
@@ -45,7 +45,7 @@
 | JDBC 只有基础实现 | “没做过迁移/分布式锁” | `JdbcResultStore` 已落地；缺 schema migration、分布式锁 TTL |
 | 手写 JSON/HTTP Server | “重复造轮子” | 零依赖约束下的取舍，有测试覆盖；但需要把“为什么”讲清楚 |
 | 没有内置 exporter | “没做过可观测性” | Micrometer/OTel 和 adapter/rules/llm/store stage span 已落地；exporter 由使用方提供 |
-| 没有 10k/真实 Agent 压测 | “没验证过规模” | 1,000 条轻量基线；缺 10k/JDBC/真实 Agent 数据 |
+| 真实 Agent 未压测 | “没验证过真实模型规模” | 已有 10k 文件/JDBC 和多步参考 Agent；外部 LLM/HTTP Agent 因无稳定 endpoint 未跑 |
 | Starter 已落地 | “不能嵌入企业应用” | 可选模块，不污染核心；发布到 Maven Central 仍需配置 |
 
 **根因不是代码简单，是工程信号藏得太深。** README 先讲功能，没有先讲失败处理、取舍和验证；面试官看不到 1.3 万行里的难点。
@@ -529,7 +529,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；226 项测试 + 1,000 条轻量基准，CI 双平台。
+> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；app 核心零依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；226 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
 
 ### 8.3 面试三句话
 

@@ -350,7 +350,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 
 核心规则不依赖命令行、存储或 LLM；LLM 只产出语义分析、疑似模块、修改建议和 few-shot 候选，永远不参与硬门禁判定。
 
-崩溃恢复、首错诊断和隔离边界的实现细节、故障矩阵与测试见 [docs/engineering-deep-dive.md](docs/engineering-deep-dive.md)；1,000 条轻量用例的本地基线见 [docs/benchmark.md](docs/benchmark.md)。
+崩溃恢复、首错诊断和隔离边界的实现细节、故障矩阵与测试见 [docs/engineering-deep-dive.md](docs/engineering-deep-dive.md)；10,000 条合成用例的文件/JDBC 与多步参考 Agent 基线见 [docs/benchmark.md](docs/benchmark.md)，可用 `python scripts/benchmark.py --count 10000 --workers 20` 复现。
 
 ## 存储、恢复与并发
 

@@ -1,7 +1,7 @@
 # Assay 面试准备与简历写法
 
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；78 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；226 项核心 Java 测试通过（1 项按环境跳过）+ 16 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；79 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；226 项核心 Java 测试通过（1 项按环境跳过）+ 16 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
 > 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
 
@@ -115,7 +115,7 @@ Candidate run ┘        │                  │
 - **工具链序列规则**：新增 `sequence_contains` / `sequence_eq`，按 `events` 的 `module/action` 断言工具调用顺序；支持 `args` 参数匹配和嵌套连续块，失败时指出缺失步骤、参数差异或首个顺序不匹配，运行页用步骤 chips 展示。
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，H2 契约测试 5 项 + CLI JDBC 测试 1 项。
 - **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
-- **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；1,000 条轻量用例 benchmark（约 1,100 cases/s，非生产容量承诺）。
+- **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；10,000 条合成用例的文件/JDBC 与多步参考 Agent 基准（文件约 2,500～3,700 cases/s；外部真实 Agent 未跑，非生产容量承诺）。
 - **可观测**：零依赖 `EvaluationListener` SPI（run/case/batch 生命周期，默认 no-op，listener 异常不影响评测）；`extensions/assay-metrics-micrometer` 输出指标（标签不含 run_id/case_id），`extensions/assay-tracing-otel` 输出 run/case/batch span，失败 run 通过 `onRunFailed` 关闭 span。
 
 ---
@@ -353,7 +353,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 实现 evolve-auto 沙箱、只读 Dashboard，以及 EvaluationListener + Micrometer/OTel 可观测性。
 - 用 Maven reactor 统一 core、两个 store、dashboard、cli、app 分发和三个扩展；226 项测试 + 4 Starter + 2 Micrometer + 2 OTel，CI 双平台。
 
-项目成果：核心零依赖；示例可复现 rollback 与首错；1,000 条轻量用例约 1,100 cases/s。
+项目成果：核心零依赖；示例可复现 rollback 与首错；10,000 条用例的文件/JDBC 基准，文件约 2,500～3,700 cases/s。
 ```
 
 ### 6.2 按岗位调整顺序
@@ -382,7 +382,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 1. **先讲问题，再讲架构**：不要一上来念模块。
 2. **强调“证据”和“人的决定权”**：这是项目和普通评测脚本的区别。
-3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、226 项测试、JDBC/Starter/Micrometer/OTel 已落地、1,000 条轻量用例约 1,100 cases/s、示例可复现 rollback”。
+3. **不要过度承诺**：不说“生产级”“大规模”“准确率 99%”；说“本地可复现、226 项测试、JDBC/Starter/Micrometer/OTel 已落地、10k 合成用例文件/JDBC 基准、外部真实 Agent 未跑、示例可复现 rollback”。
 4. **主动说取舍**：文件存储 vs 数据库、LLM 不进硬门禁、诊断是辅助证据。面试官更看重你知道边界。
 5. **准备一个具体 bug**：恢复/半行 UTF-8 或隐藏回归，按 STAR 讲。
 6. **准备一张架构图**：适配器 → 评测 → 演化 → 诊断 → 存储/报告/Dashboard。
