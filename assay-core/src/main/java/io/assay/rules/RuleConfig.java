@@ -58,6 +58,7 @@ public final class RuleConfig {
                 if (!(rule.get("value") instanceof List<?> sequence) || sequence.isEmpty()) {
                     throw new IllegalArgumentException("sequence value must be a non-empty array: " + name);
                 }
+                validateSequence(sequence, name);
             }
             List<String> modules = new ArrayList<>();
             Object suspects = rule.getOrDefault("suspected_modules", List.of());
@@ -83,6 +84,32 @@ public final class RuleConfig {
                     modules));
         }
         return List.copyOf(rules);
+    }
+
+    private static void validateSequence(List<?> steps, String name) {
+        for (Object step : steps) {
+            if (step instanceof String text) {
+                if (text.isBlank()) {
+                    throw new IllegalArgumentException("sequence step must be non-empty: " + name);
+                }
+            } else if (step instanceof List<?> nested) {
+                if (nested.isEmpty()) {
+                    throw new IllegalArgumentException("nested sequence must be non-empty: " + name);
+                }
+                validateSequence(nested, name);
+            } else if (step instanceof Map<?, ?> map) {
+                if (map.get("module") == null && map.get("action") == null
+                        && map.get("step") == null && map.get("tool") == null) {
+                    throw new IllegalArgumentException("sequence step needs module/action, step, or tool: " + name);
+                }
+                Object args = map.containsKey("args") ? map.get("args") : map.get("fields");
+                if (args != null && !(args instanceof Map<?, ?>)) {
+                    throw new IllegalArgumentException("sequence step args must be an object: " + name);
+                }
+            } else {
+                throw new IllegalArgumentException("invalid sequence step: " + name);
+            }
+        }
     }
 
     private static String text(Map<String, Object> map, String key, String fallback) {

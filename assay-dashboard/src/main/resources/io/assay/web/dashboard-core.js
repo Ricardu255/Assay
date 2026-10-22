@@ -365,6 +365,21 @@
     rows.sort((left, right) => (right.lastAt?.getTime() || 0) - (left.lastAt?.getTime() || 0));
     return rows.slice(0, Math.max(1, Number.isFinite(limit) ? limit : 8));
   }
+  function sequenceSteps(value) {
+    if (!Array.isArray(value)) return null;
+    return value.map((item) => {
+      if (Array.isArray(item)) return { group: sequenceSteps(item) };
+      if (typeof item === "string") return { key: item, args: {} };
+      if (item && typeof item === "object") {
+        const key = item.step ?? item.tool ?? (item.module != null || item.action != null
+          ? `${item.module ?? ""}/${item.action ?? ""}` : null);
+        const rawArgs = item.args && typeof item.args === "object" ? item.args
+          : item.fields && typeof item.fields === "object" ? item.fields : {};
+        return { key: key === null ? JSON.stringify(item) : String(key), args: rawArgs };
+      }
+      return { key: String(item), args: {} };
+    });
+  }
   function ruleStats(payload) {
     const raw = payload && payload.rule_stats;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
@@ -379,7 +394,7 @@
     }).sort((left, right) => (left.passRate ?? 2) - (right.passRate ?? 2)
       || right.evaluated - left.evaluated || left.name.localeCompare(right.name));
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats };
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats, sequenceSteps };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);

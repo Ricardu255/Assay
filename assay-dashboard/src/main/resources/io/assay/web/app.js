@@ -393,6 +393,29 @@ function details(title, value, open = false) {
   return `<details ${open ? "open" : ""}><summary>${escape(title)}</summary><pre>${json(value)}</pre></details>`;
 }
 
+function sequenceArgs(args) {
+  const entries = Object.entries(object(args));
+  if (!entries.length) return "";
+  const text = entries.map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`).join(", ");
+  return `<span class="sequence-args">${escape(text)}</span>`;
+}
+
+function sequenceChips(steps) {
+  return steps.map((step) => step.group
+    ? `<span class="sequence-group">${sequenceChips(step.group)}</span>`
+    : `<span class="sequence-step" title="${escape(step.key)}">${escape(step.key)}${sequenceArgs(step.args)}</span>`).join("");
+}
+
+function sequenceView(check) {
+  const expected = AssayUI.sequenceSteps(check.expected);
+  if (!expected || !expected.length) return "";
+  const actual = AssayUI.sequenceSteps(check.actual) || [];
+  return `<div class="sequence-view ${check.passed ? "passed" : "failed"}">
+    <div class="sequence-row"><span class="sequence-label">实际</span><div class="sequence-track">${actual.length ? sequenceChips(actual) : '<span class="muted">没有可读取的步骤</span>'}</div></div>
+    <div class="sequence-row"><span class="sequence-label">期望</span><div class="sequence-track">${sequenceChips(expected)}</div></div>
+  </div>`;
+}
+
 function renderTrace() {
   const result = array(current().payload.results)[state.caseIndex];
   if (!result) { $("trace-detail").innerHTML = empty("没有匹配的用例", "调整状态或搜索条件。"); return; }
@@ -410,7 +433,7 @@ function renderTrace() {
     ${visibleEvents.map(({ event, index }) => `<details class="trace-event ${AssayUI.failedEvent(event) ? "error" : ""}" data-event="${index}" ${AssayUI.failedEvent(event) ? "open" : ""}><summary><span class="step-number">${index + 1}</span><span class="step-main"><strong>${escape(event.module || "未标注模块")}</strong><span class="step-action">${escape(event.action || "未标注动作")}</span></span>${badge(event.status || "unknown")}<span class="muted number">${decimal(event.duration_ms, " ms")}</span></summary><div class="event-body">
       ${event.error ? `<p class="step-error">${escape(event.error)}</p>` : ""}<div class="command-head"><strong>步骤字段</strong><button class="link-button" data-copy-event="${index}">复制步骤 JSON</button></div><pre>${json(event.fields || {})}</pre>
       ${Object.keys(object(event.fields)).length ? "" : '<p class="mini-note">适配器未记录该步骤的额外字段。</p>'}</div></details>`).join("") || '<p class="muted">没有执行失败步骤；规则未通过的证据请查看下方规则检查。</p>'}` : `<p class="muted">${result.trace ? "本次 Trace 没有步骤记录。" : "执行未产生可读取的 Trace。"}</p>`}
-    <h3 class="section-gap">规则检查</h3>${checks.length ? checks.map((check) => `<div class="check"><div class="check-head">${badge(check.passed ? "passed" : check.level === "hard" ? "failed" : "warning")}<strong>${escape(check.name)}</strong><span class="muted">${escape({ hard: "硬门禁", soft: "软质量", candidate: "复核信号" }[check.level] || check.level)}</span></div><p>${escape(check.message || check.layer || "")}</p>${details("实际值与期望值", { actual: check.actual, expected: check.expected, suspected_modules: check.suspected_modules })}</div>`).join("") : '<p class="muted">没有规则结果。</p>'}
+    <h3 class="section-gap">规则检查</h3>${checks.length ? checks.map((check) => `<div class="check"><div class="check-head">${badge(check.passed ? "passed" : check.level === "hard" ? "failed" : "warning")}<strong>${escape(check.name)}</strong><span class="muted">${escape({ hard: "硬门禁", soft: "软质量", candidate: "复核信号" }[check.level] || check.level)}</span></div><p>${escape(check.message || check.layer || "")}</p>${sequenceView(check)}${details("实际值与期望值", { actual: check.actual, expected: check.expected, suspected_modules: check.suspected_modules })}</div>`).join("") : '<p class="muted">没有规则结果。</p>'}
     ${details("最终输出", trace.final_output, true)}${details("输入与期望", { input: object(result.case).payload, expected: object(result.case).expected })}${details("Trace 字段与反馈", { fields: trace.fields, feedback: trace.feedback })}
     ${Object.keys(review).length ? `<div class="model-note"><strong>模型建议 · 非权威</strong><p>${escape(review.summary || review.error || "查看建议详情")}</p>${details("建议详情", review)}</div>` : ""}</div>`;
 }

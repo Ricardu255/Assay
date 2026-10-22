@@ -205,6 +205,22 @@ test("Rule stats sort the worst pass rate first and preserve missing data", () =
   assert.deepEqual(ui.ruleStats({}), []);
 });
 
+test("Sequence steps normalize events, arguments, and nested groups", () => {
+  const steps = ui.sequenceSteps([
+    { module: "Router", action: "route" },
+    { step: "Tool/search", args: { query: "refund" } },
+    ["Tool/answer", { tool: "Log/write", fields: { level: "info" } }]
+  ]);
+  assert.equal(steps[0].key, "Router/route");
+  assert.deepEqual(steps[0].args, {});
+  assert.equal(steps[1].key, "Tool/search");
+  assert.deepEqual(steps[1].args, { query: "refund" });
+  assert.equal(steps[2].group[0].key, "Tool/answer");
+  assert.equal(steps[2].group[1].key, "Log/write");
+  assert.deepEqual(steps[2].group[1].args, { level: "info" });
+  assert.equal(ui.sequenceSteps("not-a-sequence"), null);
+});
+
 test("Setup defaults point at the reactor artifact and source layout", () => {
   const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
   assert.match(source, /jar: "app\/target\/assay\.jar"/);

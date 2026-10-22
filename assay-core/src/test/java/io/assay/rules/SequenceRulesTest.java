@@ -60,6 +60,52 @@ class SequenceRulesTest {
     }
 
     @Test
+    void toolArgumentsCanBeMatched() {
+        Rule rule = Rule.ofValue(
+                "search_args", "events", "sequence_contains",
+                List.of(Map.of("step", "Tool/search", "args", Map.of("query", "refund"))));
+        CheckResult check = evaluate(rule, traceWithFields(
+                new TraceEvent("Tool", "search", "ok", 0, null, Map.of("query", "refund"))));
+
+        assertTrue(check.passed());
+    }
+
+    @Test
+    void toolArgumentMismatchIsReported() {
+        Rule rule = Rule.ofValue(
+                "search_args", "events", "sequence_eq",
+                List.of(Map.of("step", "Tool/search", "args", Map.of("query", "refund"))));
+        CheckResult check = evaluate(rule, traceWithFields(
+                new TraceEvent("Tool", "search", "ok", 0, null, Map.of("query", "other"))));
+
+        assertFalse(check.passed());
+        assertTrue(check.message().contains("args mismatch"), check.message());
+    }
+
+    @Test
+    void nestedSequenceMatchesAContiguousBlock() {
+        Rule rule = Rule.ofValue(
+                "retry_block", "events", "sequence_contains",
+                List.of("Router/route", List.of("Tool/search", "Tool/answer"), "Log/write"));
+        CheckResult check = evaluate(rule, trace(
+                "Router/route", "Tool/noise", "Tool/search", "Tool/answer", "Log/write"));
+
+        assertTrue(check.passed());
+    }
+
+    @Test
+    void nestedSequenceRequiresItsOwnStepsToBeContiguous() {
+        Rule rule = Rule.ofValue(
+                "retry_block", "events", "sequence_contains",
+                List.of("Router/route", List.of("Tool/search", "Tool/answer"), "Log/write"));
+        CheckResult check = evaluate(rule, trace(
+                "Router/route", "Tool/search", "Tool/noise", "Tool/answer", "Log/write"));
+
+        assertFalse(check.passed());
+        assertTrue(check.message().contains("missing ordered group"), check.message());
+    }
+
+    @Test
     void expectedSequenceCanComeFromTheCase() {
         Rule rule = Rule.of("tool_chain", "events", "sequence_eq", "tool_chain");
         EvalCase evalCase = new EvalCase(
@@ -82,6 +128,10 @@ class SequenceRulesTest {
     private static CheckResult evaluate(Rule rule, NormalizedTrace trace) {
         return Rules.evaluateRule(
                 rule, "hard", new EvalCase("C1", Map.of(), Map.of(), "default"), trace);
+    }
+
+    private static NormalizedTrace traceWithFields(TraceEvent... events) {
+        return new NormalizedTrace("trace-1", "ok", List.of(events), Map.of());
     }
 
     private static NormalizedTrace trace(String... steps) {

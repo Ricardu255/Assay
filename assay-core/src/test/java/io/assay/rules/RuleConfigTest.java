@@ -43,11 +43,29 @@ class RuleConfigTest {
         assertEquals("sequence_contains", rules.get(0).operator());
         assertEquals(List.of("Router/route", "Tool/search"), rules.get(0).value());
 
+        List<Object> nested = List.of(
+                "Router/route",
+                List.of("Tool/search", "Tool/answer"),
+                Map.of("step", "Log/write", "args", Map.of("level", "info")));
+        List<Rule> nestedRules = RuleConfig.parse(
+                List.of(Map.of("name", "nested", "actual", "events", "operator", "sequence_eq", "value", nested)),
+                "hard_gates");
+        assertEquals(nested, nestedRules.get(0).value());
+
         assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
                 List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", List.of())),
                 "hard_gates"));
         assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
                 List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", "Router/route")),
+                "hard_gates"));
+        assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
+                List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", List.of(List.of()))),
+                "hard_gates"));
+        assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
+                List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", List.of(Map.of("args", Map.of("q", "x"))))),
+                "hard_gates"));
+        assertThrows(IllegalArgumentException.class, () -> RuleConfig.parse(
+                List.of(Map.of("name", "chain", "actual", "events", "operator", "sequence_eq", "value", List.of(Map.of("step", "A/x", "args", "bad")))),
                 "hard_gates"));
     }
 

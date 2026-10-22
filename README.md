@@ -234,7 +234,12 @@ java -jar app/target/assay.jar run \
 
 仓库里的 `examples/` 提供三个可直接运行的参考实现。
 
-规则是纯数据：`actual` 是从 Trace 读字段的路径，`expected` 是从 case 的 `expected` 块读字段的路径，`operator` 支持 `eq`、`ne`、`contains`、`not_contains`、`min`、`max`、`in`、`exists`，以及 `sequence_contains` / `sequence_eq`。序列规则默认把 `events` 中的 `module/action` 作为步骤 key；`sequence_contains` 要求有序子序列，`sequence_eq` 要求完全一致。
+规则是纯数据：`actual` 是从 Trace 读字段的路径，`expected` 是从 case 的 `expected` 块读字段的路径，`operator` 支持 `eq`、`ne`、`contains`、`not_contains`、`min`、`max`、`in`、`exists`，以及 `sequence_contains` / `sequence_eq`。序列规则默认把 `events` 中的 `module/action` 作为步骤 key；步骤可带 `args` 匹配事件 `fields`，嵌套数组表示必须连续的步骤块。`sequence_contains` 要求有序子序列，`sequence_eq` 要求完全一致；运行页规则检查会用步骤 chips 展示实际与期望序列。
+
+```json
+{"name":"tool_chain","actual":"events","operator":"sequence_contains",
+ "value":["Router/route",[{"step":"Tool/search","args":{"query":"refund"}},"Tool/answer"]]}
+```
 
 ## 标准 Trace
 

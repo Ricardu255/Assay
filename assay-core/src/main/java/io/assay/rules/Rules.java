@@ -67,79 +67,233 @@ public final class Rules {
         if (!(actual instanceof List<?> actualItems)) {
             return new SequenceResult(false, "expected a sequence for " + operator, List.of(), List.of());
         }
-        if (!(expected instanceof List<?> expectedItems) || expectedItems.isEmpty()) {
-            return new SequenceResult(false, "expected sequence must be a non-empty array", keys(actualItems), List.of());
+        List<StepSpec> actualSteps;
+        List<StepSpec> expectedSteps;
+        try {
+            actualSteps = parseActual(actualItems);
+            expectedSteps = parseExpected(expected);
+        } catch (IllegalArgumentException error) {
+            return new SequenceResult(false, error.getMessage(), List.of(), List.of());
         }
-        List<String> actualKeys = keys(actualItems);
-        List<String> expectedKeys = keys(expectedItems);
+        if (expectedSteps.isEmpty()) {
+            return new SequenceResult(false, "expected sequence must be a non-empty array", evidence(actualSteps), List.of());
+        }
+        List<StepSpec> flatExpected = flatten(expectedSteps);
         if ("sequence_eq".equals(operator)) {
-            for (int index = 0; index < Math.max(actualKeys.size(), expectedKeys.size()); index++) {
-                if (index >= actualKeys.size()) {
+            for (int index = 0; index < Math.max(actualSteps.size(), flatExpected.size()); index++) {
+                if (index >= actualSteps.size()) {
                     return new SequenceResult(
-                            false, "missing step " + (index + 1) + ": " + expectedKeys.get(index), actualKeys, expectedKeys);
+                            false, "missing step " + (index + 1) + ": " + label(flatExpected.get(index)),
+                            evidence(actualSteps), evidence(expectedSteps));
                 }
-                if (index >= expectedKeys.size()) {
+                if (index >= flatExpected.size()) {
                     return new SequenceResult(
-                            false, "unexpected step " + (index + 1) + ": " + actualKeys.get(index), actualKeys, expectedKeys);
+                            false, "unexpected step " + (index + 1) + ": " + label(actualSteps.get(index)),
+                            evidence(actualSteps), evidence(expectedSteps));
                 }
-                if (!actualKeys.get(index).equals(expectedKeys.get(index))) {
-                    return new SequenceResult(
-                            false,
-                            "step " + (index + 1) + " expected " + expectedKeys.get(index) + " but was "
-                                    + actualKeys.get(index),
-                            actualKeys,
-                            expectedKeys);
+                String mismatch = mismatch(actualSteps.get(index), flatExpected.get(index), index + 1);
+                if (mismatch != null) {
+                    return new SequenceResult(false, mismatch, evidence(actualSteps), evidence(expectedSteps));
                 }
             }
-            return new SequenceResult(true, "passed", actualKeys, expectedKeys);
+            return new SequenceResult(true, "passed", evidence(actualSteps), evidence(expectedSteps));
         }
-        int matched = 0;
-        for (String item : actualKeys) {
-            if (matched < expectedKeys.size() && item.equals(expectedKeys.get(matched))) {
-                matched++;
+        int cursor = 0;
+        for (StepSpec step : expectedSteps) {
+            if (step.group() != null) {
+                int end = matchGroup(actualSteps, cursor, step.group());
+                if (end < 0) {
+                    return new SequenceResult(
+                            false, "missing ordered group: " + groupLabel(step.group()),
+                            evidence(actualSteps), evidence(expectedSteps));
+                }
+                cursor = end;
+                continue;
+            }
+            int found = cursor;
+            while (found < actualSteps.size() && !stepMatches(actualSteps.get(found), step)) {
+                found++;
+            }
+            if (found >= actualSteps.size()) {
+                return new SequenceResult(
+                        false, "missing ordered step: " + label(step),
+                        evidence(actualSteps), evidence(expectedSteps));
+            }
+            cursor = found + 1;
+        }
+        return new SequenceResult(true, "passed", evidence(actualSteps), evidence(expectedSteps));
+    }
+
+    private static List<StepSpec> parseActual(List<?> items) {
+        List<StepSpec> steps = new ArrayList<>();
+        for (Object item : items) {
+            steps.add(parseStep(item));
+        }
+        return steps;
+    }
+
+    private static List<StepSpec> parseExpected(Object value) {
+        if (!(value instanceof List<?> items) || items.isEmpty()) {
+            throw new IllegalArgumentException("expected sequence must be a non-empty array");
+        }
+        List<StepSpec> steps = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof List<?> group) {
+                if (group.isEmpty()) {
+                    throw new IllegalArgumentException("nested sequence must be a non-empty array");
+                }
+                steps.add(new StepSpec(null, Map.of(), parseExpected(group)));
+            } else {
+                steps.add(parseStep(item));
             }
         }
-        if (matched < expectedKeys.size()) {
-            return new SequenceResult(
-                    false,
-                    "missing ordered step: " + expectedKeys.get(matched) + "; actual: " + String.join(" -> ", actualKeys),
-                    actualKeys,
-                    expectedKeys);
-        }
-        return new SequenceResult(true, "passed", actualKeys, expectedKeys);
+        return steps;
     }
 
-    private static List<String> keys(List<?> values) {
-        List<String> keys = new ArrayList<>();
-        for (Object value : values) {
-            keys.add(stepKey(value));
-        }
-        return keys;
-    }
-
-    private static String stepKey(Object value) {
+    private static StepSpec parseStep(Object value) {
         if (value instanceof String text) {
-            return text;
+            if (text.isBlank()) {
+                throw new IllegalArgumentException("sequence step must be a non-empty string");
+            }
+            return new StepSpec(text, Map.of(), null);
         }
-        if (value instanceof Map<?, ?> map) {
-            Object module = map.get("module");
-            Object action = map.get("action");
-            if (module != null || action != null) {
-                return (module == null ? "" : String.valueOf(module)) + "/" + (action == null ? "" : String.valueOf(action));
+        if (!(value instanceof Map<?, ?> map)) {
+            throw new IllegalArgumentException("sequence step must be a string, object, or nested array");
+        }
+        String key = stepKey(map);
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("sequence step requires module/action, step, or tool");
+        }
+        Object rawArgs = map.containsKey("args") ? map.get("args") : map.get("fields");
+        Map<String, Object> args = new LinkedHashMap<>();
+        if (rawArgs != null) {
+            if (!(rawArgs instanceof Map<?, ?> fields)) {
+                throw new IllegalArgumentException("sequence step args must be an object");
             }
-            Object step = map.get("step");
-            if (step != null) {
-                return String.valueOf(step);
-            }
-            Object tool = map.get("tool");
-            if (tool != null) {
-                return String.valueOf(tool);
+            for (Map.Entry<?, ?> entry : fields.entrySet()) {
+                args.put(String.valueOf(entry.getKey()), entry.getValue());
             }
         }
-        return String.valueOf(value);
+        return new StepSpec(key, args, null);
     }
 
-    private record SequenceResult(boolean passed, String message, List<String> actual, List<String> expected) {
+    private static String stepKey(Map<?, ?> map) {
+        Object module = map.get("module");
+        Object action = map.get("action");
+        if (module != null || action != null) {
+            return (module == null ? "" : String.valueOf(module)) + "/"
+                    + (action == null ? "" : String.valueOf(action));
+        }
+        Object step = map.get("step");
+        if (step != null) {
+            return String.valueOf(step);
+        }
+        Object tool = map.get("tool");
+        return tool == null ? null : String.valueOf(tool);
+    }
+
+    private static List<StepSpec> flatten(List<StepSpec> steps) {
+        List<StepSpec> result = new ArrayList<>();
+        for (StepSpec step : steps) {
+            if (step.group() == null) {
+                result.add(step);
+            } else {
+                result.addAll(flatten(step.group()));
+            }
+        }
+        return result;
+    }
+
+    private static List<Object> evidence(List<StepSpec> steps) {
+        List<Object> result = new ArrayList<>();
+        for (StepSpec step : steps) {
+            if (step.group() != null) {
+                result.add(evidence(step.group()));
+            } else if (step.args().isEmpty()) {
+                result.add(step.key());
+            } else {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("step", step.key());
+                item.put("args", step.args());
+                result.add(item);
+            }
+        }
+        return result;
+    }
+
+    private static String label(StepSpec step) {
+        return step.args().isEmpty() ? step.key() : step.key() + " " + step.args();
+    }
+
+    private static String groupLabel(List<StepSpec> group) {
+        List<String> labels = new ArrayList<>();
+        for (StepSpec step : group) {
+            labels.add(label(step));
+        }
+        return labels.toString();
+    }
+
+    private record StepSpec(String key, Map<String, Object> args, List<StepSpec> group) {
+    }
+
+    private static boolean stepMatches(StepSpec actual, StepSpec expected) {
+        return actual.key().equals(expected.key()) && argsMatch(actual.args(), expected.args());
+    }
+
+    private static boolean argsMatch(Map<String, Object> actual, Map<String, Object> expected) {
+        if (expected.isEmpty()) {
+            return true;
+        }
+        if (actual == null) {
+            return false;
+        }
+        for (Map.Entry<String, Object> entry : expected.entrySet()) {
+            Object value = ValueOps.readPath(actual, entry.getKey());
+            if (value == ValueOps.MISSING || !ValueOps.equal(value, entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String mismatch(StepSpec actual, StepSpec expected, int position) {
+        if (!actual.key().equals(expected.key())) {
+            return "step " + position + " expected " + label(expected) + " but was " + label(actual);
+        }
+        if (!argsMatch(actual.args(), expected.args())) {
+            return "step " + position + " " + expected.key() + " args mismatch: expected "
+                    + expected.args() + " but was " + actual.args();
+        }
+        return null;
+    }
+
+    private static int matchGroup(List<StepSpec> actual, int cursor, List<StepSpec> group) {
+        for (int start = cursor; start < actual.size(); start++) {
+            int position = start;
+            boolean matched = true;
+            for (StepSpec step : group) {
+                if (step.group() != null) {
+                    int end = matchGroup(actual, position, step.group());
+                    if (end < 0) {
+                        matched = false;
+                        break;
+                    }
+                    position = end;
+                } else if (position < actual.size() && stepMatches(actual.get(position), step)) {
+                    position++;
+                } else {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) {
+                return position;
+            }
+        }
+        return -1;
+    }
+
+    private record SequenceResult(boolean passed, String message, Object actual, Object expected) {
     }
 
     /** An unsupported operator is a programming error; a type mismatch is a failed check. */

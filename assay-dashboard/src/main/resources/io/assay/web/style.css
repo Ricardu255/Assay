@@ -77,6 +77,15 @@ p { margin: 0; }
 .rule-history-panel:empty { display: none; }
 .rule-history-head { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; margin-bottom: 10px; }
 .rule-history-head strong { font-size: var(--font-sm); }
+.sequence-view { display: grid; gap: 8px; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+.sequence-row { display: flex; gap: 10px; align-items: flex-start; }
+.sequence-label { min-width: 34px; padding-top: 4px; color: var(--text-secondary); font-size: var(--font-xs); }
+.sequence-track { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sequence-step { display: inline-flex; align-items: baseline; gap: 2px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); font-size: var(--font-xs); }
+.sequence-group { display: inline-flex; gap: 4px; padding: 3px; border: 1px dashed var(--info-border); border-radius: 6px; }
+.sequence-args { color: var(--text-secondary); font-size: var(--font-xs); }
+.sequence-view.passed .sequence-step { color: var(--good-text); border-color: var(--good-border); background: var(--good-bg); }
+.sequence-view.failed .sequence-step { color: var(--bad-text); border-color: var(--bad-border); background: var(--bad-bg); }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: var(--font-sm); text-align: left; }
 th { background: var(--surface-subtle); color: var(--muted); font-size: var(--font-xs); font-weight: 550; padding: 12px 18px; white-space: nowrap; }
