@@ -9,7 +9,7 @@
 ## 实施状态（2026-10-20）
 
 - [x] P0：新增 [engineering-deep-dive.md](engineering-deep-dive.md)，README 补充工程深挖入口和 JDBC/Starter 用法。
-- [x] P1（存储）：新增 `JdbcResultStore`、`Stores.open`、`Results.RunLock` 抽象；CLI 支持 `--store jdbc:...`；新增 5 项 JDBC 存储测试 + 1 项 CLI JDBC 测试。
+- [x] P1（存储）：新增 `JdbcResultStore`、`Stores.open`、`Results.RunLock` 抽象；CLI 支持 `--store jdbc:...`；新增 6 项 JDBC 存储测试（含 H2 file 重连）+ 1 项 CLI JDBC 测试。
 - [x] P2（集成）：新增 `extensions/assay-spring-boot-starter`，提供文件/JDBC 存储自动配置、`EvaluationEngine` 装配和 `EvaluationListener` 注入，4 项上下文测试通过。
 - [x] P2（交付）：新增 `Dockerfile`、`.dockerignore`，CI 用根 reactor 的 `clean verify` 覆盖全部模块，并构建镜像。
 - [x] P1（模块化，Phase 2B）：拆出 `assay-dashboard`、`assay-cli`；`app` 只做分发 shade；测试随包迁入各模块；`io.assay.store` / `llm` / `engine` 的 split package 已清理。
@@ -213,7 +213,7 @@ Phase 2B（已完成）：
 
 1. `web` 和静态资源移入 `assay-dashboard`。
 2. `AssayCli`、adapters、sandbox、audit、selection、review 移入 `assay-cli`。
-3. 测试随包迁移：core 29、store-file 36、store-jdbc 5、dashboard 4、cli 138。
+3. 测试随包迁移（迁移当时）：core 29、store-file 36、store-jdbc 5、dashboard 4、cli 138；后续新增测试见当前总数。
 4. `ResultStore` 改为 `io.assay.store.file`，`Stores` 移入 `io.assay.cli`，`LlmReviewer` 移入 `io.assay.engine`。
 5. `app` 只保留 shade 分发。
 

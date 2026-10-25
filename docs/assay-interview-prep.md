@@ -395,7 +395,13 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 可靠性型：
 
 - 实现批式落盘、断点恢复、跨进程锁和 trace id 校验，避免重跑混入旧结果。
+- 修复 H2 file 模式关闭后重连只读：自动补 `DB_CLOSE_DELAY=-1`，并用真实 file 契约测试覆盖。
 - 用零依赖 Listener + 可选 Micrometer/OTel 扩展输出 run/case/batch 与 adapter/rules/llm/store 阶段信号。
+
+性能 / 易用型：
+
+- 为 Dashboard catalog 和 rule-history 增加按 mtime/size 失效的摘要缓存，避免每次刷新解析完整结果。
+- 提供 `assay quickstart`、`QUICKSTART.md` 和免 Maven 发行包，让非 Java 用户三步内跑通 HTTP Agent。
 
 ### 6.6 不要写什么
 
@@ -702,7 +708,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 ---
 
-## 九、快问快答 14 条
+## 九、快问快答 18 条
 
 1. **为什么不用 YAML？** 核心零依赖，JSON 够用且严格校验更容易；YAML 的隐式类型和解析器依赖会引入风险。
 2. **为什么退出码有 2？** `2` 表示用法错误或需要人工复核；需要人看的运行不能看起来像通过。
@@ -718,6 +724,10 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 12. **Spring Boot Starter 会不会污染核心？** 不会；Starter 是独立扩展，核心不反向依赖 Spring，且没有 `ProjectAdapter` 就不装配 Engine。
 13. **为什么用 EvaluationListener，而不是在引擎里直接打点？** 核心保持零依赖；Micrometer/OTel 放扩展，默认 no-op，listener 抛异常也不会改变评测结果。
 14. **怎么评工具调用顺序？** `sequence_contains` 要求有序子序列，`sequence_eq` 要求完全一致；步骤 key 默认取 `events` 的 `module/action`，支持 `args` 参数匹配和嵌套连续块，运行页会用 chips 展示实际/期望序列。
+15. **H2 文件库为什么之前会 read-only？** 每次操作新建连接，H2 在最后一个连接关闭后关库，重开时可能只读；`fromUrl` 自动补 `DB_CLOSE_DELAY=-1`，并用真实 file 模式测试覆盖“写入→关闭→重开→再写”。
+16. **Dashboard 为什么不再卡？** catalog 和 rule-history 共用摘要缓存，按文件 mtime/size 失效；只缓存元数据和 `rule_stats`，不缓存完整 results，最多 512 个摘要。
+17. **不懂 Java 的人怎么用？** `assay.cmd` 双击示例；`assay quickstart` 三问生成配置、跑评测、开报告；发行包只需 Java 17，不需要 Maven。
+18. **10k 基准能说明什么？** 只说明框架在合成、确定性负载下的调度/规则/存储开销；真实 HTTP/LLM Agent 的 P50/P95 还没跑，不能把参考 Agent 数字当生产容量。
 
 ---
 
@@ -1095,6 +1105,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - `startRun(resume=true)` 校验 adapter/suite/source/metadata，再校验 manifest 的 missing/changed；允许新增 case。
 - `addCaseCheck` 用 `SELECT ... FOR UPDATE` 读改写，避免并发覆盖。
 - `lockRun` 插入 `assay_lock` 行；重复主键 → `already running`；关闭时删除。
+- H2 file URL 自动补 `DB_CLOSE_DELAY=-1`：每次操作新建连接，最后一个连接关闭后 H2 会关库，重连可能变 read-only；该参数让库在进程生命周期内保持打开。
 - 进程崩溃会留下锁行，需要人工清理；没有自动 TTL，这是已知边界。
 
 #### 10.4.4 取舍
@@ -1106,9 +1117,9 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 #### 10.4.5 测试
 
-- 5 项 `JdbcResultStoreTest`：保存/读取、resume/manifest、锁、审核/演化、追加检查。
+- 6 项 `JdbcResultStoreTest`：保存/读取、resume/manifest、锁、审核/演化、追加检查、H2 file 关闭后重连写入。
 - 1 项 CLI JDBC 测试：`--store jdbc:h2:...` 跑通完整 `run`。
-- 实际用 H2 driver 做过 CLI 冒烟。
+- 实际用 H2 driver 做过两个独立 CLI 进程连续写入。
 
 #### 10.4.6 追问
 
@@ -1116,6 +1127,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 - **“事务边界在哪？”** 一个批次一个事务；`startRun`、`addCaseCheck`、`saveEvolution` 各自一个事务。
 - **“怎么保证恢复不混数据？”** 和文件实现同一套 manifest 校验；缺失/变更/legacy run 都拒绝。
 - **“锁崩溃了怎么办？”** 当前人工清理 `assay_lock`；下一步加 TTL/owner/heartbeat。
+- **“H2 文件库重连为什么 read-only？”** `JdbcResultStore` 是每次操作新建连接；H2 在最后一个连接关闭后会关库，某些环境下再次打开会只读。修复是在 `fromUrl` 对 H2 file URL 补 `DB_CLOSE_DELAY=-1`，并加一个真实的“写入→关闭→重开→再写”测试，而不是只用 H2 内存库。
 
 ---
 
