@@ -39,6 +39,28 @@ class AssayCliTest {
     }
 
     @Test
+    void quickstartGeneratesConfigAndCases(@TempDir Path root) throws Exception {
+        Path dir = root.resolve("quickstart");
+        int code = AssayCli.run(new String[] {
+            "quickstart",
+            "--endpoint", "http://127.0.0.1:9/agent",
+            "--output-path", "data.answer",
+            "--keyword", "refund",
+            "--generate-only",
+            "--dir", dir.toString()
+        });
+
+        assertEquals(0, code);
+        Map<String, Object> config = Json.parseObject(AtomicFiles.readText(dir.resolve("my-agent.http.json")));
+        assertEquals("http", config.get("type"));
+        assertEquals("data.answer", config.get("output_path"));
+        assertEquals(1, ((List<?>) config.get("hard_gates")).size());
+        List<String> lines = Files.readAllLines(dir.resolve("cases.jsonl"));
+        assertEquals(3, lines.size());
+        assertTrue(lines.get(0).contains("refund"), lines.get(0));
+    }
+
+    @Test
     void runWritesArtifactsAndReturnsZeroWhenGatesPass(@TempDir Path root) {
         Path cases = writeCases(root, "smoke.jsonl", List.of(echoCase("C1", "hello agent", "ECHO", "hello")));
         Path store = root.resolve("store");

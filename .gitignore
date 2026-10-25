@@ -1,4 +1,5 @@
 target/
 .assay/
+dist/
 __pycache__/
 *.pyc

@@ -28,7 +28,7 @@
 ### 1.1 已经具备的工程深度
 
 - Java 17、Maven、JUnit 5；主代码约 1.29 万行，测试约 4,900 行。
-- 226 项核心 Java 测试 + 16 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+- 227 项核心 Java 测试 + 16 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
 - `ProjectAdapter` 四能力契约，支持 HTTP、Java 适配器、离线归一化轨迹、OpenInference/OTLP。
 - 四层评测、硬/软门禁、三数据集演化、场景/质量/目标门禁、规则通过率、P95。
 - `TraceDiff` LCS 首错、用例状态迁移、失败聚类。
@@ -102,7 +102,7 @@
 2. 它解决什么问题（发布决策，不是观测）
 3. 架构图（适配器 → 评测 → 演化 → 诊断 → 存储/报告）
 4. 三个最难的问题（恢复 / 首错 / 隔离）
-5. 关键数字（226 tests、13k 行、双平台 CI）
+5. 关键数字（227 tests、13k 行、双平台 CI）
 6. 快速开始
 7. 设计取舍（为什么零依赖、为什么文件存储、为什么 LLM 不进硬门禁）
 8. 生产化路线图（JDBC、Starter、OTel）
@@ -197,7 +197,7 @@ Phase 1（已完成）：
 1. 根 `pom.xml` 改为 parent，统一 Java 17、JUnit、Spring Boot、Micrometer 版本。
 2. 主项目移入 `app/`，artifactId 保持 `assay`；根目录的 `assay` 启动脚本不冲突。
 3. Starter 和 Micrometer 扩展现有 POM 加 `<parent>`，由 reactor 统一构建。
-4. `mvn test` 一次跑 226 + 4 + 2 + 2 项测试。
+4. `mvn test` 一次跑 227 + 4 + 2 + 2 项测试。
 
 Phase 2A（已完成）：
 
@@ -205,7 +205,7 @@ Phase 2A（已完成）：
 2. `JdbcResultStore` 移入 `assay-store-jdbc`。
 3. model/rules/engine/evolve/report/json/support/metrics 移入 `assay-core`。
 4. app 通过 shade 产出可执行的 `app/target/assay.jar`。
-5. 226 + 4 + 2 + 2 项测试全绿。
+5. 227 + 4 + 2 + 2 项测试全绿。
 
 Phase 2B（已完成）：
 
@@ -523,13 +523,13 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 2. 问题：demo 能跑 ≠ 能发布；观测 ≠ 决策。
 3. 架构图。
 4. 三个工程难点：恢复、首错、隔离。
-5. 关键数字：226 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter/Micrometer/OTel/stage span 已落地。
+5. 关键数字：227 tests、双平台 CI、13k 行、零依赖核心、JDBC/Starter/Micrometer/OTel/stage span 已落地。
 6. 快速开始。
 7. 设计取舍 + 生产化路线图。
 
 ### 8.2 简历 bullet（当前已落地版）
 
-> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；core 零运行时依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；226 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
+> Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；core 零运行时依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；227 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
 
 ### 8.3 面试三句话
 

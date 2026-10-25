@@ -13,6 +13,8 @@
 
 需要 JDK 17 或更高版本与 Maven。
 
+**不懂 Java：先看 [QUICKSTART.md](QUICKSTART.md)。** 安装 Java 17 后，Windows 双击 `assay.cmd`，或在项目根目录运行 `assay.cmd quickstart`，按三个问题填入 Agent 地址、答案字段和期望关键字，会自动生成配置、跑评测并打开报告。
+
 **Windows 首次体验：直接双击项目根目录的 `assay.cmd`。** 它会构建项目、运行一条无需 API Key 的示例，再自动打开报告界面。保持启动窗口运行，按 `Ctrl+C` 停止。macOS / Linux 可运行 `sh ./assay demo`。源码版需要 JDK 17+ 与 Maven 在 PATH 中；使用包含根目录 `assay.jar` 的分发目录时可省去 Maven。
 
 启动器也可简写其他命令，例如 `assay.cmd serve --open-browser`。显式请求自动打开浏览器时，如果 8080 端口已被占用，会选择空闲端口并打开实际地址。
@@ -52,6 +54,14 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 运行明细中的 Trace 以步骤卡片展示：失败步骤默认展开，可筛选失败、定位首个失败、展开全部，或复制完整的单步 JSON。步骤额外数据来自适配器记录的 `TraceEvent.fields`；未记录时会明确显示为空。运行页的「规则统计」按规则名展示评测数、通过数、通过率和缺失样本，低通过率规则排在前面；点击「查看趋势」可看同一 suite 最近 20 次运行的规则通过率。
 
 顶部可选择浅色、深色或跟随系统，选择会保存在当前浏览器。颜色、字号、间距与状态样式统一使用主题变量；系统启用减少动态效果时，界面会关闭过渡和滚动动画。
+
+### 打包给最终用户
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package-dist.ps1
+```
+
+生成 `dist/assay.zip`，包含 `assay.jar`、`assay.cmd`、`assay`、`examples` 和 `QUICKSTART.md`；用户只需要 Java 17，不需要 Maven。
 
 ## 模块结构
 
