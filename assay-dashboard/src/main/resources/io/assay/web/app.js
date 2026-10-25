@@ -397,22 +397,28 @@ function sequenceArgs(args) {
   const entries = Object.entries(object(args));
   if (!entries.length) return "";
   const text = entries.map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`).join(", ");
-  return `<span class="sequence-args">${escape(text)}</span>`;
+  return `<span class="sequence-args" title="${escape(text)}">${escape(text)}</span>`;
 }
 
-function sequenceChips(steps) {
-  return steps.map((step) => step.group
-    ? `<span class="sequence-group">${sequenceChips(step.group)}</span>`
-    : `<span class="sequence-step" title="${escape(step.key)}">${escape(step.key)}${sequenceArgs(step.args)}</span>`).join("");
+function sequenceChips(steps, side, mismatch) {
+  let flatIndex = 0;
+  const walk = (items) => items.map((step) => {
+    if (step.group) return `<span class="sequence-group">${walk(step.group)}</span>`;
+    const index = flatIndex++;
+    const bad = side === "expected" && index === mismatch;
+    return `<span class="sequence-step ${bad ? "mismatch" : ""}" title="${escape(step.key)}"><span class="sequence-key">${escape(step.key)}</span>${sequenceArgs(step.args)}</span>`;
+  }).join("");
+  return walk(steps);
 }
 
 function sequenceView(check) {
   const expected = AssayUI.sequenceSteps(check.expected);
   if (!expected || !expected.length) return "";
   const actual = AssayUI.sequenceSteps(check.actual) || [];
+  const mismatch = check.passed ? -1 : AssayUI.sequenceMismatch(check.actual, check.expected, check.message);
   return `<div class="sequence-view ${check.passed ? "passed" : "failed"}">
-    <div class="sequence-row"><span class="sequence-label">实际</span><div class="sequence-track">${actual.length ? sequenceChips(actual) : '<span class="muted">没有可读取的步骤</span>'}</div></div>
-    <div class="sequence-row"><span class="sequence-label">期望</span><div class="sequence-track">${sequenceChips(expected)}</div></div>
+    <div class="sequence-row"><span class="sequence-label">实际</span><div class="sequence-track">${actual.length ? sequenceChips(actual, "actual", mismatch) : '<span class="muted">没有可读取的步骤</span>'}</div></div>
+    <div class="sequence-row"><span class="sequence-label">期望</span><div class="sequence-track">${sequenceChips(expected, "expected", mismatch)}</div></div>
   </div>`;
 }
 
@@ -464,17 +470,20 @@ function scenarioTable(results) {
 function ruleHistoryPanel(data) {
   const points = array(data.points);
   if (!points.length) {
-    return `<p class="muted">没有历史数据。旧 run 可能没有 rule_stats，或这个 suite 还没有新 run。</p>`;
+    return `<div class="rule-history-empty"><strong>没有历史数据</strong><p class="muted">旧 run 可能没有 rule_stats，或这个 suite 还没有新 run。</p></div>`;
   }
   const valid = points.map((point, index) => ({ point, index }))
     .filter(({ point }) => number(point.pass_rate) !== null);
-  const width = 360, height = 132, padX = 10, padTop = 10, padBottom = 24;
+  const width = 520, height = 178, padX = 16, padTop = 14, padBottom = 30;
   const chartHeight = height - padTop - padBottom;
   const x = (index) => padX + (points.length <= 1 ? (width - 2 * padX) / 2 : index * (width - 2 * padX) / (points.length - 1));
   const y = (rate) => padTop + (1 - rate) * chartHeight;
   const line = valid.map(({ point, index }, position) => `${position ? "L" : "M"}${x(index).toFixed(1)} ${y(number(point.pass_rate)).toFixed(1)}`).join(" ");
   const dots = valid.map(({ point, index }) => `<circle cx="${x(index)}" cy="${y(number(point.pass_rate))}" r="3.5" class="trend-dot"><title>${escape(date(point.modified_at))}：${percent(point.pass_rate)}</title></circle>`).join("");
-  const labels = points.map((point, index) => `<text x="${x(index)}" y="${height - 4}" text-anchor="middle" class="trend-label">${escape(date(point.modified_at).slice(0, 5))}</text>`).join("");
+  const labelEvery = Math.max(1, Math.ceil(points.length / 7));
+  const labels = points.map((point, index) => index % labelEvery === 0 || index === points.length - 1
+    ? `<text x="${x(index)}" y="${height - 6}" text-anchor="middle" class="trend-label">${escape(date(point.modified_at).slice(0, 5))}</text>`
+    : "").join("");
   return `<div class="rule-history-head"><strong>${escape(data.rule)}</strong><span class="muted">最近 ${points.length} 次 · ${escape(data.suite || "全部 suite")}</span></div>
     <svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(data.rule)} 最近通过率">${[0, 0.5, 1].map((rate) => `<line x1="${padX}" y1="${y(rate)}" x2="${width - padX}" y2="${y(rate)}" class="trend-grid"/>`).join("")}<path d="${line}" class="trend-line"/>${dots}${labels}</svg>
     <div class="table-wrap"><table><thead><tr><th>Run</th><th>时间</th><th>通过率</th><th>评测数</th><th>缺失</th></tr></thead><tbody>
@@ -487,13 +496,15 @@ async function loadRuleHistory(rule) {
   if (!panel) return;
   const context = current();
   const suite = String(object(context?.payload).suite || "");
-  panel.innerHTML = `<p class="muted">正在读取规则历史…</p>`;
+  panel.innerHTML = `<div class="rule-history-loading"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-row"></div></div>`;
   try {
     const data = await request(`/api/rule-history?rule=${encodeURIComponent(rule)}&suite=${encodeURIComponent(suite)}&limit=20`);
     if (current() !== context || !$("rule-history-panel")) return;
     $("rule-history-panel").innerHTML = ruleHistoryPanel(data);
   } catch (error) {
-    if (current() === context && $("rule-history-panel")) $("rule-history-panel").innerHTML = `<p class="error-box">读取失败：${escape(error.message)}</p>`;
+    if (current() === context && $("rule-history-panel")) {
+      $("rule-history-panel").innerHTML = `<div class="rule-history-error"><p class="error-box">读取失败：${escape(error.message)}</p><button class="button secondary" data-rule-history="${escape(rule)}">重试</button></div>`;
+    }
   }
 }
 
@@ -513,7 +524,7 @@ function renderRun(context) {
   const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
   if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
   if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
-  if (state.tab === "rules") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div>${ruleStatsTable(payload)}<div id="rule-history-panel" class="rule-history-panel"></div></section>`;
+  if (state.tab === "rules") return `${header}<section class="panel rule-stats-panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div><div class="rule-stats-layout"><div class="rule-stats-main">${ruleStatsTable(payload)}</div><div id="rule-history-panel" class="rule-history-panel" aria-live="polite"><div class="rule-history-empty"><strong>规则历史</strong><p class="muted">选择左侧「查看趋势」，查看同一 suite 最近 20 次运行。</p></div></div></div></section>`;
   return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
     <input type="search" id="case-search" placeholder="搜索用例或场景" aria-label="搜索用例或场景" value="${escape(state.caseQuery)}"><select id="case-filter" aria-label="筛选用例状态">${[["all", "全部状态"], ["failed", "仅硬失败"], ["warning", "仅软告警"], ["passed", "全部通过"]].map(([value, title]) => `<option value="${value}" ${state.caseFilter === value ? "selected" : ""}>${title}</option>`).join("")}</select></div>
     <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><div id="case-resizer" class="split-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="case-list trace-detail" aria-label="调整用例与 Trace 宽度，左右键调节，双击或 Enter 平分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div><section class="panel" id="trace-detail" ${traceCollapsed ? "hidden" : ""}></section></div></div></div>`;

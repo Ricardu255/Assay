@@ -221,6 +221,14 @@ test("Sequence steps normalize events, arguments, and nested groups", () => {
   assert.equal(ui.sequenceSteps("not-a-sequence"), null);
 });
 
+test("Sequence mismatch points at the first expected step", () => {
+  assert.equal(ui.sequenceMismatch(["Router/route", "Tool/answer"], ["Router/route", "Tool/search"],
+    "step 2 expected Tool/search but was Tool/answer"), 1);
+  assert.equal(ui.sequenceMismatch(["Router/route"], ["Router/route", "Tool/answer"],
+    "missing ordered step: Tool/answer; actual: Router/route"), 1);
+  assert.equal(ui.sequenceMismatch(["Router/route"], ["Router/route"], "passed"), -1);
+});
+
 test("Setup defaults point at the reactor artifact and source layout", () => {
   const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
   assert.match(source, /jar: "app\/target\/assay\.jar"/);

@@ -380,6 +380,33 @@
       return { key: String(item), args: {} };
     });
   }
+  function sequenceMismatch(actual, expected, message) {
+    const left = sequenceSteps(actual) || [];
+    const right = sequenceSteps(expected) || [];
+    if (!right.length) return -1;
+    const text = String(message || "");
+    let match = text.match(/step (\d+) expected/i);
+    if (match) return Math.max(0, Number(match[1]) - 1);
+    match = text.match(/unexpected step (\d+)/i);
+    if (match) return Math.max(0, Number(match[1]) - 1);
+    match = text.match(/step (\d+) .*args mismatch/i);
+    if (match) return Math.max(0, Number(match[1]) - 1);
+    match = text.match(/missing ordered step:\s*([^;]+)/i);
+    if (match) {
+      const label = match[1].trim().split(/\s+/)[0];
+      const index = flattenSequence(right).findIndex((step) => step.key === label || step.key.startsWith(label));
+      if (index >= 0) return index;
+    }
+    const flatLeft = flattenSequence(left);
+    const flatRight = flattenSequence(right);
+    for (let index = 0; index < Math.min(flatLeft.length, flatRight.length); index++) {
+      if (flatLeft[index].key !== flatRight[index].key) return index;
+    }
+    return flatLeft.length === flatRight.length ? -1 : Math.min(flatLeft.length, flatRight.length);
+  }
+  function flattenSequence(steps) {
+    return steps.flatMap((step) => step.group ? flattenSequence(step.group) : [step]);
+  }
   function ruleStats(payload) {
     const raw = payload && payload.rule_stats;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
@@ -394,7 +421,7 @@
     }).sort((left, right) => (left.passRate ?? 2) - (right.passRate ?? 2)
       || right.evaluated - left.evaluated || left.name.localeCompare(right.name));
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats, sequenceSteps };
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats, sequenceSteps, sequenceMismatch };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);
