@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 /** Read-only access to the report artifacts; the store and evaluation engine are never invoked. */
@@ -24,7 +26,9 @@ public final class ArtifactCatalog {
     private static final Map<String, String> KINDS = Map.of(
             "results.json", "run", "evolution.json", "evolution",
             "auto_evolution.json", "auto", "scope_audit.json", "audit", "release.json", "release");
+    private static final int MAX_CACHED_SUMMARIES = 512;
     private final Path root;
+    private final Map<Path, Summary> summaries = new ConcurrentHashMap<>();
 
     public ArtifactCatalog(Path root) throws IOException {
         Path absolute = root.toAbsolutePath().normalize();
@@ -50,26 +54,14 @@ public final class ArtifactCatalog {
         }
         for (Path file : files) {
             String relative = root.relativize(file).toString().replace('\\', '/');
-            String id = Base64.getUrlEncoder().withoutPadding().encodeToString(relative.getBytes(StandardCharsets.UTF_8));
             try {
-                Map<String, Object> payload = read(id);
-                String kind = KINDS.get(file.getFileName().toString());
+                Summary summary = summary(file);
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("id", id);
-                item.put("kind", kind);
-                item.put("path", relative);
-                item.put("modified_at", Files.getLastModifiedTime(file).toInstant().toString());
-                item.put("name", switch (kind) {
-                    case "run" -> payload.getOrDefault("run_id", relative);
-                    case "evolution" -> payload.getOrDefault("experiment_id", relative);
-                    case "auto" -> payload.getOrDefault("loop_id", relative);
-                    case "release" -> payload.getOrDefault("release_id", relative);
-                    default -> payload.getOrDefault("requirement", relative);
-                });
-                item.put("status", payload.getOrDefault("decision", payload.getOrDefault("conclusion", payload.getOrDefault("status", "unknown"))));
-                for (String field : List.of("suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
-                    item.put(field, payload.get(field));
-                }
+                item.put("id", summary.id());
+                item.put("kind", summary.kind());
+                item.put("path", summary.relative());
+                item.put("modified_at", summary.modified().toInstant().toString());
+                item.putAll(summary.fields());
                 items.add(item);
             } catch (IOException | RuntimeException error) {
                 warnings.add(relative + ": " + error.getMessage());
@@ -97,29 +89,27 @@ public final class ArtifactCatalog {
                         && "run".equals(KINDS.get(path.getFileName().toString()))).forEach(files::add);
             }
             for (Path file : files) {
-                Map<String, Object> payload;
+                Summary summary;
                 try {
-                    payload = Json.parseObject(readText(file, MAX_FILE_BYTES));
+                    summary = summary(file);
                 } catch (IOException | RuntimeException error) {
                     continue;
                 }
-                String payloadSuite = String.valueOf(payload.getOrDefault("suite", ""));
+                String payloadSuite = String.valueOf(summary.fields().getOrDefault("suite", ""));
                 if (!suiteFilter.isEmpty() && !suiteFilter.equals(payloadSuite)) {
                     continue;
                 }
-                Map<String, Object> row = asMap(asMap(payload.get("rule_stats")).get(ruleName));
+                Map<String, Object> row = asMap(summary.ruleStats().get(ruleName));
                 if (row.isEmpty()) {
                     continue;
                 }
-                String relative = root.relativize(file).toString().replace('\\', '/');
                 Map<String, Object> point = new LinkedHashMap<>();
-                point.put("id", Base64.getUrlEncoder().withoutPadding()
-                        .encodeToString(relative.getBytes(StandardCharsets.UTF_8)));
-                point.put("run_id", payload.getOrDefault("run_id", relative));
+                point.put("id", summary.id());
+                point.put("run_id", summary.fields().getOrDefault("run_id", summary.relative()));
                 point.put("suite", payloadSuite);
-                point.put("source", payload.getOrDefault("source", ""));
-                point.put("modified_at", Files.getLastModifiedTime(file).toInstant().toString());
-                point.put("case_count", payload.getOrDefault("case_count", 0));
+                point.put("source", summary.fields().getOrDefault("source", ""));
+                point.put("modified_at", summary.modified().toInstant().toString());
+                point.put("case_count", summary.fields().getOrDefault("case_count", 0));
                 point.put("level", row.get("level"));
                 point.put("evaluated", row.get("evaluated"));
                 point.put("passed", row.get("passed"));
@@ -134,6 +124,52 @@ public final class ArtifactCatalog {
             points = new ArrayList<>(points.subList(points.size() - max, points.size()));
         }
         return Map.of("rule", ruleName, "suite", suiteFilter, "matched", matched, "points", points);
+    }
+
+    private Summary summary(Path file) throws IOException {
+        FileTime modified = Files.getLastModifiedTime(file);
+        long size = Files.size(file);
+        Summary cached = summaries.get(file);
+        if (cached != null && cached.modified().equals(modified) && cached.size() == size) {
+            return cached;
+        }
+        String relative = root.relativize(file).toString().replace('\\', '/');
+        String id = Base64.getUrlEncoder().withoutPadding().encodeToString(relative.getBytes(StandardCharsets.UTF_8));
+        String kind = KINDS.get(file.getFileName().toString());
+        Map<String, Object> payload = Json.parseObject(readText(file, MAX_FILE_BYTES));
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("name", switch (kind) {
+            case "run" -> payload.getOrDefault("run_id", relative);
+            case "evolution" -> payload.getOrDefault("experiment_id", relative);
+            case "auto" -> payload.getOrDefault("loop_id", relative);
+            case "release" -> payload.getOrDefault("release_id", relative);
+            default -> payload.getOrDefault("requirement", relative);
+        });
+        fields.put(
+                "status",
+                payload.getOrDefault(
+                        "decision", payload.getOrDefault("conclusion", payload.getOrDefault("status", "unknown"))));
+        fields.put("run_id", payload.get("run_id"));
+        for (String field : List.of("suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
+            fields.put(field, payload.get(field));
+        }
+        Summary summary = new Summary(
+                id, relative, kind, modified, size, fields, asMap(payload.get("rule_stats")));
+        if (summaries.size() >= MAX_CACHED_SUMMARIES) {
+            summaries.clear();
+        }
+        summaries.put(file, summary);
+        return summary;
+    }
+
+    private record Summary(
+            String id,
+            String relative,
+            String kind,
+            FileTime modified,
+            long size,
+            Map<String, Object> fields,
+            Map<String, Object> ruleStats) {
     }
 
     private static String query(String value, String field, int maxLength) {

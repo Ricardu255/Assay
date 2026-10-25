@@ -95,7 +95,7 @@ java -jar app/target/assay.jar run \
 
 - 没有 JVM warmup 隔离；四个数字都包含 JVM 启动。
 - H2 是嵌入式文件库，不是 PostgreSQL/MySQL 服务端；JDBC 数字不能代表生产数据库。
-- H2 在“关闭最后一个连接再重新打开”时，本机环境会出现 read-only 行为；基准 URL 使用 `DB_CLOSE_DELAY=-1` 规避，这不改变 `JdbcResultStore` 的接口语义。
+- `JdbcResultStore` 会为 H2 file URL 自动补 `DB_CLOSE_DELAY=-1`，避免“关闭最后一个连接再重新打开”后变成 read-only；基准脚本也显式带上该参数，减少环境差异。
 - 没有测真实 Agent 的 P50/P95；`trace_duration` 是适配器声明的步骤耗时，不是墙钟延迟。
 - 没有做多轮重复取中位数；单次结果只适合做趋势参考。
 

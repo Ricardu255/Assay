@@ -11,12 +11,14 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
 import io.assay.store.Results;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** The JDBC store must preserve the file store's resume, lock, review, and evolution semantics. */
 class JdbcResultStoreTest {
@@ -103,6 +105,28 @@ class JdbcResultStoreTest {
         Map<String, Object> result = store.listResults("run-5").get(0);
         assertEquals(false, result.get("hard_pass"));
         assertEquals(1, ((List<?>) result.get("checks")).size());
+    }
+
+    @Test
+    void fileBackedH2SurvivesStoreReconnect(@TempDir Path root) {
+        String url = "jdbc:h2:file:"
+                + root.resolve("assay-db").toAbsolutePath().toString().replace('\\', '/');
+        JdbcResultStore first = JdbcResultStore.fromUrl(url);
+        try {
+            first.startRun("run-file-1", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash-1"));
+            first.saveCases(List.of(caseResult("run-file-1", "C1", true)));
+        } finally {
+            first.close();
+        }
+
+        JdbcResultStore second = JdbcResultStore.fromUrl(url);
+        try {
+            second.startRun("run-file-2", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash-1"));
+            second.saveCases(List.of(caseResult("run-file-2", "C1", true)));
+            assertEquals(1, second.listResults("run-file-2").size());
+        } finally {
+            second.close();
+        }
     }
 
     private static CaseResult caseResult(String runId, String caseId, boolean pass) {

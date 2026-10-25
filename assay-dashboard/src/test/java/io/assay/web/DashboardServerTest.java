@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +66,31 @@ class DashboardServerTest {
             assertEquals(404, get(base.resolve("not-a-page")).statusCode());
             assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(run)));
         }
+    }
+
+    @Test
+    void catalogRefreshesChangedReportSummaries(@TempDir Path root) throws Exception {
+        Path report = root.resolve("results.json");
+        Files.writeString(report, Json.write(Map.of(
+                "run_id", "run-1", "status", "failed", "suite", "smoke")));
+        ArtifactCatalog catalog = new ArtifactCatalog(root);
+        assertEquals("failed", item(catalog, "run-1").get("status"));
+
+        Files.writeString(report, Json.write(Map.of(
+                "run_id", "run-1", "status", "passed", "suite", "smoke", "case_count", 2)));
+        Files.setLastModifiedTime(report, FileTime.fromMillis(System.currentTimeMillis() + 2_000));
+        Map<?, ?> refreshed = item(catalog, "run-1");
+        assertEquals("passed", refreshed.get("status"));
+        assertEquals(2L, refreshed.get("case_count"));
+    }
+
+    private static Map<?, ?> item(ArtifactCatalog catalog, String name) throws Exception {
+        List<?> items = (List<?>) catalog.list().get("items");
+        return items.stream()
+                .map(value -> (Map<?, ?>) value)
+                .filter(value -> name.equals(value.get("name")))
+                .findFirst()
+                .orElseThrow();
     }
 
     @Test

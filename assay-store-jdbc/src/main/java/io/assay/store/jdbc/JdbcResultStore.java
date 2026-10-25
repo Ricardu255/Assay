@@ -64,7 +64,21 @@ public final class JdbcResultStore implements Results {
         Properties properties = new Properties();
         copyEnvironment(properties, "ASSAY_DB_USER", "user");
         copyEnvironment(properties, "ASSAY_DB_PASSWORD", "password");
-        return new JdbcResultStore(() -> DriverManager.getConnection(url, properties));
+        String normalized = normalizeUrl(url);
+        return new JdbcResultStore(() -> DriverManager.getConnection(normalized, properties));
+    }
+
+    /**
+     * H2 file databases close when the last connection is closed; reopening them in the same JVM can
+     * make the database read-only unless the close delay is set. Keep the database alive for the
+     * process so the per-operation connection model of this store stays usable.
+     */
+    private static String normalizeUrl(String url) {
+        String lower = url.toLowerCase(java.util.Locale.ROOT);
+        if (!lower.startsWith("jdbc:h2:file:") || lower.contains("db_close_delay")) {
+            return url;
+        }
+        return url + (url.endsWith(";") ? "" : ";") + "DB_CLOSE_DELAY=-1";
     }
 
     private static void copyEnvironment(Properties properties, String environment, String property) {

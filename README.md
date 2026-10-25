@@ -384,7 +384,7 @@ java -cp "app/target/assay.jar:drivers/h2-2.2.224.jar" io.assay.cli.AssayCli run
   --output .assay/runs
 ```
 
-Windows 的 classpath 分隔符是 `;`。数据库凭据可通过 `ASSAY_DB_USER` / `ASSAY_DB_PASSWORD` 环境变量提供；表结构会在首次打开时自动创建。JDBC 存储用 `assay_lock` 表实现跨进程 run 锁，如果进程在持有锁时崩溃，需要人工清理残留的锁行（或删库重建测试库）——这是当前实现的已知边界，不是自动 TTL。
+Windows 的 classpath 分隔符是 `;`。数据库凭据可通过 `ASSAY_DB_USER` / `ASSAY_DB_PASSWORD` 环境变量提供；表结构会在首次打开时自动创建。H2 file URL 会自动补 `DB_CLOSE_DELAY=-1`，避免关闭最后一个连接后重连变成 read-only。JDBC 存储用 `assay_lock` 表实现跨进程 run 锁，如果进程在持有锁时崩溃，需要人工清理残留的锁行（或删库重建测试库）——这是当前实现的已知边界，不是自动 TTL。
 
 ### Spring Boot Starter（可选）
 
