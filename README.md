@@ -39,13 +39,17 @@ java -jar app/target/assay.jar run \
   --collect-few-shot
 ```
 
-在项目所在电脑上启动只读可视化界面：
+在项目所在电脑上启动可视化界面：
 
 ```bash
+# 只读报告
 java -jar app/target/assay.jar serve --output .assay/runs --port 8080
+
+# 同时启用本地任务队列和 worker（单击提交/取消）
+java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store --worker --port 8080
 ```
 
-命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本演化、范围审计和发布验证；总览还提供最近 7 天通过率趋势和按测试集健康表。可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机，查看和导入不会改写报告。
+命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本演化、范围审计和发布验证；总览还提供最近 7 天通过率趋势和按测试集健康表。可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机；不带 `--worker` 时查看和导入不会改写报告，带 `--worker` 时任务队列页可以提交和取消评测任务。
 
 首次接入可打开界面的「开始评测」：选择 **HTTP 接口（推荐，无需写代码）**，填写地址、响应字段和通过条件，下载配置，再选择 JSONL 测试集检查格式、重复 ID 与必需字段，复制适用于 PowerShell 或 Bash 的运行命令。配置生成和文件检查在浏览器内完成；下载文件放到项目根目录，或将路径改为实际位置。命令由用户在项目根目录的另一个终端运行，完成后点击顶部「刷新」查看结果。
 
@@ -406,6 +410,14 @@ java -jar app/target/assay.jar cancel --store .assay/store --job-id <job-id>
 ```
 
 多机或多进程共享队列时，把 `--store` 换成 JDBC URL，并把驱动放进 classpath；JDBC job store 使用同一数据库中的 `assay_job` 表。H2 文件模式在当前 Windows 环境下重开可能只读，跨进程队列建议使用 PostgreSQL，或使用本地文件 job store。
+
+也可以完全在界面里操作：
+
+```bash
+java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store --worker --port 8080
+```
+
+打开 `http://127.0.0.1:8080/#section=queue`，填适配器/测试集/用例路径，点「提交任务」；「运行示例」会直接提交内置 EchoAdapter。运行页每 3 秒刷新，支持取消 QUEUED/RUNNING 任务。
 
 语义：
 

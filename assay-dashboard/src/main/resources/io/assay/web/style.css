@@ -72,6 +72,9 @@ p { margin: 0; }
 .badge.hard { color: var(--bad-text); background: var(--bad-bg); border-color: var(--bad-border); }
 .badge.soft { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
 .badge.candidate { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
+.badge.queued { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
+.badge.succeeded { color: var(--good-text); background: var(--good-bg); border-color: var(--good-border); }
+.badge.cancelled { color: var(--text-secondary); background: var(--surface-subtle); border-color: var(--line); }
 .rule-stats-panel { overflow: hidden; }
 .rule-stats-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr); }
 .rule-stats-main { min-width: 0; }
@@ -161,6 +164,7 @@ tbody tr:hover { background: var(--surface-hover); }
 @container case-view (max-width: 699px) { .case-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } .split-handle { display: none; } }
 .setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .form-field { display: flex; flex-direction: column; gap: var(--space-2); color: var(--ink); font-size: var(--font-sm); min-width: 0; }
 .form-field input, .form-field select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); }
 .form-field small { color: var(--muted); line-height: 1.6; }

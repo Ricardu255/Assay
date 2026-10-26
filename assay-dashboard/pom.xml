@@ -23,6 +23,11 @@
       <artifactId>assay-core</artifactId>
     </dependency>
     <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-file</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

@@ -1,7 +1,7 @@
 "use strict";
 
 const sections = [
-  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["run", "运行记录", "▤"], ["evolution", "版本演化", "⇄"],
+  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["queue", "任务队列", "▶"], ["run", "运行记录", "▤"], ["evolution", "版本演化", "⇄"],
   ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
 const labels = {
@@ -13,12 +13,16 @@ const labels = {
   suspected_out_of_scope: "疑似越界", reasonable_related: "合理关联", low: "低风险", medium: "中风险", high: "高风险",
   improvement: "改善集", regression: "回归集", holdout: "留出集", not_run: "未运行", related: "相关",
   hard: "硬门禁", soft: "软质量", candidate: "复核信号",
+  queued: "排队中", running: "运行中", succeeded: "已完成", cancelled: "已取消",
   step_added: "新增步骤", step_removed: "缺失步骤", step_changed: "步骤变更", step_reordered: "步骤顺序",
   step_fields: "字段变化", step_error: "步骤报错", step_status: "状态变化", final_output: "最终输出",
   trace_fields: "Trace 字段", missing_trace: "缺少 Trace", no_visible_divergence: "无可见差异"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
+const queueForm = { adapter: "io.assay.examples.EchoAdapter", suite: "ui-demo",
+  cases: "examples/cases.example.jsonl", output: ".assay/runs", workers: "1", maxAttempts: "3" };
+let queueTimer = null;
 const setup = { mode: "example", shell: "powershell", jar: "app/target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
   endpoint: "", outputPath: "output", tokenEnv: "", operator: "contains", expectedPath: "keyword",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
@@ -61,8 +65,8 @@ function toast(message) {
   toast.timer = setTimeout(() => { $("toast").hidden = true; }, 4500);
 }
 
-async function request(path) {
-  const response = await fetch(path, { cache: "no-store" });
+async function request(path, options = {}) {
+  const response = await fetch(path, { cache: "no-store", ...options });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`);
   return body;
@@ -92,7 +96,7 @@ async function refresh() {
 function renderNavigation() {
   $("navigation").innerHTML = sections.map(([kind, title, icon]) => `<button class="nav-button ${state.section === kind ? "active" : ""}" data-section="${kind}" title="${title}" ${state.section === kind ? 'aria-current="page"' : ""}>
     <span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-name">${title}</span>
-    ${["overview", "setup"].includes(kind) ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`).join("");
+    ${["overview", "setup", "queue"].includes(kind) ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`).join("");
   $("section-label").textContent = kindName(state.section);
 }
 
@@ -232,6 +236,72 @@ function updateSetup() {
   $("setup-commands").innerHTML = errors.length ? `<ul class="validation-errors">${errors.map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` :
     `<div class="command-head"><strong>运行评测</strong><button class="button secondary" data-setup-copy="run">复制运行命令</button></div><pre>${escape(commands.run)}</pre>
     <div class="command-head section-gap"><strong>启动报告界面</strong><button class="button secondary" data-setup-copy="serve">复制查看命令</button></div><pre>${escape(commands.serve)}</pre><p class="mini-note">查看命令会自动打开浏览器；实际地址以终端输出为准，按 Ctrl+C 关闭服务。</p>`;
+}
+
+function queuePage() {
+  const field = (key, title, note = "") => `<label class="form-field">${title}<input data-queue-field="${key}" value="${escape(queueForm[key])}" autocomplete="off">${note ? `<small>${note}</small>` : ""}</label>`;
+  return `${heading("任务队列", "提交后由本地 worker 执行；运行中任务支持取消，失败任务按最大次数重试。", "LOCAL JOB QUEUE", '<button class="button primary" data-queue-example>运行示例</button>')}
+    <section class="panel"><div class="panel-head"><h2>提交评测</h2><span class="muted">需要 serve --worker</span></div><div class="panel-body form-grid">
+      ${field("adapter", "适配器类名或配置文件", "示例：io.assay.examples.EchoAdapter")}
+      ${field("suite", "测试集名称")}
+      ${field("cases", "用例 JSONL 路径")}
+      ${field("output", "报告输出目录")}
+      ${field("workers", "评测 worker 数")}
+      ${field("maxAttempts", "最大尝试次数", "worker 异常或租约过期时重试")}
+      <div class="full form-actions"><button class="button primary" data-queue-submit>提交任务</button><button class="button secondary" data-queue-refresh>刷新</button><span class="mini-note">需要先运行 <code>assay serve --worker</code>；只允许本机访问。</span></div>
+    </div></section>
+    <section class="panel section-gap"><div class="panel-head"><h2>最近任务</h2><span class="muted">每 3 秒刷新</span></div><div id="queue-list" class="panel-body"><div class="rule-history-loading"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div></div></section>`;
+}
+
+function renderQueueRows(jobs) {
+  if (!jobs.length) return `<p class="muted">还没有任务。点「运行示例」可以提交一条内置 EchoAdapter 评测。</p>`;
+  return `<div class="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>尝试</th><th>租约</th><th>操作</th></tr></thead><tbody>
+    ${jobs.map((job) => `<tr><td><strong>${escape(job.run_id || job.job_id)}</strong><div class="record-path">${escape(job.adapter || "")} · ${escape(job.suite || "")}</div></td><td>${badge(String(job.status).toLowerCase())}${job.cancel_requested ? '<div class="mini-note">已请求取消</div>' : ""}${job.error ? `<div class="record-path">${escape(job.error)}</div>` : ""}</td><td class="number">${integer(job.attempts)} / ${integer(job.max_attempts)}</td><td class="record-path">${escape(job.lease_owner || "—")}</td><td>${["QUEUED", "RUNNING"].includes(job.status) ? `<button class="link-button" data-job-cancel="${escape(job.job_id)}">取消</button>` : "—"}</td></tr>`).join("")}
+  </tbody></table></div>`;
+}
+
+async function refreshQueue() {
+  const target = $("queue-list");
+  if (!target || state.section !== "queue") return;
+  try {
+    const data = await request("/api/jobs?limit=20");
+    target.innerHTML = renderQueueRows(array(data.jobs));
+  } catch (error) {
+    target.innerHTML = `<div class="rule-history-error"><p class="error-box">${escape(error.message)}</p><p class="mini-note">启动命令：<code>assay serve --worker</code></p></div>`;
+  }
+}
+
+async function submitQueue(example = false) {
+  const payload = example ? {
+    adapter: "io.assay.examples.EchoAdapter", suite: "ui-demo",
+    cases: "examples/cases.example.jsonl", output: ".assay/runs", workers: 1, max_attempts: 3
+  } : {
+    adapter: document.querySelector('[data-queue-field="adapter"]')?.value.trim(),
+    suite: document.querySelector('[data-queue-field="suite"]')?.value.trim(),
+    cases: document.querySelector('[data-queue-field="cases"]')?.value.trim(),
+    output: document.querySelector('[data-queue-field="output"]')?.value.trim(),
+    workers: Number(document.querySelector('[data-queue-field="workers"]')?.value || 1),
+    max_attempts: Number(document.querySelector('[data-queue-field="maxAttempts"]')?.value || 3)
+  };
+  if (!payload.adapter || !payload.suite || !payload.cases) { toast("请填写适配器、测试集和用例路径。"); return; }
+  try {
+    await request("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json", "X-Assay-Request": "1" }, body: JSON.stringify(payload) });
+    toast(example ? "示例任务已提交。" : "任务已提交。");
+    await refreshQueue();
+  } catch (error) { toast(`提交失败：${error.message}`); }
+}
+
+async function cancelQueueJob(jobId) {
+  try {
+    await request(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json", "X-Assay-Request": "1" }, body: "{}" });
+    toast("已请求取消；运行中的任务会在当前 case 后停止。");
+    await refreshQueue();
+  } catch (error) { toast(`取消失败：${error.message}`); }
+}
+
+function stopQueuePolling() {
+  if (queueTimer) clearInterval(queueTimer);
+  queueTimer = null;
 }
 
 function listing() {
@@ -688,11 +758,16 @@ function renderRelease(context) {
 function render(pushLocation = false) {
   const token = focusToken(document.activeElement);
   disposeSplit();
+  stopQueuePolling();
   renderNavigation();
   const context = current();
   if (!context) {
-    view.innerHTML = state.section === "overview" ? overview() : state.section === "setup" ? setupPage() : listing();
+    view.innerHTML = state.section === "overview" ? overview() : state.section === "setup" ? setupPage() : state.section === "queue" ? queuePage() : listing();
     if (state.section === "setup") updateSetup();
+    if (state.section === "queue") {
+      refreshQueue();
+      queueTimer = setInterval(refreshQueue, 3000);
+    }
     syncLocation(pushLocation); restoreFocus(token);
     return;
   }
@@ -800,6 +875,10 @@ document.addEventListener("click", async (event) => {
   } else if (target.hasAttribute("data-load-patch")) await loadAuditPatch(current());
   else if (target.dataset.diffMode) { current().diffMode = target.dataset.diffMode; renderAuditPatch(current()); }
   else if (target.dataset.finding !== undefined) await locateFinding(Number(target.dataset.finding));
+  else if (target.hasAttribute("data-queue-example")) await submitQueue(true);
+  else if (target.hasAttribute("data-queue-submit")) await submitQueue(false);
+  else if (target.hasAttribute("data-queue-refresh")) await refreshQueue();
+  else if (target.dataset.jobCancel) await cancelQueueJob(target.dataset.jobCancel);
   else if (target.dataset.ruleHistory) await loadRuleHistory(target.dataset.ruleHistory);
   else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {

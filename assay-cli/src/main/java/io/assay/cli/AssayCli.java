@@ -135,9 +135,14 @@ public final class AssayCli {
 
     private static CommandLine.Spec specFor(String command, List<CommandLine.Spec> commands) {
         return switch (command) {
-            case "serve" -> new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
+            case "serve" -> new CommandLine.Spec("serve", "view reports and optionally run the local job queue")
                     .option("output", CommandLine.Kind.STRING, ".assay/runs")
                     .option("port", CommandLine.Kind.INTEGER, "8080")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .option("worker-id", CommandLine.Kind.STRING, null)
+                    .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
+                    .option("poll", CommandLine.Kind.DECIMAL, "2")
+                    .flag("worker")
                     .flag("open-browser");
             case "quickstart" -> new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation")
                     .option("endpoint", CommandLine.Kind.STRING, null)
@@ -266,13 +271,33 @@ public final class AssayCli {
     }
 
     private static int serve(CommandLine.Namespace args) {
-        try (DashboardServer server = startDashboard(args)) {
+        JobStore jobs = args.flag("worker") ? jobStore(args) : null;
+        DashboardServer server = null;
+        try {
+            server = startDashboard(args, jobs);
             Thread shutdown = new Thread(server::close, "assay-dashboard-shutdown");
             Runtime.getRuntime().addShutdownHook(shutdown);
             try {
                 System.out.println("dashboard: " + server.uri());
                 System.out.println("reports: " + server.output());
-                System.out.println("Read-only local viewer. Press Ctrl+C to stop.");
+                if (jobs != null) {
+                    int leaseSeconds = Math.max(1, args.integer("lease-seconds"));
+                    long pollMillis = Math.max(250, Math.round(Math.max(0.25, args.decimal("poll")) * 1000));
+                    String workerId = args.string("worker-id");
+                    if (workerId == null || workerId.isBlank()) {
+                        workerId = "dashboard-worker-" + shortId();
+                    }
+                    String finalWorkerId = workerId;
+                    Thread workerThread = new Thread(
+                            () -> runWorker(jobs, finalWorkerId, leaseSeconds, pollMillis, false),
+                            "assay-dashboard-worker");
+                    workerThread.setDaemon(true);
+                    workerThread.start();
+                    System.out.println("queue worker: " + workerId + " (store: " + args.string("store") + ")");
+                } else {
+                    System.out.println("Read-only local viewer. Use --worker to enable the job queue.");
+                }
+                System.out.println("Press Ctrl+C to stop.");
                 if (args.flag("open-browser")) {
                     try {
                         if (!java.awt.Desktop.isDesktopSupported()) throw new UnsupportedOperationException();
@@ -295,16 +320,23 @@ public final class AssayCli {
             return 0;
         } catch (java.io.IOException error) {
             throw new IllegalStateException("cannot start dashboard: " + error.getMessage(), error);
+        } finally {
+            if (server != null) {
+                server.close();
+            }
+            if (jobs != null) {
+                jobs.close();
+            }
         }
     }
 
-    private static DashboardServer startDashboard(CommandLine.Namespace args) throws java.io.IOException {
+    private static DashboardServer startDashboard(CommandLine.Namespace args, JobStore jobs) throws java.io.IOException {
         try {
-            return new DashboardServer(args.path("output"), args.integer("port"));
+            return new DashboardServer(args.path("output"), args.integer("port"), jobs, args.string("store"));
         } catch (java.net.BindException busy) {
             if (!args.flag("open-browser") || args.integer("port") == 0) throw busy;
             System.out.println("Requested port is busy; selecting an available local port.");
-            return new DashboardServer(args.path("output"), 0);
+            return new DashboardServer(args.path("output"), 0, jobs, args.string("store"));
         }
     }
 
@@ -412,24 +444,29 @@ public final class AssayCli {
             workerId = "worker-" + shortId();
         }
         try (JobStore store = jobStore(args)) {
-            while (true) {
-                Optional<Job> claimed = store.claim(workerId, Duration.ofSeconds(leaseSeconds));
-                if (claimed.isEmpty()) {
-                    if (args.flag("once")) {
-                        return 0;
-                    }
-                    try {
-                        Thread.sleep(pollMillis);
-                    } catch (InterruptedException interrupted) {
-                        Thread.currentThread().interrupt();
-                        return 1;
-                    }
-                    continue;
-                }
-                executeJob(store, claimed.get(), workerId, leaseSeconds);
-                if (args.flag("once")) {
+            return runWorker(store, workerId, leaseSeconds, pollMillis, args.flag("once"));
+        }
+    }
+
+    private static int runWorker(
+            JobStore store, String workerId, int leaseSeconds, long pollMillis, boolean once) {
+        while (true) {
+            Optional<Job> claimed = store.claim(workerId, Duration.ofSeconds(leaseSeconds));
+            if (claimed.isEmpty()) {
+                if (once) {
                     return 0;
                 }
+                try {
+                    Thread.sleep(pollMillis);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return 1;
+                }
+                continue;
+            }
+            executeJob(store, claimed.get(), workerId, leaseSeconds);
+            if (once) {
+                return 0;
             }
         }
     }

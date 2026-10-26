@@ -8,6 +8,7 @@ import io.assay.support.AtomicFiles;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -312,11 +313,21 @@ public final class FileJobStore implements JobStore {
     }
 
     private <T> T locked(LockedAction<T> action) {
-        try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-                FileLock ignored = channel.lock()) {
-            return action.run();
-        } catch (IOException error) {
-            throw new IllegalStateException("cannot access job store", error);
+        while (true) {
+            try (FileChannel channel =
+                            FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                    FileLock ignored = channel.lock()) {
+                return action.run();
+            } catch (OverlappingFileLockException busy) {
+                try {
+                    Thread.sleep(5);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("interrupted while waiting for job lock", interrupted);
+                }
+            } catch (IOException error) {
+                throw new IllegalStateException("cannot access job store", error);
+            }
         }
     }
 

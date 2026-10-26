@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.json.Json;
+import io.assay.runner.JobStatus;
+import io.assay.store.file.FileJobStore;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -65,6 +67,45 @@ class DashboardServerTest {
             assertEquals(405, CLIENT.send(post, HttpResponse.BodyHandlers.ofString()).statusCode());
             assertEquals(404, get(base.resolve("not-a-page")).statusCode());
             assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(run)));
+        }
+    }
+
+    @Test
+    void queueApiSubmitsAndCancelsJobs(@TempDir Path root) throws Exception {
+        Path storePath = root.resolve("store");
+        try (FileJobStore jobs = new FileJobStore(storePath);
+                DashboardServer server = new DashboardServer(root.resolve("runs"), 0, jobs, storePath.toString())) {
+            URI base = server.uri();
+            Map<String, Object> empty = Json.parseObject(get(base.resolve("api/jobs")).body());
+            assertEquals(0, ((List<?>) empty.get("jobs")).size());
+
+            HttpRequest submit = HttpRequest.newBuilder(base.resolve("api/jobs"))
+                    .header("X-Assay-Request", "1")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(Json.write(Map.of(
+                            "adapter", "io.assay.examples.EchoAdapter",
+                            "suite", "ui-queue",
+                            "cases", "examples/cases.example.jsonl"))))
+                    .build();
+            HttpResponse<String> created = CLIENT.send(submit, HttpResponse.BodyHandlers.ofString());
+            assertEquals(201, created.statusCode(), created.body());
+            String jobId = String.valueOf(Json.parseObject(created.body()).get("job_id"));
+            assertEquals(JobStatus.QUEUED, jobs.find(jobId).orElseThrow().status());
+
+            HttpRequest cancel = HttpRequest.newBuilder(base.resolve("api/jobs/" + jobId + "/cancel"))
+                    .header("X-Assay-Request", "1")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                    .build();
+            assertEquals(200, CLIENT.send(cancel, HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(JobStatus.CANCELLED, jobs.find(jobId).orElseThrow().status());
+        }
+    }
+
+    @Test
+    void queueApiIsDisabledWithoutAWorkerStore(@TempDir Path root) throws Exception {
+        try (DashboardServer server = new DashboardServer(root, 0)) {
+            assertEquals(503, get(server.uri().resolve("api/jobs")).statusCode());
         }
     }
 
