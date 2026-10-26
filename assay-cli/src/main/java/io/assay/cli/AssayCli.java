@@ -19,8 +19,13 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.TestSelection;
 import io.assay.report.Reporting;
 import io.assay.review.ReviewSamples;
+import io.assay.runner.Job;
+import io.assay.runner.JobStatus;
+import io.assay.runner.JobStore;
 import io.assay.selection.TestSelectionService;
 import io.assay.store.Results;
+import io.assay.store.file.FileJobStore;
+import io.assay.store.jdbc.JdbcJobStore;
 import io.assay.support.AtomicFiles;
 import io.assay.workspace.TextArtifactWorkspace;
 import io.assay.web.DashboardServer;
@@ -31,11 +36,17 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The {@code assay} command line.
@@ -62,6 +73,10 @@ public final class AssayCli {
         List<CommandLine.Spec> commands = List.of(
                 new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard"),
                 new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation"),
+                new CommandLine.Spec("submit", "queue an evaluation run"),
+                new CommandLine.Spec("worker", "execute queued evaluation jobs"),
+                new CommandLine.Spec("jobs", "list queued evaluation jobs"),
+                new CommandLine.Spec("cancel", "cancel a queued or running job"),
                 new CommandLine.Spec("run", "run one externally supplied suite"),
                 new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff"),
                 new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task"),
@@ -92,6 +107,10 @@ public final class AssayCli {
             return switch (command) {
                 case "serve" -> serve(args);
                 case "quickstart" -> quickstart(args);
+                case "submit" -> submit(args);
+                case "worker" -> worker(args);
+                case "jobs" -> jobs(args);
+                case "cancel" -> cancelJob(args);
                 case "run" -> runSuite(args);
                 case "select-tests" -> selectTests(args);
                 case "audit-scope" -> auditScope(args);
@@ -131,6 +150,25 @@ public final class AssayCli {
                     .option("timeout", CommandLine.Kind.DECIMAL, "30")
                     .flag("generate-only")
                     .flag("no-serve");
+            case "submit" -> runtime(new CommandLine.Spec("submit", "queue an evaluation run"))
+                    .required("adapter", CommandLine.Kind.STRING)
+                    .option("adapter-class", CommandLine.Kind.STRING, null)
+                    .required("suite", CommandLine.Kind.STRING)
+                    .required("cases", CommandLine.Kind.STRING)
+                    .option("run-id", CommandLine.Kind.STRING, null)
+                    .option("max-attempts", CommandLine.Kind.INTEGER, "3");
+            case "worker" -> new CommandLine.Spec("worker", "execute queued evaluation jobs")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .option("worker-id", CommandLine.Kind.STRING, null)
+                    .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
+                    .option("poll", CommandLine.Kind.DECIMAL, "2")
+                    .flag("once");
+            case "jobs" -> new CommandLine.Spec("jobs", "list queued evaluation jobs")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .option("limit", CommandLine.Kind.INTEGER, "20");
+            case "cancel" -> new CommandLine.Spec("cancel", "cancel a queued or running job")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .required("job-id", CommandLine.Kind.STRING);
             case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                     .required("adapter", CommandLine.Kind.STRING)
                     .option("adapter-class", CommandLine.Kind.STRING, null)
@@ -305,6 +343,216 @@ public final class AssayCli {
                 args.decimal("timeout"),
                 args.flag("collect-few-shot"),
                 args.string("run-identity"));
+    }
+
+    private static int submit(CommandLine.Namespace args) {
+        try (JobStore store = jobStore(args)) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("adapter", args.string("adapter"));
+            if (args.string("adapter-class") != null) {
+                payload.put("adapter_class", args.string("adapter-class"));
+            }
+            payload.put("suite", args.string("suite"));
+            payload.put("cases", args.string("cases"));
+            payload.put("store", args.string("store"));
+            payload.put("output", args.string("output"));
+            payload.put("source", args.string("source"));
+            payload.put("workers", args.integer("workers"));
+            payload.put("retries", args.integer("retries"));
+            payload.put("timeout", args.decimal("timeout"));
+            payload.put("use_llm", args.flag("use-llm"));
+            payload.put("collect_few_shot", args.flag("collect-few-shot"));
+            if (args.string("run-identity") != null) {
+                payload.put("run_identity", args.string("run-identity"));
+            }
+            String runId = args.string("run-id");
+            if (runId == null || runId.isBlank()) {
+                runId = "queued-" + shortId();
+            }
+            payload.put("run_id", runId);
+            Job job = store.submit(payload, args.integer("max-attempts"));
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("job_id", job.id());
+            output.put("run_id", runId);
+            output.put("status", job.status().name());
+            System.out.println(Json.write(output));
+            return 0;
+        }
+    }
+
+    private static int jobs(CommandLine.Namespace args) {
+        try (JobStore store = jobStore(args)) {
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Job job : store.list(args.integer("limit"))) {
+                rows.add(jobMap(job));
+            }
+            System.out.println(Json.write(rows));
+            return 0;
+        }
+    }
+
+    private static int cancelJob(CommandLine.Namespace args) {
+        try (JobStore store = jobStore(args)) {
+            String jobId = args.string("job-id");
+            boolean cancelled = store.cancel(jobId);
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("job_id", jobId);
+            output.put("cancelled", cancelled);
+            store.find(jobId).ifPresent(job -> output.put("status", job.status().name()));
+            System.out.println(Json.write(output));
+            return cancelled ? 0 : 1;
+        }
+    }
+
+    private static int worker(CommandLine.Namespace args) {
+        int leaseSeconds = Math.max(1, args.integer("lease-seconds"));
+        long pollMillis = Math.max(250, Math.round(Math.max(0.25, args.decimal("poll")) * 1000));
+        String workerId = args.string("worker-id");
+        if (workerId == null || workerId.isBlank()) {
+            workerId = "worker-" + shortId();
+        }
+        try (JobStore store = jobStore(args)) {
+            while (true) {
+                Optional<Job> claimed = store.claim(workerId, Duration.ofSeconds(leaseSeconds));
+                if (claimed.isEmpty()) {
+                    if (args.flag("once")) {
+                        return 0;
+                    }
+                    try {
+                        Thread.sleep(pollMillis);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return 1;
+                    }
+                    continue;
+                }
+                executeJob(store, claimed.get(), workerId, leaseSeconds);
+                if (args.flag("once")) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    private static void executeJob(JobStore store, Job job, String workerId, int leaseSeconds) {
+        Thread execution = Thread.currentThread();
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "assay-worker-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+        long interval = Math.max(1, leaseSeconds / 3);
+        ScheduledFuture<?> heartbeat = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (!store.heartbeat(job.id(), workerId, Duration.ofSeconds(leaseSeconds))
+                        || store.isCancelRequested(job.id())) {
+                    execution.interrupt();
+                }
+            } catch (RuntimeException error) {
+                execution.interrupt();
+            }
+        }, interval, interval, TimeUnit.SECONDS);
+        int code = 1;
+        try {
+            code = run(runArgs(job));
+            if (store.isCancelRequested(job.id())) {
+                store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
+            } else if (code == 0) {
+                store.succeed(job.id(), workerId);
+            } else {
+                store.finish(job.id(), workerId, JobStatus.FAILED, "exit code " + code);
+            }
+        } catch (RuntimeException error) {
+            if (store.isCancelRequested(job.id())) {
+                store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
+            } else {
+                store.fail(job.id(), workerId, error.getMessage() == null ? error.toString() : error.getMessage());
+            }
+        } finally {
+            heartbeat.cancel(false);
+            scheduler.shutdownNow();
+            Thread.interrupted();
+        }
+        System.out.println("job " + job.id() + " finished with exit code " + code);
+    }
+
+    private static String[] runArgs(Job job) {
+        Map<String, Object> payload = job.payload();
+        List<String> args = new ArrayList<>(List.of(
+                "run",
+                "--adapter", text(payload, "adapter"),
+                "--suite", text(payload, "suite"),
+                "--cases", text(payload, "cases"),
+                "--store", text(payload, "store"),
+                "--output", text(payload, "output"),
+                "--source", text(payload, "source"),
+                "--workers", String.valueOf(integer(payload, "workers")),
+                "--retries", String.valueOf(integer(payload, "retries")),
+                "--timeout", String.valueOf(decimal(payload, "timeout")),
+                "--run-id", text(payload, "run_id")));
+        if (payload.get("adapter_class") != null) {
+            args.add("--adapter-class");
+            args.add(String.valueOf(payload.get("adapter_class")));
+        }
+        if (Boolean.TRUE.equals(payload.get("use_llm"))) {
+            args.add("--use-llm");
+        }
+        if (Boolean.TRUE.equals(payload.get("collect_few_shot"))) {
+            args.add("--collect-few-shot");
+        }
+        if (payload.get("run_identity") != null) {
+            args.add("--run-identity");
+            args.add(String.valueOf(payload.get("run_identity")));
+        }
+        if (job.attempts() > 1) {
+            args.add("--resume");
+        }
+        return args.toArray(String[]::new);
+    }
+
+    private static String text(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        if (value == null || String.valueOf(value).isBlank()) {
+            throw new IllegalArgumentException("job payload is missing " + key);
+        }
+        return String.valueOf(value);
+    }
+
+    private static int integer(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
+    }
+
+    private static double decimal(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        return value instanceof Number number ? number.doubleValue() : Double.parseDouble(String.valueOf(value));
+    }
+
+    private static JobStore jobStore(CommandLine.Namespace args) {
+        String reference = args.string("store");
+        if (reference == null || reference.isBlank()) {
+            throw new CommandLine.UsageException("queue commands require --store", 2, false);
+        }
+        if (reference.startsWith("jdbc:")) {
+            return JdbcJobStore.fromUrl(reference);
+        }
+        return new FileJobStore(Path.of(reference));
+    }
+
+    private static Map<String, Object> jobMap(Job job) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("job_id", job.id());
+        row.put("status", job.status().name());
+        row.put("attempts", job.attempts());
+        row.put("max_attempts", job.maxAttempts());
+        row.put("lease_owner", job.leaseOwner());
+        row.put("lease_expires_at", job.leaseExpiresAt() == null ? null : job.leaseExpiresAt().toString());
+        row.put("cancel_requested", job.cancelRequested());
+        row.put("created_at", job.createdAt().toString());
+        row.put("started_at", job.startedAt() == null ? null : job.startedAt().toString());
+        row.put("finished_at", job.finishedAt() == null ? null : job.finishedAt().toString());
+        row.put("error", job.error());
+        return row;
     }
 
     private static int runSuite(CommandLine.Namespace args) {

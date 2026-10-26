@@ -4,12 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.json.Json;
+import io.assay.runner.Job;
+import io.assay.runner.JobStatus;
+import io.assay.store.jdbc.JdbcJobStore;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,6 +62,36 @@ class AssayCliTest {
         List<String> lines = Files.readAllLines(dir.resolve("cases.jsonl"));
         assertEquals(3, lines.size());
         assertTrue(lines.get(0).contains("refund"), lines.get(0));
+    }
+
+    @Test
+    void workerClaimsAQueuedJobAndCompletesIt(@TempDir Path root) {
+        Path cases = writeCases(root, "queue.jsonl", List.of(echoCase("Q1", "hello", "ECHO", "hello")));
+        String storeUrl = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            int submitted = AssayCli.run(new String[] {
+                "submit",
+                "--adapter", "io.assay.examples.EchoAdapter",
+                "--suite", "queue",
+                "--cases", cases.toString(),
+                "--store", storeUrl,
+                "--output", root.resolve("runs").toString(),
+                "--max-attempts", "2"
+            });
+            assertEquals(0, submitted);
+            Job queued = jobs.list(1).get(0);
+            assertEquals(JobStatus.QUEUED, queued.status());
+
+            int worked = AssayCli.run(new String[] {
+                "worker", "--store", storeUrl, "--once", "--lease-seconds", "10"
+            });
+            assertEquals(0, worked);
+
+            Job finished = jobs.find(queued.id()).orElseThrow();
+            assertEquals(JobStatus.SUCCEEDED, finished.status());
+            assertTrue(Files.isRegularFile(root.resolve("runs").resolve(finished.payload().get("run_id").toString())
+                    .resolve("results.json")));
+        }
     }
 
     @Test

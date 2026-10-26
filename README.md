@@ -386,6 +386,36 @@ java -cp "app/target/assay.jar:drivers/h2-2.2.224.jar" io.assay.cli.AssayCli run
 
 Windows 的 classpath 分隔符是 `;`。数据库凭据可通过 `ASSAY_DB_USER` / `ASSAY_DB_PASSWORD` 环境变量提供；表结构会在首次打开时自动创建。H2 file URL 会自动补 `DB_CLOSE_DELAY=-1`，避免关闭最后一个连接后重连变成 read-only。JDBC 存储用 `assay_lock` 表实现跨进程 run 锁，如果进程在持有锁时崩溃，需要人工清理残留的锁行（或删库重建测试库）——这是当前实现的已知边界，不是自动 TTL。
 
+### 异步评测队列（MVP）
+
+队列默认使用零依赖的文件 job store；`--store` 同时作为 job store 和结果存储。单机文件模式不需要数据库驱动：
+
+```bash
+# 提交任务
+java -jar app/target/assay.jar submit \
+  --adapter io.assay.examples.EchoAdapter --suite queued \
+  --cases examples/cases.example.jsonl \
+  --store .assay/store --output .assay/runs
+
+# 执行一个任务（本地可运行多个 worker）
+java -jar app/target/assay.jar worker --store .assay/store --once
+
+# 查看 / 取消
+java -jar app/target/assay.jar jobs --store .assay/store
+java -jar app/target/assay.jar cancel --store .assay/store --job-id <job-id>
+```
+
+多机或多进程共享队列时，把 `--store` 换成 JDBC URL，并把驱动放进 classpath；JDBC job store 使用同一数据库中的 `assay_job` 表。H2 文件模式在当前 Windows 环境下重开可能只读，跨进程队列建议使用 PostgreSQL，或使用本地文件 job store。
+
+语义：
+
+- `QUEUED → RUNNING → SUCCEEDED / FAILED / CANCELLED`
+- worker 持有租约并定期 heartbeat；租约过期后可被其他 worker 重新领取
+- 取消是协作式的：运行中的任务在当前 case 边界停止，不会强杀 Agent
+- 执行失败按 `max-attempts` 重试；超过上限进入 FAILED
+- 投递是 **at-least-once**，不是 exactly-once；重复执行通过 run id + resume + run lock 保底
+- `worker --once` 用于测试/单次执行；不传时持续轮询
+
 ### Spring Boot Starter（可选）
 
 `extensions/assay-spring-boot-starter` 提供 Spring Boot 自动配置，不改变核心的零依赖设计：
