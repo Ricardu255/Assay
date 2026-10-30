@@ -75,6 +75,10 @@ p { margin: 0; }
 .badge.queued { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
 .badge.succeeded { color: var(--good-text); background: var(--good-bg); border-color: var(--good-border); }
 .badge.cancelled { color: var(--text-secondary); background: var(--surface-subtle); border-color: var(--line); }
+.badge.pass { color: var(--good-text); background: var(--good-bg); border-color: var(--good-border); }
+.badge.block, .badge.critical { color: var(--bad-text); background: var(--bad-bg); border-color: var(--bad-border); }
+.badge.info { color: var(--info-text); background: var(--info-bg); border-color: var(--info-border); }
+.badge.normal { color: var(--text-secondary); background: var(--surface-subtle); border-color: var(--line); }
 .rule-stats-panel { overflow: hidden; }
 .rule-stats-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr); }
 .rule-stats-main { min-width: 0; }

@@ -9,6 +9,7 @@ on:
 # following the README would take.
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   verify:
@@ -86,6 +87,38 @@ jobs:
           test "$status" -eq 1
           grep -q '"decision": "rollback"' .assay/runs/ci-regression/evolution.json
           grep -q '"category": "step_fields"' .assay/runs/ci-regression/evolution.json
+      - name: Compare stored runs with a release gate
+        shell: bash
+        run: |
+          set +e
+          java -jar app/target/assay.jar compare \
+            --baseline ci-regression-holdout-baseline \
+            --candidate ci-regression-holdout-candidate \
+            --store .assay/store \
+            --profile strict \
+            --output .assay/runs/ci-compare/report.md
+          status=$?
+          set -e
+          test "$status" -eq 1
+          cat .assay/runs/ci-compare/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment the comparison on the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- assay-compare-gate -->";
+            const report = fs.readFileSync(".assay/runs/ci-compare/report.md", "utf8");
+            const body = `${marker}\n${report}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find((comment) => comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
       - name: Exercise external trace ingestion
         shell: bash
         run: |

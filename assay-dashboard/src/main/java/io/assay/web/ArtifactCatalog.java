@@ -25,7 +25,8 @@ public final class ArtifactCatalog {
     private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
     private static final Map<String, String> KINDS = Map.of(
             "results.json", "run", "evolution.json", "evolution",
-            "auto_evolution.json", "auto", "scope_audit.json", "audit", "release.json", "release");
+            "auto_evolution.json", "auto", "scope_audit.json", "audit", "release.json", "release",
+            "compare.json", "compare");
     private static final int MAX_CACHED_SUMMARIES = 512;
     private final Path root;
     private final Map<Path, Summary> summaries = new ConcurrentHashMap<>();
@@ -137,24 +138,42 @@ public final class ArtifactCatalog {
         String id = Base64.getUrlEncoder().withoutPadding().encodeToString(relative.getBytes(StandardCharsets.UTF_8));
         String kind = KINDS.get(file.getFileName().toString());
         Map<String, Object> payload = Json.parseObject(readText(file, MAX_FILE_BYTES));
+        Map<String, Object> gate = asMap(payload.get("gate"));
+        Map<String, Object> baseline = asMap(payload.get("baseline"));
+        Map<String, Object> candidate = asMap(payload.get("candidate"));
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("name", switch (kind) {
             case "run" -> payload.getOrDefault("run_id", relative);
             case "evolution" -> payload.getOrDefault("experiment_id", relative);
             case "auto" -> payload.getOrDefault("loop_id", relative);
             case "release" -> payload.getOrDefault("release_id", relative);
+            case "compare" -> nameOf(baseline, "baseline") + " -> " + nameOf(candidate, "candidate");
             default -> payload.getOrDefault("requirement", relative);
         });
-        fields.put(
-                "status",
-                payload.getOrDefault(
-                        "decision", payload.getOrDefault("conclusion", payload.getOrDefault("status", "unknown"))));
+        Object status = "compare".equals(kind)
+                ? String.valueOf(gate.getOrDefault("status", "unknown")).toLowerCase(java.util.Locale.ROOT)
+                : payload.getOrDefault(
+                        "decision", payload.getOrDefault("conclusion", payload.getOrDefault("status", "unknown")));
+        fields.put("status", status);
         fields.put("run_id", payload.get("run_id"));
-        for (String field : List.of("suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
-            fields.put(field, payload.get(field));
+        if ("compare".equals(kind)) {
+            fields.put("suite", payload.get("dataset"));
+            fields.put("case_count", candidate.get("case_count"));
+            fields.put("hard_failures", candidate.get("hard_failures"));
+            fields.put("soft_warnings", candidate.get("soft_warning_count"));
+        } else {
+            for (String field : List.of("suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
+                fields.put(field, payload.get(field));
+            }
         }
         Summary summary = new Summary(
-                id, relative, kind, modified, size, fields, asMap(payload.get("rule_stats")));
+                id,
+                relative,
+                kind,
+                modified,
+                size,
+                fields,
+                "compare".equals(kind) ? asMap(candidate.get("rule_stats")) : asMap(payload.get("rule_stats")));
         if (summaries.size() >= MAX_CACHED_SUMMARIES) {
             summaries.clear();
         }
@@ -178,6 +197,11 @@ public final class ArtifactCatalog {
             throw new IllegalArgumentException(field + " must be a non-empty, bounded value");
         }
         return text;
+    }
+
+    private static String nameOf(Map<String, Object> value, String fallback) {
+        Object name = value.get("run_id");
+        return name == null || String.valueOf(name).isBlank() ? fallback : String.valueOf(name);
     }
 
     @SuppressWarnings("unchecked")

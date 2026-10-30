@@ -88,6 +88,18 @@ Expected keyword in the answer:
 
 这样运行页就能看到每一步，而不只是最终答案。
 
+## 比较两个版本
+
+同一个 suite 跑两次，给第二次一个固定的运行 ID：
+
+```bash
+assay.cmd run --adapter my-agent.http.json --suite my-agent --cases http-cases.jsonl --run-id v1
+assay.cmd run --adapter my-agent-v2.http.json --suite my-agent --cases http-cases.jsonl --run-id v2
+assay.cmd compare --baseline v1 --candidate v2 --profile strict
+```
+
+报告会直接给出 `PASS`、`WARNING` 或 `BLOCK`，并列出退化的用例和第一个分歧步骤。
+
 ## 不要一开始做什么
 
 - 不需要写 Java

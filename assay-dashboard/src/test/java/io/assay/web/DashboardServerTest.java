@@ -125,6 +125,25 @@ class DashboardServerTest {
         assertEquals(2L, refreshed.get("case_count"));
     }
 
+    @Test
+    void catalogRecognizesCompareReports(@TempDir Path root) throws Exception {
+        Path file = root.resolve("compare/compare.json");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, Json.write(Map.of(
+                "dataset", "suite",
+                "baseline", Map.of("run_id", "base", "case_count", 2, "hard_failures", 0, "soft_warning_count", 0),
+                "candidate", Map.of("run_id", "cand", "case_count", 2, "hard_failures", 1, "soft_warning_count", 0),
+                "gate", Map.of("status", "BLOCK", "violations", List.of()))));
+
+        ArtifactCatalog catalog = new ArtifactCatalog(root);
+        Map<?, ?> item = item(catalog, "base -> cand");
+        assertEquals("compare", item.get("kind"));
+        assertEquals("block", item.get("status"));
+        assertEquals(2L, item.get("case_count"));
+        assertEquals(1L, item.get("hard_failures"));
+        assertEquals("suite", item.get("suite"));
+    }
+
     private static Map<?, ?> item(ArtifactCatalog catalog, String name) throws Exception {
         List<?> items = (List<?>) catalog.list().get("items");
         return items.stream()

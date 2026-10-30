@@ -1,0 +1,18 @@
+{
+  "minimum_samples": 1,
+  "minimum_hard_pass_rate": 0.95,
+  "maximum_hard_pass_rate_drop": 0.03,
+  "maximum_task_regressions": 0,
+  "maximum_critical_task_regressions": 0,
+  "maximum_average_latency_ms": 1000,
+  "maximum_p95_latency_ms": 1500,
+  "maximum_average_total_tokens": 220,
+  "maximum_average_cost_usd": 0.001,
+  "minimum_rule_pass_rates": {
+    "route": 0.95
+  },
+  "severity": {
+    "maximum_task_regressions": "warning"
+  },
+  "use_estimated_metrics": false
+}

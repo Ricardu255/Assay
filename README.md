@@ -39,6 +39,46 @@ java -jar app/target/assay.jar run \
   --collect-few-shot
 ```
 
+### 比较两次运行
+
+`compare` 不重新调用 Agent，直接读取两次已保存的运行，输出「指标对比 → 场景切片 → 退化用例 → 首错 → 门禁结论」：
+
+```bash
+java -jar app/target/assay.jar compare \
+  --baseline baseline-run-id \
+  --candidate candidate-run-id \
+  --store .assay/store \
+  --profile strict \
+  --output .assay/runs/compare
+```
+
+也可以直接传 `results.json` 或运行目录，便于在另一台机器上复核：
+
+```bash
+java -jar app/target/assay.jar compare \
+  --baseline .assay/runs/base/results.json \
+  --candidate .assay/runs/candidate/results.json \
+  --format json
+```
+
+`--profile strict` / `--profile balanced` 是内置预设（默认 `balanced`，只出报告用 `--profile none`）；需要精确阈值时用 `--config examples/compare-gate.example.json`。扁平配置只包含发布方关心的字段：
+
+```json
+{
+  "minimum_hard_pass_rate": 0.95,
+  "maximum_hard_pass_rate_drop": 0.03,
+  "maximum_task_regressions": 0,
+  "maximum_critical_task_regressions": 0,
+  "maximum_average_latency_ms": 1000,
+  "maximum_average_total_tokens": 220,
+  "minimum_rule_pass_rates": {"route": 0.95}
+}
+```
+
+结论为 `PASS`、`WARNING` 或 `BLOCK`；`BLOCK` 以退出码 1 结束，可直接放进 CI。Token 和成本优先读取 Trace 上报值；没有上报时，报告会显示带 `~` 的估算值并明确标注，估算值默认不参与门禁。
+
+`--output` 传目录（或以 `/` 结尾、或不带扩展名的路径）时会同时生成 `report.md` 和 `compare.json`；`serve` 指向该目录后，界面左侧「版本对比」页可以直接打开这份报告。
+
 在项目所在电脑上启动可视化界面：
 
 ```bash
@@ -49,7 +89,7 @@ java -jar app/target/assay.jar serve --output .assay/runs --port 8080
 java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store --worker --port 8080
 ```
 
-命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本演化、范围审计和发布验证；总览还提供最近 7 天通过率趋势和按测试集健康表。可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机；不带 `--worker` 时查看和导入不会改写报告，带 `--worker` 时任务队列页可以提交和取消评测任务。
+命令保持运行时，在同一台电脑的浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)；按 `Ctrl+C` 关闭。`--output` 指向报告目录，可指定同时包含多类报告的父目录。界面展示运行、Trace、规则结果、场景统计、版本对比、版本演化、范围审计和发布验证；总览还提供最近 7 天通过率趋势和按测试集健康表。可筛选失败用例或在浏览器中临时导入报告 JSON。服务只监听本机；不带 `--worker` 时查看和导入不会改写报告，带 `--worker` 时任务队列页可以提交和取消评测任务。
 
 首次接入可打开界面的「开始评测」：选择 **HTTP 接口（推荐，无需写代码）**，填写地址、响应字段和通过条件，下载配置，再选择 JSONL 测试集检查格式、重复 ID 与必需字段，复制适用于 PowerShell 或 Bash 的运行命令。配置生成和文件检查在浏览器内完成；下载文件放到项目根目录，或将路径改为实际位置。命令由用户在项目根目录的另一个终端运行，完成后点击顶部「刷新」查看结果。
 

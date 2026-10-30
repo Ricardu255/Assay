@@ -1,7 +1,8 @@
 "use strict";
 
 const sections = [
-  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["queue", "任务队列", "▶"], ["run", "运行记录", "▤"], ["evolution", "版本演化", "⇄"],
+  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["queue", "任务队列", "▶"], ["run", "运行记录", "▤"],
+  ["compare", "版本对比", "⇋"], ["evolution", "版本演化", "⇄"],
   ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
 const labels = {
@@ -16,7 +17,8 @@ const labels = {
   queued: "排队中", running: "运行中", succeeded: "已完成", cancelled: "已取消",
   step_added: "新增步骤", step_removed: "缺失步骤", step_changed: "步骤变更", step_reordered: "步骤顺序",
   step_fields: "字段变化", step_error: "步骤报错", step_status: "状态变化", final_output: "最终输出",
-  trace_fields: "Trace 字段", missing_trace: "缺少 Trace", no_visible_divergence: "无可见差异"
+  trace_fields: "Trace 字段", missing_trace: "缺少 Trace", no_visible_divergence: "无可见差异",
+  pass: "通过", block: "阻断", info: "提示", estimated: "估算", critical: "关键", normal: "常规"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
   tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
@@ -128,7 +130,7 @@ function artifactTable(records, limit = Infinity) {
     ${records.slice(0, limit).map((item) => `<tr><td><button class="record-name" data-artifact="${escape(item.id)}">${escape(item.name)}</button><div class="record-path">${escape(item.path)}</div></td>
       <td class="muted">${escape(kindName(item.kind))}${item.suite ? `<div class="record-path">${escape(item.suite)}</div>` : ""}</td>
       <td>${badge(item.status === "passed" && count(item.soft_warnings) > 0 ? "warning" : item.status)}</td>
-      <td class="number">${item.kind === "run" ? `${integer(item.case_count)} <span class="muted">条</span>` : item.current_version ? escape(item.current_version) : "—"}</td>
+      <td class="number">${item.kind === "run" || item.kind === "compare" ? `${integer(item.case_count)} <span class="muted">条</span>` : item.current_version ? escape(item.current_version) : "—"}</td>
       <td class="muted number">${escape(date(item.modified_at))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -312,7 +314,8 @@ function listing() {
 
 function detailHeader(context) {
   const payload = context.payload;
-  const status = payload.decision || payload.conclusion || (payload.status === "passed" && count(payload.soft_warnings) ? "warning" : payload.status);
+  const gate = object(payload.gate);
+  const status = String(gate.status || payload.decision || payload.conclusion || (payload.status === "passed" && count(payload.soft_warnings) ? "warning" : payload.status) || "unknown").toLowerCase();
   return `<button class="link-button back" data-back>← ${state.stack.length > 1 ? "返回上一级报告" : "返回记录列表"}</button>
     ${heading(context.item.name, context.item.path || "当前报告内的嵌套运行", kindName(context.item.kind),
       `<div class="detail-actions">${badge(status)}<button class="button secondary" data-download>下载 JSON</button></div>`)}`;
@@ -605,6 +608,97 @@ function coverage(metrics, name) {
   return number(entry.sample_count) === null ? "未记录" : `${entry.sample_count} / ${entry.case_count}`;
 }
 
+function compareValue(value, format, estimated) {
+  if (number(value) === null) return "—";
+  return `${estimated ? "~" : ""}${format(value)}`;
+}
+
+function compareRow(label, baseline, candidate, deltaValue, format, deltaFormat = (value) => delta(value)) {
+  return `<tr><td>${escape(label)}</td><td class="number">${baseline}</td><td class="number">${candidate}</td><td class="number">${number(deltaValue) === null ? "—" : deltaFormat(deltaValue)}</td></tr>`;
+}
+
+function renderCompare(context) {
+  const payload = context.payload;
+  const gate = object(payload.gate);
+  const baseline = object(payload.baseline);
+  const candidate = object(payload.candidate);
+  const deltas = object(payload.deltas);
+  const transitions = object(payload.transitions);
+  const scenarios = object(payload.scenarios);
+  const rules = object(payload.rules);
+  const baselineEstimate = object(payload.baseline_estimated_efficiency);
+  const candidateEstimate = object(payload.estimated_efficiency);
+  const baselineEfficiency = object(baseline.efficiency);
+  const candidateEfficiency = object(candidate.efficiency);
+  const status = String(gate.status || "unknown").toLowerCase();
+  const violations = array(gate.violations);
+  const regressions = array(payload.regressions);
+  const usd = (value) => `$${Number(value).toFixed(6)}`;
+  const ms = (value) => decimal(value, " ms");
+  const estimatedValue = (row, key, format) => compareValue(row[key], format, true);
+  const efficiencyText = (efficiency, estimate, key, format) => number(efficiency[key]) !== null
+    ? compareValue(efficiency[key], format, false)
+    : compareValue(estimate[key], format, true);
+
+  const metricRows = [
+    compareRow("硬门禁通过率", percent(baseline.hard_pass_rate), percent(candidate.hard_pass_rate), deltas.hard_pass_rate, percent, (value) => delta(value, true)),
+    compareRow("软告警数", integer(baseline.soft_warning_count), integer(candidate.soft_warning_count), deltas.soft_warning_count, integer),
+    compareRow("平均延迟", compareValue(baseline.mean_latency_ms, ms, false), compareValue(candidate.mean_latency_ms, ms, false), deltas.mean_latency_ms, ms, (value) => delta(value) + " ms"),
+    compareRow("P95 延迟", compareValue(baseline.p95_latency_ms, ms, false), compareValue(candidate.p95_latency_ms, ms, false), deltas.p95_latency_ms, ms, (value) => delta(value) + " ms"),
+    compareRow("平均步骤", compareValue(baseline.mean_steps, (value) => decimal(value), false), compareValue(candidate.mean_steps, (value) => decimal(value), false), deltas.mean_steps, (value) => decimal(value)),
+    compareRow("平均 Token", efficiencyText(baselineEfficiency, baselineEstimate, "mean_total_tokens", (value) => decimal(value)), efficiencyText(candidateEfficiency, candidateEstimate, "mean_total_tokens", (value) => decimal(value)), deltas.mean_total_tokens, (value) => decimal(value)),
+    compareRow("平均成本", efficiencyText(baselineEfficiency, baselineEstimate, "mean_cost_usd", usd), efficiencyText(candidateEfficiency, candidateEstimate, "mean_cost_usd", usd), deltas.mean_cost_usd, usd, (value) => delta(value) + " USD")
+  ];
+
+  const scenarioRows = Object.entries(scenarios).map(([name, row]) => {
+    const item = object(row);
+    return `<tr><td><strong>${escape(name)}</strong></td><td class="number">${integer(item.case_count)}</td><td class="number">${percent(item.baseline_hard_pass_rate)}</td><td class="number">${percent(item.candidate_hard_pass_rate)}</td><td class="number ${number(item.hard_pass_rate_delta) < 0 ? "negative" : "positive"}">${delta(item.hard_pass_rate_delta, true)}</td><td class="number">${integer(item.regressions)}</td><td class="number">${integer(item.critical_regressions)}</td></tr>`;
+  }).join("");
+
+  const regressionRows = regressions.map((raw) => {
+    const row = object(raw);
+    const divergence = object(row.first_divergence);
+    const first = divergence.category
+      ? `${escape(labels[divergence.category] || divergence.category)}${divergence.candidate_step == null ? "" : ` · 第 ${escape(divergence.candidate_step)} 步`}`
+      : "—";
+    const checks = array(row.failed_checks).map((check) => `${object(check).layer}/${object(check).name}`).join("、") || "—";
+    return `<tr><td><strong>${escape(row.case_id)}</strong><div class="record-path">${escape(row.scenario || "default")}</div></td><td>${badge(row.critical ? "critical" : "normal")}</td><td>${first}<div class="record-path">${escape(divergence.reason || "")}</div></td><td class="muted">${escape(checks)}</td></tr>`;
+  }).join("");
+
+  const ruleRows = Object.entries(rules).map(([name, raw]) => {
+    const row = object(raw);
+    const left = object(row.baseline);
+    const right = object(row.candidate);
+    return `<tr><td><strong>${escape(name)}</strong></td><td class="number">${percent(left.pass_rate)}</td><td class="number">${percent(right.pass_rate)}</td><td class="number ${number(row.pass_rate_delta) < 0 ? "negative" : "positive"}">${delta(row.pass_rate_delta, true)}</td></tr>`;
+  }).join("");
+
+  const findingRows = violations.length
+    ? `<ul class="evidence">${violations.map((raw) => {
+        const row = object(raw);
+        return `<li>${badge(row.severity)} <strong>${escape(row.rule)}</strong> · 实际 ${escape(row.actual ?? "—")} / 阈值 ${escape(row.threshold ?? "—")}<div class="record-path">${escape(row.message || "")}${row.estimated ? "（估算）" : ""}</div></li>`;
+      }).join("")}</ul>`
+    : '<p class="muted">所有已配置阈值均满足。</p>';
+
+  const estimateNote = (number(candidateEfficiency.mean_total_tokens) === null || number(candidateEfficiency.mean_cost_usd) === null)
+    ? `<section class="panel section-gap"><div class="panel-head"><h2>估算指标</h2><span class="muted">Trace 未上报 Token / 成本</span></div><div class="panel-body"><p class="muted">带 <strong>~</strong> 的值由文本长度和价格表估算，仅用于演示，不是账单数据；默认不参与门禁。</p><p>平均 Token：${estimatedValue(candidateEstimate, "mean_total_tokens", (value) => decimal(value))} · 平均成本：${estimatedValue(candidateEstimate, "mean_cost_usd", usd)} · 价格模型：${escape(candidateEstimate.price_model || "default")}</p></div></section>`
+    : "";
+
+  return `${detailHeader(context)}
+    <div class="stats">
+      ${stat("候选通过率", percent(candidate.hard_pass_rate), `基线 ${percent(baseline.hard_pass_rate)}`, number(deltas.hard_pass_rate) < 0 ? "negative" : "positive")}
+      ${stat("退化用例", integer(transitions.regressed_count), "基线通过、候选用例失败", count(transitions.regressed_count) ? "negative" : "")}
+      ${stat("关键退化", integer(array(transitions.regressed).filter((row) => object(row).critical).length), "关键任务", array(transitions.regressed).some((row) => object(row).critical) ? "negative" : "")}
+      ${stat("用例数", integer(candidate.case_count), `数据集 ${payload.dataset || "—"}`)}
+    </div>
+    <section class="panel section-gap"><div class="panel-head"><h2>门禁结论</h2>${badge(status)}</div><div class="panel-body">${findingRows}</div></section>
+    <section class="panel section-gap"><div class="panel-head"><h2>指标对比</h2><span class="muted">${escape(baseline.run_id || "baseline")} → ${escape(candidate.run_id || "candidate")}</span></div><div class="table-wrap"><table><thead><tr><th>指标</th><th>基线</th><th>候选</th><th>变化</th></tr></thead><tbody>${metricRows.join("")}</tbody></table></div></section>
+    ${scenarioRows ? `<section class="panel section-gap"><div class="panel-head"><h2>场景切片</h2><span class="muted">按场景看退化分布</span></div><div class="table-wrap"><table><thead><tr><th>场景</th><th>用例</th><th>基线通过</th><th>候选通过</th><th>变化</th><th>退化</th><th>关键</th></tr></thead><tbody>${scenarioRows}</tbody></table></div></section>` : ""}
+    <section class="panel section-gap"><div class="panel-head"><h2>退化用例</h2><span class="muted">只列基线通过、候选失败</span></div>${regressionRows ? `<div class="table-wrap"><table><thead><tr><th>用例</th><th>级别</th><th>首错步骤</th><th>失败规则</th></tr></thead><tbody>${regressionRows}</tbody></table></div>` : '<div class="panel-body"><p class="muted">没有用例从通过变为失败。</p></div>'}</section>
+    ${ruleRows ? `<section class="panel section-gap"><div class="panel-head"><h2>规则通过率</h2><span class="muted">同一规则在两次运行中的对比</span></div><div class="table-wrap"><table><thead><tr><th>规则</th><th>基线</th><th>候选</th><th>变化</th></tr></thead><tbody>${ruleRows}</tbody></table></div></section>` : ""}
+    ${estimateNote}
+    <details class="warnings section-gap"><summary>原始 JSON</summary><pre class="raw-data">${json(payload)}</pre></details>`;
+}
+
 function renderEvolution(context) {
   const payload = context.payload, candidate = object(payload.candidate), comparisons = object(payload.comparisons);
   const improvement = object(comparisons.improvement);
@@ -771,7 +865,7 @@ function render(pushLocation = false) {
     syncLocation(pushLocation); restoreFocus(token);
     return;
   }
-  const renderers = { run: renderRun, evolution: renderEvolution, auto: renderAuto, audit: renderAudit, release: renderRelease };
+  const renderers = { run: renderRun, compare: renderCompare, evolution: renderEvolution, auto: renderAuto, audit: renderAudit, release: renderRelease };
   view.innerHTML = renderers[context.item.kind](context);
   if (context.item.kind === "run" && state.tab === "cases") renderCaseRows();
   if (context.item.kind === "audit") renderAuditPatch(context);
