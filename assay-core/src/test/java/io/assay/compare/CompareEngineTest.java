@@ -103,6 +103,25 @@ class CompareEngineTest {
     }
 
     @Test
+    void incompleteRunsBlockTheComparison() {
+        Map<String, Object> baseline = summary(
+                "baseline", List.of(result("baseline", "A", "routing", false, true, "SUPPORT")));
+        baseline.put("status", "budget_exhausted");
+        baseline.put("skipped_case_count", 2);
+        Map<String, Object> candidate = summary(
+                "candidate", List.of(result("candidate", "A", "routing", false, true, "SUPPORT")));
+
+        Map<String, Object> report =
+                CompareEngine.compare("baseline", "candidate", baseline, candidate, CompareGate.defaults());
+
+        assertEquals("BLOCK", asMap(report.get("gate")).get("status"));
+        assertTrue(asList(asMap(report.get("gate")).get("violations")).stream()
+                .map(CompareEngineTest::asMap)
+                .anyMatch(item -> "run_completeness".equals(item.get("rule"))));
+        assertEquals("budget_exhausted", asMap(report.get("baseline")).get("status"));
+    }
+
+    @Test
     void markdownIsAOneScreenReleaseReport() {
         Map<String, Object> baseline = summary(
                 "baseline", List.of(result("baseline", "A", "routing", false, true, "SUPPORT")));

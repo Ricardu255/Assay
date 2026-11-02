@@ -279,6 +279,38 @@ class AssayCliTest {
     }
 
     @Test
+    void submitRejectsAnIdempotencyKeyWithADifferentPayload(@TempDir Path root) {
+        Path firstCases = writeCases(root, "first.jsonl", List.of(echoCase("Q1", "hello", "ECHO", "hello")));
+        Path secondCases = writeCases(root, "second.jsonl", List.of(echoCase("Q2", "bye", "ECHO", "bye")));
+        String storeUrl = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        String[] first = {
+            "submit",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "queue",
+            "--cases", firstCases.toString(),
+            "--store", storeUrl,
+            "--output", root.resolve("runs").toString(),
+            "--idempotency-key", "checkout-42"
+        };
+        String[] second = {
+            "submit",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "queue",
+            "--cases", secondCases.toString(),
+            "--store", storeUrl,
+            "--output", root.resolve("runs").toString(),
+            "--idempotency-key", "checkout-42"
+        };
+
+        assertEquals(0, AssayCli.run(first));
+        assertEquals(1, AssayCli.run(second));
+
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            assertEquals(1, jobs.list(10).size());
+        }
+    }
+
+    @Test
     void queuedJobCarriesItsBudgetAndStopsWhenExhausted(@TempDir Path root) {
         Path cases = writeCases(
                 root,

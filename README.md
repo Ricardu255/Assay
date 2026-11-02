@@ -360,7 +360,7 @@ java -jar app/target/assay.jar run \
 - Trace 没有上报 Token 或成本时，按预扣值计费并记录 `unreported_*_calls`，不会把缺失值当成 0。
 - 预扣是估算，实际值可能高于预留并产生 `overrun`；预算用于控制实验规模，不是供应商账单。
 - `--resume` 会把已落盘用例的消耗计入同一预算，避免恢复后重新获得完整额度。
-- `budget_exhausted` 表示样本不完整，不应直接拿来做版本对比或通过率结论。
+- `budget_exhausted` 表示样本不完整，不应直接拿来做版本对比或通过率结论；`compare` 会以 `run_completeness` 阻断，`evolve` 直接给出 `rollback`。
 - 当前预算覆盖被测 Agent 的 adapter 调用；`--use-llm` 的评测复核调用暂不单独计入。
 
 所有子命令都有可直接运行的示例：
@@ -496,9 +496,11 @@ java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store -
 - `QUEUED → RUNNING → SUCCEEDED / FAILED / CANCELLED`
 - worker 持有租约并定期 heartbeat；租约过期后可被其他 worker 重新领取
 - 取消是协作式的：运行中的任务在当前 case 边界停止，不会强杀 Agent
-- 执行失败按 `max-attempts` 重试；超过上限进入 FAILED
+- 执行失败按 `max-attempts` 重试；退避默认 1s 起、16s 封顶并按 0.2 抖动，`next_attempt_at` 记录下次可领取时间
+- worker 可用 `--retry-base-seconds`、`--retry-max-seconds`、`--retry-jitter` 调整退避策略
+- 超过重试上限进入 FAILED
 - 运行以非 0 退出（含硬门禁失败和 `budget_exhausted`）时任务进入 FAILED，需要人工提高预算或修复后 `replay`
-- 提交时可带 `--idempotency-key`；同一个 key 在队列中只对应一个任务，重复提交返回已有 job
+- 提交时可带 `--idempotency-key`；同一个 key + 相同 payload 返回已有 job，key 相同但 payload 不同会明确报冲突
 - FAILED 任务可用 `replay` 回到 QUEUED；`replay_count` 超过 `--max-replays` 后不再重放
 - 投递是 **at-least-once**，不是 exactly-once；重复执行通过 run id + resume + run lock 保底
 - `worker --once` 用于测试/单次执行；不传时持续轮询
@@ -702,6 +704,8 @@ mvn -q test
 - **范围审计** —— 发现分类与行号侧别、模型发现的校验与处置轨迹、报告产物。
 - **OpenAI Trace** —— span 类型识别的各种写法、token 与错误聚合、按 trace id 分组与非法输入拒绝。
 - **评测预算** —— Token/成本预扣与结算、缺失用量按预扣计费、并发预留不超卖、预算用尽后跳过用例、恢复时计入历史消耗。
+- **异步队列** —— 幂等 key + payload 冲突、失败重放上限、指数退避与抖动、租约过期回收、预算用尽任务进入 FAILED。
+- **不完整运行** —— `budget_exhausted` 阻断 `compare`，并让 `evolve` 直接 rollback。
 - **其余** —— JSON 编解码、评测指标、审核样本晋级、命令行退出码（`0` / `1` / `2`）。
 
 ## 扩展点

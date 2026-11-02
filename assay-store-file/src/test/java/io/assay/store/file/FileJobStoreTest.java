@@ -2,13 +2,18 @@ package io.assay.store.file;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.assay.runner.IdempotencyConflictException;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.runner.RetryPolicy;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -81,7 +86,7 @@ class FileJobStoreTest {
 
     @Test
     void retryableFailureRequeuesUntilMaxAttempts(@TempDir Path root) {
-        try (FileJobStore store = new FileJobStore(root)) {
+        try (FileJobStore store = new FileJobStore(root, RetryPolicy.none())) {
             Job job = store.submit(Map.of("suite", "smoke"), 2);
             assertTrue(store.claim("worker-a", Duration.ofSeconds(30)).isPresent());
             store.fail(job.id(), "worker-a", "adapter timeout");
@@ -90,6 +95,37 @@ class FileJobStoreTest {
             assertTrue(store.claim("worker-b", Duration.ofSeconds(30)).isPresent());
             store.fail(job.id(), "worker-b", "adapter timeout");
             assertEquals(JobStatus.FAILED, store.find(job.id()).orElseThrow().status());
+        }
+    }
+
+    @Test
+    void retryableFailureSchedulesABackoffBeforeTheNextClaim(@TempDir Path root) {
+        RetryPolicy policy = new RetryPolicy(Duration.ofSeconds(5), Duration.ofSeconds(5), 0);
+        try (FileJobStore store = new FileJobStore(root, policy)) {
+            Job job = store.submit(Map.of("suite", "smoke"), 2);
+            assertTrue(store.claim("worker-a", Duration.ofSeconds(30)).isPresent());
+            store.fail(job.id(), "worker-a", "adapter timeout");
+
+            Job queued = store.find(job.id()).orElseThrow();
+            assertEquals(JobStatus.QUEUED, queued.status());
+            assertNotNull(queued.nextAttemptAt());
+            assertTrue(queued.nextAttemptAt().isAfter(Instant.now()));
+            assertFalse(store.claim("worker-b", Duration.ofSeconds(30)).isPresent());
+        }
+    }
+
+    @Test
+    void idempotentSubmitRejectsADifferentPayload(@TempDir Path root) {
+        try (JobStore store = new FileJobStore(root)) {
+            Job first = store.submit("checkout-42", Map.of("suite", "smoke", "cases", "a"), 2);
+
+            IdempotencyConflictException error = assertThrows(
+                    IdempotencyConflictException.class,
+                    () -> store.submit("checkout-42", Map.of("suite", "smoke", "cases", "b"), 2));
+
+            assertEquals("checkout-42", error.idempotencyKey());
+            assertEquals(first.id(), error.existingJobId());
+            assertEquals(1, store.list(10).size());
         }
     }
 

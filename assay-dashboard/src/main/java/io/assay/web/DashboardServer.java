@@ -249,6 +249,7 @@ public final class DashboardServer implements AutoCloseable {
         row.put("created_at", job.createdAt().toString());
         row.put("started_at", job.startedAt() == null ? null : job.startedAt().toString());
         row.put("finished_at", job.finishedAt() == null ? null : job.finishedAt().toString());
+        row.put("next_attempt_at", job.nextAttemptAt() == null ? null : job.nextAttemptAt().toString());
         row.put("error", job.error());
         return row;
     }

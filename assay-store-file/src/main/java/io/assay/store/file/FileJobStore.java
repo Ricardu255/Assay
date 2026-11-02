@@ -1,9 +1,11 @@
 package io.assay.store.file;
 
 import io.assay.json.Json;
+import io.assay.runner.IdempotencyConflictException;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.runner.RetryPolicy;
 import io.assay.support.AtomicFiles;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -33,10 +35,16 @@ public final class FileJobStore implements JobStore {
 
     private final Path jobs;
     private final Path lockFile;
+    private final RetryPolicy retryPolicy;
 
     public FileJobStore(Path root) {
+        this(root, RetryPolicy.defaults());
+    }
+
+    public FileJobStore(Path root, RetryPolicy retryPolicy) {
         jobs = root.resolve("jobs");
         lockFile = root.resolve(".jobs.lock");
+        this.retryPolicy = retryPolicy == null ? RetryPolicy.defaults() : retryPolicy;
         AtomicFiles.createDirectories(jobs);
     }
 
@@ -52,6 +60,7 @@ public final class FileJobStore implements JobStore {
                 for (Path file : files()) {
                     Job existing = read(file);
                     if (key.equals(existing.idempotencyKey())) {
+                        requireSamePayload(key, existing, payload);
                         return existing;
                     }
                 }
@@ -59,7 +68,7 @@ public final class FileJobStore implements JobStore {
             Job job = new Job(
                     "job-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12),
                     JobStatus.QUEUED, payload, 0, maxAttempts, null, null, false, now, null, null, null,
-                    key, 0);
+                    key, 0, null);
             write(job);
             return job;
         });
@@ -79,12 +88,14 @@ public final class FileJobStore implements JobStore {
                 if (job.status() == JobStatus.QUEUED && job.cancelRequested()) {
                     write(cancelled(job, now));
                 } else if (job.status() == JobStatus.QUEUED) {
-                    candidates.add(job);
+                    if (ready(job, now)) {
+                        candidates.add(job);
+                    }
                 } else if (job.status() == JobStatus.RUNNING && expired(job, now)) {
                     if (job.attempts() >= job.maxAttempts()) {
                         write(failed(job, now, "lease expired after max attempts"));
                     } else {
-                        Job queued = withStatus(job, JobStatus.QUEUED, null, null, null, job.error());
+                        Job queued = withStatus(job, JobStatus.QUEUED, null, null, null, job.error(), null);
                         write(queued);
                         candidates.add(queued);
                     }
@@ -99,7 +110,7 @@ public final class FileJobStore implements JobStore {
                     next.id(), JobStatus.RUNNING, next.payload(), next.attempts() + 1, next.maxAttempts(),
                     worker, now.plus(lease), next.cancelRequested(), next.createdAt(),
                     next.startedAt() == null ? now : next.startedAt(), null, null,
-                    next.idempotencyKey(), next.replayCount());
+                    next.idempotencyKey(), next.replayCount(), null);
             write(running);
             return Optional.of(running);
         });
@@ -122,7 +133,8 @@ public final class FileJobStore implements JobStore {
             write(new Job(
                     job.id(), job.status(), job.payload(), job.attempts(), job.maxAttempts(),
                     job.leaseOwner(), Instant.now().plus(lease), job.cancelRequested(), job.createdAt(),
-                    job.startedAt(), job.finishedAt(), job.error(), job.idempotencyKey(), job.replayCount()));
+                    job.startedAt(), job.finishedAt(), job.error(), job.idempotencyKey(), job.replayCount(),
+                    job.nextAttemptAt()));
             return true;
         });
     }
@@ -143,7 +155,8 @@ public final class FileJobStore implements JobStore {
                 write(new Job(
                         job.id(), job.status(), job.payload(), job.attempts(), job.maxAttempts(),
                         job.leaseOwner(), job.leaseExpiresAt(), true, job.createdAt(),
-                        job.startedAt(), job.finishedAt(), job.error(), job.idempotencyKey(), job.replayCount()));
+                        job.startedAt(), job.finishedAt(), job.error(), job.idempotencyKey(), job.replayCount(),
+                        job.nextAttemptAt()));
                 return true;
             }
             return false;
@@ -196,10 +209,13 @@ public final class FileJobStore implements JobStore {
                 return null;
             }
             if (job.attempts() < job.maxAttempts()) {
+                Instant now = Instant.now();
+                Duration delay = retryPolicy.delayFor(job.attempts());
                 write(new Job(
                         job.id(), JobStatus.QUEUED, job.payload(), job.attempts(), job.maxAttempts(),
                         null, null, job.cancelRequested(), job.createdAt(), job.startedAt(), null, error,
-                        job.idempotencyKey(), job.replayCount()));
+                        job.idempotencyKey(), job.replayCount(),
+                        delay.isZero() ? null : now.plus(delay)));
             } else {
                 write(failed(job, Instant.now(), error));
             }
@@ -222,7 +238,7 @@ public final class FileJobStore implements JobStore {
                 write(new Job(
                         job.id(), status, job.payload(), job.attempts(), job.maxAttempts(),
                         null, null, job.cancelRequested(), job.createdAt(), job.startedAt(),
-                        Instant.now(), error, job.idempotencyKey(), job.replayCount()));
+                        Instant.now(), error, job.idempotencyKey(), job.replayCount(), null));
             }
             return null;
         });
@@ -244,7 +260,8 @@ public final class FileJobStore implements JobStore {
             }
             Job queued = new Job(
                     job.id(), JobStatus.QUEUED, job.payload(), 0, maxAttempts, null, null,
-                    false, job.createdAt(), null, null, null, job.idempotencyKey(), job.replayCount() + 1);
+                    false, job.createdAt(), null, null, null, job.idempotencyKey(), job.replayCount() + 1,
+                    null);
             write(queued);
             return Optional.of(queued);
         });
@@ -286,7 +303,8 @@ public final class FileJobStore implements JobStore {
                 instant(value.get("finished_at")),
                 nullable(value.get("error")),
                 nullable(value.get("idempotency_key")),
-                integerOrZero(value.get("replay_count")));
+                integerOrZero(value.get("replay_count")),
+                instant(value.get("next_attempt_at")));
     }
 
     private void write(Job job) throws IOException {
@@ -305,26 +323,39 @@ public final class FileJobStore implements JobStore {
         value.put("error", job.error());
         value.put("idempotency_key", job.idempotencyKey());
         value.put("replay_count", job.replayCount());
+        value.put("next_attempt_at", job.nextAttemptAt() == null ? null : job.nextAttemptAt().toString());
         AtomicFiles.writeText(path(job.id()), Json.write(value, 2) + "\n");
     }
 
-    private static Job withStatus(Job job, JobStatus status, String owner, Instant lease, Instant finished, String error) {
+    private static Job withStatus(
+            Job job, JobStatus status, String owner, Instant lease, Instant finished, String error,
+            Instant nextAttemptAt) {
         return new Job(
                 job.id(), status, job.payload(), job.attempts(), job.maxAttempts(), owner, lease,
                 job.cancelRequested(), job.createdAt(), job.startedAt(), finished, error,
-                job.idempotencyKey(), job.replayCount());
+                job.idempotencyKey(), job.replayCount(), nextAttemptAt);
     }
 
     private static Job cancelled(Job job, Instant finished) {
-        return withStatus(job, JobStatus.CANCELLED, null, null, finished, "cancelled by user");
+        return withStatus(job, JobStatus.CANCELLED, null, null, finished, "cancelled by user", null);
     }
 
     private static Job failed(Job job, Instant finished, String error) {
-        return withStatus(job, JobStatus.FAILED, null, null, finished, error);
+        return withStatus(job, JobStatus.FAILED, null, null, finished, error, null);
+    }
+
+    private static boolean ready(Job job, Instant now) {
+        return job.nextAttemptAt() == null || !job.nextAttemptAt().isAfter(now);
     }
 
     private static boolean expired(Job job, Instant now) {
         return job.leaseExpiresAt() != null && job.leaseExpiresAt().isBefore(now);
+    }
+
+    private static void requireSamePayload(String key, Job existing, Map<String, Object> payload) {
+        if (!Json.canonical(existing.payload()).equals(Json.canonical(payload))) {
+            throw new IdempotencyConflictException(key, existing.id());
+        }
     }
 
     private static int integer(Object value) {

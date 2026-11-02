@@ -12,11 +12,12 @@ import java.util.Optional;
  * two workers from claiming one job, while the run lock prevents two processes from writing the same
  * evaluation run. Delivery is at-least-once; a completed run must be safe to resume.
  *
- * <p>Submissions may carry an idempotency key. Re-submitting the same key returns the existing job
- * instead of enqueueing a second evaluation, which prevents duplicate model calls after a retried
- * webhook or a double-clicked submit button. A job that exhausts its attempts remains terminal
- * ({@link JobStatus#FAILED}); {@link #replay(String, int, int)} moves it back to the queue while
- * preserving the original failure and counting the replay.
+ * <p>Submissions may carry an idempotency key. Re-submitting the same key with the same payload
+ * returns the existing job instead of enqueueing a second evaluation; reusing the key with a
+ * different payload raises {@link IdempotencyConflictException}. A retryable failure is requeued
+ * after {@link RetryPolicy} backoff, recorded in {@link Job#nextAttemptAt()}. A job that exhausts its
+ * attempts remains terminal ({@link JobStatus#FAILED}); {@link #replay(String, int, int)} moves it
+ * back to the queue while preserving the original failure and counting the replay.
  */
 public interface JobStore extends AutoCloseable {
 
@@ -28,6 +29,8 @@ public interface JobStore extends AutoCloseable {
     /**
      * Submit a job, or return the existing job for the same non-blank idempotency key.
      * A null or blank key keeps the original non-idempotent behavior.
+     *
+     * @throws IdempotencyConflictException when the key already belongs to a different payload
      */
     Job submit(String idempotencyKey, Map<String, Object> payload, int maxAttempts);
 

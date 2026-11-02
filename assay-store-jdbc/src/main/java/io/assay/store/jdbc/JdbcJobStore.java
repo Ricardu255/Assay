@@ -1,9 +1,11 @@
 package io.assay.store.jdbc;
 
 import io.assay.json.Json;
+import io.assay.runner.IdempotencyConflictException;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.runner.RetryPolicy;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -31,17 +33,27 @@ public final class JdbcJobStore implements JobStore {
     }
 
     private final Connections connections;
+    private final RetryPolicy retryPolicy;
 
     public JdbcJobStore(DataSource dataSource) {
-        this(dataSource::getConnection);
+        this(dataSource::getConnection, RetryPolicy.defaults());
     }
 
-    private JdbcJobStore(Connections connections) {
+    public JdbcJobStore(DataSource dataSource, RetryPolicy retryPolicy) {
+        this(dataSource::getConnection, retryPolicy);
+    }
+
+    private JdbcJobStore(Connections connections, RetryPolicy retryPolicy) {
         this.connections = connections;
+        this.retryPolicy = retryPolicy == null ? RetryPolicy.defaults() : retryPolicy;
         ensureSchema();
     }
 
     public static JdbcJobStore fromUrl(String url) {
+        return fromUrl(url, RetryPolicy.defaults());
+    }
+
+    public static JdbcJobStore fromUrl(String url, RetryPolicy retryPolicy) {
         if (url == null || !url.startsWith("jdbc:")) {
             throw new IllegalArgumentException("job store requires a jdbc: URL");
         }
@@ -55,7 +67,7 @@ public final class JdbcJobStore implements JobStore {
             properties.setProperty("password", password);
         }
         String normalized = normalizeUrl(url);
-        return new JdbcJobStore(() -> DriverManager.getConnection(normalized, properties));
+        return new JdbcJobStore(() -> DriverManager.getConnection(normalized, properties), retryPolicy);
     }
 
     private static String normalizeUrl(String url) {
@@ -83,12 +95,14 @@ public final class JdbcJobStore implements JobStore {
                       finished_at timestamp,
                       error text,
                       idempotency_key varchar(128),
-                      replay_count int not null default 0
+                      replay_count int not null default 0,
+                      next_attempt_at timestamp
                     )
                     """);
-            // Existing local stores predate idempotency/replay; add the columns without a reset.
+            // Existing local stores predate idempotency/replay/backoff; add columns without a reset.
             statement.execute("alter table assay_job add column if not exists idempotency_key varchar(128)");
             statement.execute("alter table assay_job add column if not exists replay_count int not null default 0");
+            statement.execute("alter table assay_job add column if not exists next_attempt_at timestamp");
             statement.execute("create unique index if not exists assay_job_idempotency on assay_job(idempotency_key)");
         } catch (SQLException error) {
             throw new IllegalStateException("cannot initialize job store", error);
@@ -104,6 +118,7 @@ public final class JdbcJobStore implements JobStore {
         if (key != null) {
             Optional<Job> existing = findByIdempotencyKey(key);
             if (existing.isPresent()) {
+                requireSamePayload(key, existing.get(), payload);
                 return existing.get();
             }
         }
@@ -122,11 +137,12 @@ public final class JdbcJobStore implements JobStore {
             insert.setString(5, key);
             insert.executeUpdate();
             return new Job(id, JobStatus.QUEUED, payload, 0, maxAttempts, null, null, false, now, null, null, null,
-                    key, 0);
+                    key, 0, null);
         } catch (SQLException error) {
             if (key != null) {
                 Optional<Job> existing = findByIdempotencyKey(key);
                 if (existing.isPresent()) {
+                    requireSamePayload(key, existing.get(), payload);
                     return existing.get();
                 }
             }
@@ -165,34 +181,38 @@ public final class JdbcJobStore implements JobStore {
                           idempotency_key, replay_count
                         from assay_job
                         where status = 'QUEUED' and cancel_requested = false
+                          and (next_attempt_at is null or next_attempt_at <= ?)
                         order by created_at
                         limit 1 for update
-                        """); ResultSet rows = select.executeQuery()) {
-                    if (!rows.next()) {
+                        """)) {
+                    select.setTimestamp(1, Timestamp.from(now));
+                    try (ResultSet rows = select.executeQuery()) {
+                        if (!rows.next()) {
+                            connection.commit();
+                            return Optional.empty();
+                        }
+                        jobId = rows.getString("job_id");
+                        int attempts = rows.getInt("attempts") + 1;
+                        int max = rows.getInt("max_attempts");
+                        Map<String, Object> payload = Json.parseObject(rows.getString("payload_json"));
+                        try (PreparedStatement update = connection.prepareStatement("""
+                                update assay_job
+                                set status = 'RUNNING', attempts = ?, lease_owner = ?, lease_expires_at = ?,
+                                    started_at = coalesce(started_at, ?), next_attempt_at = null, error = null
+                                where job_id = ?
+                                """)) {
+                            update.setInt(1, attempts);
+                            update.setString(2, worker);
+                            update.setTimestamp(3, Timestamp.from(expires));
+                            update.setTimestamp(4, Timestamp.from(now));
+                            update.setString(5, jobId);
+                            update.executeUpdate();
+                        }
                         connection.commit();
-                        return Optional.empty();
+                        return Optional.of(new Job(
+                                jobId, JobStatus.RUNNING, payload, attempts, max, worker, expires, false, now, now,
+                                null, null, rows.getString("idempotency_key"), rows.getInt("replay_count"), null));
                     }
-                    jobId = rows.getString("job_id");
-                    int attempts = rows.getInt("attempts") + 1;
-                    int max = rows.getInt("max_attempts");
-                    Map<String, Object> payload = Json.parseObject(rows.getString("payload_json"));
-                    try (PreparedStatement update = connection.prepareStatement("""
-                            update assay_job
-                            set status = 'RUNNING', attempts = ?, lease_owner = ?, lease_expires_at = ?,
-                                started_at = coalesce(started_at, ?), error = null
-                            where job_id = ?
-                            """)) {
-                        update.setInt(1, attempts);
-                        update.setString(2, worker);
-                        update.setTimestamp(3, Timestamp.from(expires));
-                        update.setTimestamp(4, Timestamp.from(now));
-                        update.setString(5, jobId);
-                        update.executeUpdate();
-                    }
-                    connection.commit();
-                    return Optional.of(new Job(
-                            jobId, JobStatus.RUNNING, payload, attempts, max, worker, expires, false, now, now, null, null,
-                            rows.getString("idempotency_key"), rows.getInt("replay_count")));
                 }
             } catch (SQLException | RuntimeException error) {
                 rollback(connection);
@@ -207,7 +227,7 @@ public final class JdbcJobStore implements JobStore {
         try (PreparedStatement failed = connection.prepareStatement("""
                 update assay_job
                 set status = 'FAILED', error = 'lease expired after max attempts',
-                    finished_at = ?, lease_owner = null, lease_expires_at = null
+                    finished_at = ?, lease_owner = null, lease_expires_at = null, next_attempt_at = null
                 where status = 'RUNNING' and lease_expires_at < ? and attempts >= max_attempts
                 """)) {
             failed.setTimestamp(1, Timestamp.from(now));
@@ -216,7 +236,7 @@ public final class JdbcJobStore implements JobStore {
         }
         try (PreparedStatement requeue = connection.prepareStatement("""
                 update assay_job
-                set status = 'QUEUED', lease_owner = null, lease_expires_at = null
+                set status = 'QUEUED', lease_owner = null, lease_expires_at = null, next_attempt_at = null
                 where status = 'RUNNING' and lease_expires_at < ? and attempts < max_attempts
                 """)) {
             requeue.setTimestamp(1, Timestamp.from(now));
@@ -359,11 +379,14 @@ public final class JdbcJobStore implements JobStore {
                 }
                 Instant now = Instant.now();
                 try (PreparedStatement update = connection.prepareStatement(attempts < max
-                        ? "update assay_job set status = 'QUEUED', lease_owner = null, lease_expires_at = null, error = ? where job_id = ?"
-                        : "update assay_job set status = 'FAILED', finished_at = ?, lease_owner = null, lease_expires_at = null, error = ? where job_id = ?")) {
+                        ? "update assay_job set status = 'QUEUED', lease_owner = null, lease_expires_at = null, next_attempt_at = ?, error = ? where job_id = ?"
+                        : "update assay_job set status = 'FAILED', finished_at = ?, lease_owner = null, lease_expires_at = null, next_attempt_at = null, error = ? where job_id = ?")) {
                     if (attempts < max) {
-                        update.setString(1, error);
-                        update.setString(2, jobId);
+                        Duration delay = retryPolicy.delayFor(attempts);
+                        update.setTimestamp(
+                                1, delay.isZero() ? null : Timestamp.from(now.plus(delay)));
+                        update.setString(2, error);
+                        update.setString(3, jobId);
                     } else {
                         update.setTimestamp(1, Timestamp.from(now));
                         update.setString(2, error);
@@ -393,7 +416,8 @@ public final class JdbcJobStore implements JobStore {
         try (Connection connection = connections.open();
                 PreparedStatement update = connection.prepareStatement("""
                         update assay_job
-                        set status = ?, finished_at = ?, lease_owner = null, lease_expires_at = null, error = ?
+                        set status = ?, finished_at = ?, lease_owner = null, lease_expires_at = null,
+                            next_attempt_at = null, error = ?
                         where job_id = ? and status = 'RUNNING' and lease_owner = ?
                         """)) {
             update.setString(1, status.name());
@@ -422,7 +446,8 @@ public final class JdbcJobStore implements JobStore {
                 instant(rows.getTimestamp("finished_at")),
                 rows.getString("error"),
                 rows.getString("idempotency_key"),
-                rows.getInt("replay_count"));
+                rows.getInt("replay_count"),
+                instant(rows.getTimestamp("next_attempt_at")));
     }
 
     private static Instant instant(Timestamp value) {
@@ -434,6 +459,12 @@ public final class JdbcJobStore implements JobStore {
             throw new IllegalArgumentException(field + " must be non-empty");
         }
         return value.trim();
+    }
+
+    private static void requireSamePayload(String key, Job existing, Map<String, Object> payload) {
+        if (!Json.canonical(existing.payload()).equals(Json.canonical(payload))) {
+            throw new IdempotencyConflictException(key, existing.id());
+        }
     }
 
     private static void rollback(Connection connection) {
@@ -474,7 +505,7 @@ public final class JdbcJobStore implements JobStore {
                         update assay_job
                         set status = 'QUEUED', attempts = 0, max_attempts = ?,
                             replay_count = replay_count + 1, lease_owner = null, lease_expires_at = null,
-                            started_at = null, finished_at = null, error = null
+                            started_at = null, finished_at = null, next_attempt_at = null, error = null
                         where job_id = ? and status = 'FAILED'
                         """)) {
                     update.setInt(1, maxAttempts);

@@ -2,12 +2,17 @@ package io.assay.store.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.assay.runner.IdempotencyConflictException;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.runner.RetryPolicy;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -91,8 +96,41 @@ class JdbcJobStoreTest {
         }
     }
 
+    @Test
+    void retryableFailureSchedulesABackoffBeforeTheNextClaim() {
+        RetryPolicy policy = new RetryPolicy(Duration.ofSeconds(5), Duration.ofSeconds(5), 0);
+        try (JdbcJobStore store = JdbcJobStore.fromUrl(
+                "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", policy)) {
+            Job job = store.submit(Map.of("suite", "smoke"), 2);
+            assertTrue(store.claim("worker-a", Duration.ofSeconds(30)).isPresent());
+            store.fail(job.id(), "worker-a", "adapter timeout");
+
+            Job queued = store.find(job.id()).orElseThrow();
+            assertEquals(JobStatus.QUEUED, queued.status());
+            assertNotNull(queued.nextAttemptAt());
+            assertTrue(queued.nextAttemptAt().isAfter(Instant.now()));
+            assertFalse(store.claim("worker-b", Duration.ofSeconds(30)).isPresent());
+        }
+    }
+
+    @Test
+    void idempotentSubmitRejectsADifferentPayload() {
+        try (JobStore store = store()) {
+            Job first = store.submit("checkout-42", Map.of("suite", "smoke", "cases", "a"), 2);
+
+            IdempotencyConflictException error = assertThrows(
+                    IdempotencyConflictException.class,
+                    () -> store.submit("checkout-42", Map.of("suite", "smoke", "cases", "b"), 2));
+
+            assertEquals("checkout-42", error.idempotencyKey());
+            assertEquals(first.id(), error.existingJobId());
+            assertEquals(1, store.list(10).size());
+        }
+    }
+
     private static JdbcJobStore store() {
-        return JdbcJobStore.fromUrl("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");
+        return JdbcJobStore.fromUrl(
+                "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", RetryPolicy.none());
     }
 
     @Test

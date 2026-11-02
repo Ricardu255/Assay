@@ -190,8 +190,39 @@ public record CompareGate(
             Map<String, Object> candidateMetrics,
             Map<String, Object> transitions,
             Map<String, Object> estimatedEfficiency) {
+        return evaluate(baselineMetrics, candidateMetrics, transitions, estimatedEfficiency, false, false);
+    }
+
+    /**
+     * Evaluates the candidate and refuses to treat an incomplete run as a clean baseline or result.
+     *
+     * @param baselineIncomplete whether the baseline stopped before all cases ran
+     * @param candidateIncomplete whether the candidate stopped before all cases ran
+     */
+    public GateOutcome evaluate(
+            Map<String, Object> baselineMetrics,
+            Map<String, Object> candidateMetrics,
+            Map<String, Object> transitions,
+            Map<String, Object> estimatedEfficiency,
+            boolean baselineIncomplete,
+            boolean candidateIncomplete) {
         List<GateViolation> violations = new ArrayList<>();
         Map<String, Object> estimated = estimatedEfficiency == null ? Map.of() : estimatedEfficiency;
+
+        if (baselineIncomplete) {
+            violations.add(block(
+                    "run_completeness",
+                    "budget_exhausted",
+                    "complete",
+                    "Baseline run did not execute every case; comparison is unsafe."));
+        }
+        if (candidateIncomplete) {
+            violations.add(block(
+                    "run_completeness",
+                    "budget_exhausted",
+                    "complete",
+                    "Candidate run did not execute every case; comparison is unsafe."));
+        }
 
         int caseCount = intValue(candidateMetrics.get("case_count"));
         if (caseCount < minimumSamples) {

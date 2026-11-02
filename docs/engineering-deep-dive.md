@@ -217,8 +217,16 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 3. Trace 返回后按 `total_tokens` / `cost_usd` 结算；缺失时不记 0，而是按预扣值计费并标记 `unreported_*_calls`。
 4. 被预算挡下的用例不写入硬失败，单独记录为 `skipped_case_count`；运行状态为 `budget_exhausted`，退出码非 0。
 5. `--resume` 读取已落盘结果并计入同一预算，避免恢复后重新获得全额。
+6. 不完整运行不能进入发布判断：`compare` 以 `run_completeness` 阻断，`evolve` 直接 rollback。
 
 预扣是估算，实际用量仍可能高于预留并产生 `overrun`。因此预算的定位是控制实验规模，而不是替代供应商账单或财务对账。`--use-llm` 的评测复核调用暂不纳入这条链路。
+
+### 4.7 队列幂等与重试
+
+- 幂等键绑定 payload 的 canonical JSON，而不是只绑定 key；同一 key 配不同 payload 直接报冲突，避免旧任务静默吞掉新请求。
+- 可重试失败写入 `next_attempt_at`，默认按 1s 起步、16s 封顶、0.2 对称抖动退避；worker 只领取已到期任务。
+- 租约过期回收后立即允许重领：租约本身已经提供了等待时间，再叠加一层退避会拖慢恢复。
+- 超过 `max_attempts` 进入 FAILED；`replay` 显式重置 attempts、退避时间和失败原因，并受 `max_replays` 约束。
 
 ---
 

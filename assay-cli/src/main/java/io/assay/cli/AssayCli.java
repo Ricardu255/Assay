@@ -27,6 +27,7 @@ import io.assay.review.ReviewSamples;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.runner.RetryPolicy;
 import io.assay.selection.TestSelectionService;
 import io.assay.store.Results;
 import io.assay.store.file.FileJobStore;
@@ -151,6 +152,9 @@ public final class AssayCli {
                     .option("worker-id", CommandLine.Kind.STRING, null)
                     .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
                     .option("poll", CommandLine.Kind.DECIMAL, "2")
+                    .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                    .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                    .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
                     .flag("worker")
                     .flag("open-browser");
             case "quickstart" -> new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation")
@@ -177,6 +181,9 @@ public final class AssayCli {
                     .option("worker-id", CommandLine.Kind.STRING, null)
                     .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
                     .option("poll", CommandLine.Kind.DECIMAL, "2")
+                    .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                    .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                    .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
                     .flag("once");
             case "jobs" -> new CommandLine.Spec("jobs", "list queued evaluation jobs")
                     .option("store", CommandLine.Kind.STRING, ".assay/store")
@@ -413,6 +420,13 @@ public final class AssayCli {
 
     private static int submit(CommandLine.Namespace args) {
         try (JobStore store = jobStore(args)) {
+            String idempotencyKey = args.string("idempotency-key");
+            if (idempotencyKey != null) {
+                idempotencyKey = idempotencyKey.trim();
+                if (idempotencyKey.isEmpty()) {
+                    idempotencyKey = null;
+                }
+            }
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("adapter", args.string("adapter"));
             if (args.string("adapter-class") != null) {
@@ -441,10 +455,12 @@ public final class AssayCli {
             }
             String runId = args.string("run-id");
             if (runId == null || runId.isBlank()) {
-                runId = "queued-" + shortId();
+                // A retried idempotent submit must produce the same payload; a random run id would
+                // make the same request look like a conflict.
+                runId = idempotencyKey == null ? "queued-" + shortId() : "queued-" + stableId(idempotencyKey);
             }
             payload.put("run_id", runId);
-            Job job = store.submit(args.string("idempotency-key"), payload, args.integer("max-attempts"));
+            Job job = store.submit(idempotencyKey, payload, args.integer("max-attempts"));
             Map<String, Object> output = new LinkedHashMap<>();
             output.put("job_id", job.id());
             output.put("run_id", job.payload().getOrDefault("run_id", runId));
@@ -641,10 +657,24 @@ public final class AssayCli {
         if (reference == null || reference.isBlank()) {
             throw new CommandLine.UsageException("queue commands require --store", 2, false);
         }
+        RetryPolicy retryPolicy = retryPolicy(args);
         if (reference.startsWith("jdbc:")) {
-            return JdbcJobStore.fromUrl(reference);
+            return JdbcJobStore.fromUrl(reference, retryPolicy);
         }
-        return new FileJobStore(Path.of(reference));
+        return new FileJobStore(Path.of(reference), retryPolicy);
+    }
+
+    private static RetryPolicy retryPolicy(CommandLine.Namespace args) {
+        Double base = args.decimalOrNull("retry-base-seconds");
+        Double max = args.decimalOrNull("retry-max-seconds");
+        Double jitter = args.decimalOrNull("retry-jitter");
+        if (base == null && max == null && jitter == null) {
+            return RetryPolicy.defaults();
+        }
+        return new RetryPolicy(
+                Duration.ofMillis(Math.round((base == null ? 1 : base) * 1000)),
+                Duration.ofMillis(Math.round((max == null ? 16 : max) * 1000)),
+                jitter == null ? 0.2 : jitter);
     }
 
     private static Map<String, Object> jobMap(Job job) {
@@ -662,6 +692,7 @@ public final class AssayCli {
         row.put("error", job.error());
         row.put("idempotency_key", job.idempotencyKey());
         row.put("replay_count", job.replayCount());
+        row.put("next_attempt_at", job.nextAttemptAt() == null ? null : job.nextAttemptAt().toString());
         return row;
     }
 
@@ -1326,6 +1357,14 @@ public final class AssayCli {
 
     private static String shortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    }
+
+    /** Stable 12-hex-character id derived from an idempotency key, not from wall-clock state. */
+    private static String stableId(String key) {
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8))
+                .toString()
+                .replace("-", "")
+                .substring(0, 12);
     }
 
     private static int intValue(Object value) {

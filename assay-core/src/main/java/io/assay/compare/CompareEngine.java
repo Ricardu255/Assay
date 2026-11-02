@@ -55,8 +55,13 @@ public final class CompareEngine {
         Map<String, Object> baselineEstimated = CostEstimator.estimate(baselineResults);
 
         Map<String, Object> deltas = deltas(baselineMetrics, candidateMetrics);
-        CompareGate.GateOutcome outcome =
-                effectiveGate.evaluate(baselineMetrics, candidateMetrics, transitions, estimated);
+        CompareGate.GateOutcome outcome = effectiveGate.evaluate(
+                baselineMetrics,
+                candidateMetrics,
+                transitions,
+                estimated,
+                incomplete(baselineSummary),
+                incomplete(candidateSummary));
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("dataset", dataset(baselineSummary, candidateSummary));
@@ -282,8 +287,20 @@ public final class CompareEngine {
         normalized.put("case_count", results.size());
         normalized.put("hard_failures", hardFailures);
         normalized.put("soft_warnings", softWarnings);
-        normalized.put("status", hardFailures == 0 ? "passed" : "failed");
+        normalized.put(
+                "status",
+                "budget_exhausted".equals(summary.get("status"))
+                        ? "budget_exhausted"
+                        : hardFailures == 0 ? "passed" : "failed");
         return normalized;
+    }
+
+    private static boolean incomplete(Map<String, Object> summary) {
+        if ("budget_exhausted".equals(summary.get("status"))) {
+            return true;
+        }
+        Object skipped = summary.get("skipped_case_count");
+        return skipped instanceof Number number && number.intValue() > 0;
     }
 
     private static Double number(Object value) {

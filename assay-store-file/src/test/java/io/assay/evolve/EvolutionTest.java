@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.engine.EvaluationEngine;
+import io.assay.engine.EvaluationListener;
 import io.assay.model.EvalCase;
+import io.assay.model.EvaluationBudget;
 import io.assay.model.EvolutionCandidate;
 import io.assay.model.EvolutionPolicy;
 import io.assay.model.MetricObjective;
@@ -225,6 +227,31 @@ class EvolutionTest {
         String report = AtomicFiles.readText(root.resolve("out/evolution_report.md"));
         assertTrue(report.contains("missing"));
         assertTrue(report.contains("0/1"));
+    }
+
+    @Test
+    void budgetExhaustedRunsCannotProduceAnAcceptDecision(@TempDir Path root) {
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            EvaluationEngine baseline = new EvaluationEngine(adapter("1", false, false), store);
+            EvaluationEngine candidate = new EvaluationEngine(
+                    adapter("2", true, false),
+                    store,
+                    null,
+                    1,
+                    0,
+                    30,
+                    false,
+                    null,
+                    EvaluationListener.NOOP,
+                    new EvaluationBudget(1, null, 0, 0));
+            result = new EvolutionEngine(baseline, candidate, qualityPolicy())
+                    .run(change(), evolutionCases(), "online", "budget-rollback", false);
+        }
+
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons")).stream()
+                .anyMatch(reason -> reason.contains("candidate run is incomplete")));
     }
 
     @Test

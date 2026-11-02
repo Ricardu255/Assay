@@ -85,6 +85,7 @@ public final class EvolutionEngine {
         Map<String, Object> baselineRuns = new LinkedHashMap<>();
         Map<String, Object> candidateRuns = new LinkedHashMap<>();
         Map<String, Object> comparisons = new LinkedHashMap<>();
+        List<String> incompleteRuns = new ArrayList<>();
 
         for (String role : ROLES) {
             List<EvalCase> cases = datasets.get(role);
@@ -92,11 +93,22 @@ public final class EvolutionEngine {
                     baseline.runSuite(cases, role, source, effectiveId + "-" + role + "-baseline", resume);
             Map<String, Object> candidateSummary =
                     candidate.runSuite(cases, role, source, effectiveId + "-" + role + "-candidate", resume);
-            Map<String, Object> baselineMetrics = summarizeMetrics(baselineSummary, policy.objectives());
-            Map<String, Object> candidateMetrics = summarizeMetrics(candidateSummary, policy.objectives());
             baselineRuns.put(role, baselineSummary);
             candidateRuns.put(role, candidateSummary);
+            if (incomplete(baselineSummary)) {
+                incompleteRuns.add(role + ": baseline run is incomplete (budget exhausted)");
+            }
+            if (incomplete(candidateSummary)) {
+                incompleteRuns.add(role + ": candidate run is incomplete (budget exhausted)");
+            }
+            if (incomplete(baselineSummary) || incomplete(candidateSummary)) {
+                // A partial run has no comparable case set; comparing it would turn missing cases into
+                // regressions or improvements. Keep the run artifacts and stop at a rollback.
+                continue;
+            }
 
+            Map<String, Object> baselineMetrics = summarizeMetrics(baselineSummary, policy.objectives());
+            Map<String, Object> candidateMetrics = summarizeMetrics(candidateSummary, policy.objectives());
             Map<String, Object> comparison = new LinkedHashMap<>();
             comparison.put("baseline", baselineMetrics);
             comparison.put("candidate", candidateMetrics);
@@ -127,7 +139,9 @@ public final class EvolutionEngine {
             comparisons.put(role, comparison);
         }
 
-        Decision decision = decide(change, baselineRuns, candidateRuns, comparisons);
+        Decision decision = incompleteRuns.isEmpty()
+                ? decide(change, baselineRuns, candidateRuns, comparisons)
+                : new Decision("rollback", incompleteRuns);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("experiment_id", effectiveId);
         result.put("candidate", change.toJson());
@@ -158,6 +172,12 @@ public final class EvolutionEngine {
             if (!matchesTarget(asMap(baselineRuns.get(role)), change, change.baselineVersion())
                     || !matchesTarget(asMap(candidateRuns.get(role)), change, change.candidateVersion())) {
                 rollback.add(role + ": target identity or version does not match candidate manifest");
+            }
+            if (incomplete(asMap(baselineRuns.get(role)))) {
+                rollback.add(role + ": baseline run is incomplete (budget exhausted)");
+            }
+            if (incomplete(asMap(candidateRuns.get(role)))) {
+                rollback.add(role + ": candidate run is incomplete (budget exhausted)");
             }
         }
 
@@ -745,6 +765,11 @@ public final class EvolutionEngine {
 
     private static int intValue(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static boolean incomplete(Map<String, Object> summary) {
+        return "budget_exhausted".equals(summary.get("status"))
+                || intValue(summary.get("skipped_case_count")) > 0;
     }
 
     @SuppressWarnings("unchecked")
