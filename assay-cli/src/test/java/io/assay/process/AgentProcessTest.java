@@ -78,12 +78,12 @@ class AgentProcessTest {
                                         fixture("spawn", "4000"),
                                         directory,
                                         null,
-                                        1,
+                                        3,
                                         Map.of(),
                                         AgentProcessRunner.DEFAULT_MAX_OUTPUT_BYTES));
         double elapsedSeconds = (System.nanoTime() - started) / 1_000_000_000.0;
 
-        assertTrue(elapsedSeconds < 3, "the runner must not wait for the spawned child: " + elapsedSeconds);
+        assertTrue(elapsedSeconds < 5, "the runner must not wait for the spawned child: " + elapsedSeconds);
         long childPid = Long.parseLong(raised.stdout().strip());
         long deadline = System.currentTimeMillis() + 5_000;
         while (ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false)

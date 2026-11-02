@@ -95,6 +95,51 @@ class AssayCliTest {
     }
 
     @Test
+    void submitIsIdempotentWithTheSameKey(@TempDir Path root) {
+        Path cases = writeCases(root, "queue.jsonl", List.of(echoCase("Q1", "hello", "ECHO", "hello")));
+        String storeUrl = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        String[] args = {
+            "submit",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "queue",
+            "--cases", cases.toString(),
+            "--store", storeUrl,
+            "--output", root.resolve("runs").toString(),
+            "--idempotency-key", "checkout-42"
+        };
+        assertEquals(0, AssayCli.run(args));
+        assertEquals(0, AssayCli.run(args));
+
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            assertEquals(1, jobs.list(10).size());
+            assertEquals("checkout-42", jobs.list(1).get(0).idempotencyKey());
+        }
+    }
+
+    @Test
+    void replayMovesAFailedJobBackToTheQueue(@TempDir Path root) {
+        String storeUrl = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        String jobId;
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            Job job = jobs.submit(Map.of("suite", "queue"), 1);
+            jobId = job.id();
+            assertTrue(jobs.claim("worker-a", java.time.Duration.ofSeconds(30)).isPresent());
+            jobs.fail(jobId, "worker-a", "adapter timeout");
+            assertEquals(JobStatus.FAILED, jobs.find(jobId).orElseThrow().status());
+        }
+
+        assertEquals(0, AssayCli.run(new String[] {
+            "replay", "--store", storeUrl, "--job-id", jobId, "--max-attempts", "1", "--max-replays", "2"
+        }));
+
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            Job replayed = jobs.find(jobId).orElseThrow();
+            assertEquals(JobStatus.QUEUED, replayed.status());
+            assertEquals(1, replayed.replayCount());
+        }
+    }
+
+    @Test
     void runWritesArtifactsAndReturnsZeroWhenGatesPass(@TempDir Path root) {
         Path cases = writeCases(root, "smoke.jsonl", List.of(echoCase("C1", "hello agent", "ECHO", "hello")));
         Path store = root.resolve("store");
@@ -234,6 +279,72 @@ class AssayCliTest {
     }
 
     @Test
+    void queuedJobCarriesItsBudgetAndStopsWhenExhausted(@TempDir Path root) {
+        Path cases = writeCases(
+                root,
+                "budget-queue.jsonl",
+                List.of(echoCase("C1", "x", "ECHO", "x"), echoCase("C2", "x", "ECHO", "x")));
+        String storeUrl = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        try (JdbcJobStore jobs = JdbcJobStore.fromUrl(storeUrl)) {
+            assertEquals(0, AssayCli.run(new String[] {
+                "submit",
+                "--adapter", "io.assay.examples.EchoAdapter",
+                "--suite", "budget-queue",
+                "--cases", cases.toString(),
+                "--store", storeUrl,
+                "--output", root.resolve("runs").toString(),
+                "--max-total-tokens", "6",
+                "--reserve-output-tokens", "0"
+            }));
+            Job queued = jobs.list(1).get(0);
+            assertEquals(6L, queued.payload().get("max_total_tokens"));
+            assertEquals(0L, queued.payload().get("reserve_output_tokens"));
+
+            assertEquals(0, AssayCli.run(new String[] {
+                "worker", "--store", storeUrl, "--once", "--lease-seconds", "10"
+            }));
+
+            Job finished = jobs.find(queued.id()).orElseThrow();
+            assertEquals(JobStatus.FAILED, finished.status());
+            Map<String, Object> results = Json.parseObject(AtomicFiles.readText(
+                    root.resolve("runs").resolve(queued.payload().get("run_id").toString()).resolve("results.json")));
+            assertEquals("budget_exhausted", results.get("status"));
+            assertEquals(1L, results.get("skipped_case_count"));
+        }
+    }
+
+    @Test
+    void runStopsAtTheTokenBudgetAndExitsOne(@TempDir Path root) {
+        Path cases = writeCases(
+                root,
+                "budget.jsonl",
+                List.of(echoCase("C1", "x", "ECHO", "x"), echoCase("C2", "x", "ECHO", "x"),
+                        echoCase("C3", "x", "ECHO", "x")));
+        Path output = root.resolve("runs");
+
+        int code = AssayCli.run(new String[] {
+            "run",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "budget",
+            "--cases", cases.toString(),
+            "--store", root.resolve("store").toString(),
+            "--output", output.toString(),
+            "--max-total-tokens", "6",
+            "--reserve-output-tokens", "0"
+        });
+
+        assertEquals(1, code);
+        Path runDir = output.resolve(readOnlyRunId(output));
+        Map<String, Object> results = Json.parseObject(AtomicFiles.readText(runDir.resolve("results.json")));
+        assertEquals("budget_exhausted", results.get("status"));
+        assertEquals(1L, results.get("case_count"));
+        assertEquals(2L, results.get("skipped_case_count"));
+        Map<String, Object> budget = asMap(results.get("budget"));
+        assertEquals(4L, budget.get("spent_tokens"));
+        assertTrue(AtomicFiles.readText(runDir.resolve("report.md")).contains("Budget tokens"));
+    }
+
+    @Test
     void usageErrorsExitWithTwo(@TempDir Path root) {
         assertEquals(2, AssayCli.run(new String[] {}));
         assertEquals(2, AssayCli.run(new String[] {"no-such-command"}));
@@ -267,6 +378,11 @@ class AssayCliTest {
                         });
 
         assertEquals(1, code);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Map.of();
     }
 
     private static String readOnlyRunId(Path runs) {

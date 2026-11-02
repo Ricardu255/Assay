@@ -29,6 +29,7 @@ public final class OtelEvaluationListener implements EvaluationListener {
     private static final AttributeKey<String> SUITE = AttributeKey.stringKey("assay.suite");
     private static final AttributeKey<String> SOURCE = AttributeKey.stringKey("assay.source");
     private static final AttributeKey<String> STATUS = AttributeKey.stringKey("assay.status");
+    private static final AttributeKey<String> SKIP_REASON = AttributeKey.stringKey("assay.skip_reason");
     private static final AttributeKey<String> STAGE = AttributeKey.stringKey("assay.stage");
     private static final AttributeKey<String> ERROR = AttributeKey.stringKey("assay.error");
     private static final AttributeKey<Boolean> HARD_PASS = AttributeKey.booleanKey("assay.hard_pass");
@@ -83,6 +84,19 @@ public final class OtelEvaluationListener implements EvaluationListener {
         span.setAttribute(SOFT_WARNINGS, (long) result.softWarningCount());
         span.setAttribute(STATUS, result.hardPass() ? "passed" : "failed");
         span.setStatus(result.hardPass() ? StatusCode.OK : StatusCode.ERROR);
+        span.end();
+    }
+
+    @Override
+    public void onCaseSkipped(String runId, EvalCase evalCase, String reason) {
+        closeStages();
+        Span span = caseSpans.get();
+        caseSpans.remove();
+        if (span == null) {
+            return;
+        }
+        span.setAttribute(STATUS, "budget_exhausted");
+        span.setAttribute(SKIP_REASON, reason);
         span.end();
     }
 

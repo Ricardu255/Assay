@@ -38,10 +38,18 @@ public final class MicrometerEvaluationListener implements EvaluationListener {
 
     @Override
     public void onCaseFinished(CaseResult result) {
+        recordCase(result.evalCase(), result.hardPass() ? "passed" : "failed");
+    }
+
+    @Override
+    public void onCaseSkipped(String runId, EvalCase evalCase, String reason) {
+        recordCase(evalCase, "budget_exhausted");
+    }
+
+    private void recordCase(EvalCase evalCase, String status) {
         Long started = caseStarts.get();
         caseStarts.remove();
-        String status = result.hardPass() ? "passed" : "failed";
-        String suite = tag(result.evalCase().suite());
+        String suite = tag(evalCase.suite());
         registry.counter("assay.cases", "suite", suite, "status", status).increment();
         if (started != null) {
             registry.timer("assay.case.duration", "suite", suite, "status", status)

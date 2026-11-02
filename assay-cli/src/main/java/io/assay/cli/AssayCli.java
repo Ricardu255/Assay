@@ -9,12 +9,14 @@ import io.assay.diff.DiffAnalysis;
 import io.assay.diff.DiffSnapshot;
 import io.assay.engine.CaseLoader;
 import io.assay.engine.EvaluationEngine;
+import io.assay.engine.EvaluationListener;
 import io.assay.engine.LlmReviewer;
 import io.assay.evolve.EvolutionEngine;
 import io.assay.json.Json;
 import io.assay.llm.OpenAiCompatibleReviewer;
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.EvalCase;
+import io.assay.model.EvaluationBudget;
 import io.assay.model.EvolutionBudget;
 import io.assay.model.EvolutionCandidate;
 import io.assay.model.ProjectAdapter;
@@ -80,6 +82,7 @@ public final class AssayCli {
                 new CommandLine.Spec("worker", "execute queued evaluation jobs"),
                 new CommandLine.Spec("jobs", "list queued evaluation jobs"),
                 new CommandLine.Spec("cancel", "cancel a queued or running job"),
+                new CommandLine.Spec("replay", "replay a failed evaluation job"),
                 new CommandLine.Spec("run", "run one externally supplied suite"),
                 new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff"),
                 new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task"),
@@ -115,6 +118,7 @@ public final class AssayCli {
                 case "worker" -> worker(args);
                 case "jobs" -> jobs(args);
                 case "cancel" -> cancelJob(args);
+                case "replay" -> replayJob(args);
                 case "run" -> runSuite(args);
                 case "select-tests" -> selectTests(args);
                 case "audit-scope" -> auditScope(args);
@@ -166,6 +170,7 @@ public final class AssayCli {
                     .required("suite", CommandLine.Kind.STRING)
                     .required("cases", CommandLine.Kind.STRING)
                     .option("run-id", CommandLine.Kind.STRING, null)
+                    .option("idempotency-key", CommandLine.Kind.STRING, null)
                     .option("max-attempts", CommandLine.Kind.INTEGER, "3");
             case "worker" -> new CommandLine.Spec("worker", "execute queued evaluation jobs")
                     .option("store", CommandLine.Kind.STRING, ".assay/store")
@@ -179,6 +184,11 @@ public final class AssayCli {
             case "cancel" -> new CommandLine.Spec("cancel", "cancel a queued or running job")
                     .option("store", CommandLine.Kind.STRING, ".assay/store")
                     .required("job-id", CommandLine.Kind.STRING);
+            case "replay" -> new CommandLine.Spec("replay", "replay a failed evaluation job")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .required("job-id", CommandLine.Kind.STRING)
+                    .option("max-attempts", CommandLine.Kind.INTEGER, "3")
+                    .option("max-replays", CommandLine.Kind.INTEGER, "3");
             case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                     .required("adapter", CommandLine.Kind.STRING)
                     .option("adapter-class", CommandLine.Kind.STRING, null)
@@ -360,6 +370,10 @@ public final class AssayCli {
                 .option("workers", CommandLine.Kind.INTEGER, "1")
                 .option("retries", CommandLine.Kind.INTEGER, "0")
                 .option("timeout", CommandLine.Kind.DECIMAL, "30")
+                .option("max-total-tokens", CommandLine.Kind.INTEGER, null)
+                .option("max-cost-usd", CommandLine.Kind.DECIMAL, null)
+                .option("reserve-output-tokens", CommandLine.Kind.INTEGER, "512")
+                .option("reserve-cost-usd", CommandLine.Kind.DECIMAL, "0.01")
                 .flag("use-llm")
                 .flag("collect-few-shot")
                 .option("run-identity", CommandLine.Kind.STRING, null);
@@ -379,6 +393,11 @@ public final class AssayCli {
     private static EvaluationEngine engineFor(
             CommandLine.Namespace args, Results store, String adapterRef, String adapterClass) {
         ProjectAdapter adapter = AdapterLoader.loadProjectAdapter(adapterRef, adapterClass);
+        EvaluationBudget budget = new EvaluationBudget(
+                args.integerOrNull("max-total-tokens"),
+                args.decimalOrNull("max-cost-usd"),
+                args.integer("reserve-output-tokens"),
+                args.decimal("reserve-cost-usd"));
         return new EvaluationEngine(
                 adapter,
                 store,
@@ -387,7 +406,9 @@ public final class AssayCli {
                 args.integer("retries"),
                 args.decimal("timeout"),
                 args.flag("collect-few-shot"),
-                args.string("run-identity"));
+                args.string("run-identity"),
+                EvaluationListener.NOOP,
+                budget);
     }
 
     private static int submit(CommandLine.Namespace args) {
@@ -405,6 +426,14 @@ public final class AssayCli {
             payload.put("workers", args.integer("workers"));
             payload.put("retries", args.integer("retries"));
             payload.put("timeout", args.decimal("timeout"));
+            if (args.integerOrNull("max-total-tokens") != null) {
+                payload.put("max_total_tokens", args.integerOrNull("max-total-tokens"));
+            }
+            if (args.decimalOrNull("max-cost-usd") != null) {
+                payload.put("max_cost_usd", args.decimalOrNull("max-cost-usd"));
+            }
+            payload.put("reserve_output_tokens", args.integer("reserve-output-tokens"));
+            payload.put("reserve_cost_usd", args.decimal("reserve-cost-usd"));
             payload.put("use_llm", args.flag("use-llm"));
             payload.put("collect_few_shot", args.flag("collect-few-shot"));
             if (args.string("run-identity") != null) {
@@ -415,11 +444,14 @@ public final class AssayCli {
                 runId = "queued-" + shortId();
             }
             payload.put("run_id", runId);
-            Job job = store.submit(payload, args.integer("max-attempts"));
+            Job job = store.submit(args.string("idempotency-key"), payload, args.integer("max-attempts"));
             Map<String, Object> output = new LinkedHashMap<>();
             output.put("job_id", job.id());
-            output.put("run_id", runId);
+            output.put("run_id", job.payload().getOrDefault("run_id", runId));
             output.put("status", job.status().name());
+            if (job.idempotencyKey() != null) {
+                output.put("idempotency_key", job.idempotencyKey());
+            }
             System.out.println(Json.write(output));
             return 0;
         }
@@ -446,6 +478,20 @@ public final class AssayCli {
             store.find(jobId).ifPresent(job -> output.put("status", job.status().name()));
             System.out.println(Json.write(output));
             return cancelled ? 0 : 1;
+        }
+    }
+
+    private static int replayJob(CommandLine.Namespace args) {
+        try (JobStore store = jobStore(args)) {
+            String jobId = args.string("job-id");
+            Optional<Job> replayed = store.replay(jobId, args.integer("max-attempts"), args.integer("max-replays"));
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("job_id", jobId);
+            output.put("replayed", replayed.isPresent());
+            replayed.ifPresent(job -> output.put("status", job.status().name()));
+            replayed.ifPresent(job -> output.put("replay_count", job.replayCount()));
+            System.out.println(Json.write(output));
+            return replayed.isPresent() ? 0 : 1;
         }
     }
 
@@ -554,10 +600,22 @@ public final class AssayCli {
             args.add("--run-identity");
             args.add(String.valueOf(payload.get("run_identity")));
         }
+        addOption(args, payload, "max_total_tokens", "--max-total-tokens");
+        addOption(args, payload, "max_cost_usd", "--max-cost-usd");
+        addOption(args, payload, "reserve_output_tokens", "--reserve-output-tokens");
+        addOption(args, payload, "reserve_cost_usd", "--reserve-cost-usd");
         if (job.attempts() > 1) {
             args.add("--resume");
         }
         return args.toArray(String[]::new);
+    }
+
+    private static void addOption(List<String> args, Map<String, Object> payload, String key, String option) {
+        Object value = payload.get(key);
+        if (value != null) {
+            args.add(option);
+            args.add(String.valueOf(value));
+        }
     }
 
     private static String text(Map<String, Object> payload, String key) {
@@ -602,6 +660,8 @@ public final class AssayCli {
         row.put("started_at", job.startedAt() == null ? null : job.startedAt().toString());
         row.put("finished_at", job.finishedAt() == null ? null : job.finishedAt().toString());
         row.put("error", job.error());
+        row.put("idempotency_key", job.idempotencyKey());
+        row.put("replay_count", job.replayCount());
         return row;
     }
 
@@ -616,7 +676,10 @@ public final class AssayCli {
             Reporting.writeRunArtifacts(summary, output);
             printSummary(summary);
             System.out.println("report: " + output.resolve("report.md"));
-            return intValue(summary.get("hard_failures")) > 0 ? 1 : 0;
+            return intValue(summary.get("hard_failures")) > 0
+                            || "budget_exhausted".equals(summary.get("status"))
+                    ? 1
+                    : 0;
         }
     }
 
@@ -988,7 +1051,7 @@ public final class AssayCli {
         printed.put("status", release.get("status"));
         System.out.println(Json.write(printed));
         System.out.println("release: " + output.resolve("release.json"));
-        return "failed".equals(release.get("status")) ? 1 : 0;
+        return "failed".equals(release.get("status")) || "budget_exhausted".equals(release.get("status")) ? 1 : 0;
     }
 
     private static int evolve(CommandLine.Namespace args) {

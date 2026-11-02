@@ -9,8 +9,9 @@ import java.util.List;
  * The child programs the process-runner tests execute.
  *
  * <p>The process-runner tests need child programs that print, stall, flood stdout, or spawn a grandchild.
- * A JVM has no inline script equivalent, so those behaviours live in this one fixture class that the
- * tests launch as a separate process.
+ * A JVM has no inline script equivalent, so those behaviours live in this one fixture class. The
+ * grandchild is a native long-lived command rather than a nested JVM, keeping the timeout test
+ * independent of second-JVM startup speed.
  */
 public final class AgentProcessFixtureMain {
 
@@ -41,13 +42,21 @@ public final class AgentProcessFixtureMain {
     }
 
     private static ProcessHandle spawnSleeper(long millis) throws IOException {
+        long seconds = Math.max(1, (millis + 999) / 1000);
         List<String> command = new ArrayList<>();
-        command.add(ChildProcess.javaBinary());
-        command.add("-cp");
-        command.add(ChildProcess.classPath());
-        command.add(AgentProcessFixtureMain.class.getName());
-        command.add("sleep");
-        command.add(String.valueOf(millis));
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            // A nested JVM takes seconds to start on some Windows hosts; the test only needs a
+            // long-lived grandchild, so use a native command that starts immediately.
+            command.add("cmd.exe");
+            command.add("/c");
+            command.add("ping");
+            command.add("-n");
+            command.add(String.valueOf(seconds + 1));
+            command.add("127.0.0.1");
+        } else {
+            command.add("sleep");
+            command.add(String.valueOf(seconds));
+        }
         return new ProcessBuilder(command).start().toHandle();
     }
 }

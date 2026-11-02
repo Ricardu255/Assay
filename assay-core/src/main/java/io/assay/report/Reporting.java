@@ -121,6 +121,20 @@ public final class Reporting {
         report.add("- Cases: " + summary.get("case_count"));
         report.add("- Hard failures: " + summary.get("hard_failures"));
         report.add("- Soft/review warnings: " + summary.get("soft_warnings"));
+        Map<String, Object> budget = asMap(summary.get("budget"));
+        if (Boolean.TRUE.equals(budget.get("enabled"))) {
+            if (budget.get("max_total_tokens") != null) {
+                report.add("- Budget tokens: " + budget.get("spent_tokens") + " / "
+                        + budget.get("max_total_tokens"));
+            }
+            if (budget.get("max_cost_usd") != null) {
+                report.add("- Budget cost: " + budget.get("spent_cost_usd") + " / "
+                        + budget.get("max_cost_usd") + " USD");
+            }
+            if (intValue(summary.get("skipped_case_count")) > 0) {
+                report.add("- Cases skipped by budget: " + summary.get("skipped_case_count"));
+            }
+        }
         report.add("");
         report.add("## Suspected modules");
         report.add("");

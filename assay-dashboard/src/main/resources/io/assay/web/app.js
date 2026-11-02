@@ -7,7 +7,7 @@ const sections = [
 ];
 const labels = {
   passed: "通过", failed: "失败", warning: "软告警", accept: "接受", reject: "拒绝", rollback: "回退", ok: "成功", success: "成功", error: "错误", failure: "失败",
-  completed: "已完成", running: "运行中", unknown: "未知", budget_exhausted: "轮次用尽",
+  completed: "已完成", running: "运行中", unknown: "未知", budget_exhausted: "预算用尽",
   time_budget_exhausted: "时间用尽", evolver_call_budget_exhausted: "调用预算用尽",
   no_acceptable_candidate: "无合格候选", no_candidates: "无候选", review_required: "需要复核",
   insufficient_evidence: "证据不足", no_obvious_issue: "未发现明显问题", clear_out_of_scope: "明确越界",
@@ -170,7 +170,7 @@ function overview() {
   const soft = runs.reduce((sum, item) => sum + count(item.soft_warnings), 0);
   const passedRuns = runs.filter((item) => item.status === "passed" && !count(item.soft_warnings)).length;
   const warnedRuns = runs.filter((item) => item.status === "passed" && count(item.soft_warnings)).length;
-  const failedRuns = runs.filter((item) => item.status === "failed").length;
+  const failedRuns = runs.filter((item) => item.status === "failed" || item.status === "budget_exhausted").length;
   const denominator = Math.max(1, runs.length);
   const recent = filteredItems().slice(0, 8);
   const trend = AssayUI.runTrend(items(), 7);
@@ -187,7 +187,7 @@ function overview() {
           <rect width="300" height="12" fill="var(--line)"/><rect width="${300 * passedRuns / denominator}" height="12" fill="var(--chart-good)"/>
           <rect x="${300 * passedRuns / denominator}" width="${300 * warnedRuns / denominator}" height="12" fill="var(--chart-warning)"/>
           <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="var(--chart-bad)"/></svg>
-        ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
+        ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败 / 预算用尽", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
         <p class="mini-note">按扫描到的运行汇总。不同版本与数据集的运行分别计数。</p></div></section></div>
     <section class="panel section-gap"><div class="panel-head"><h2>最近 ${trend.days} 天</h2><span class="muted">硬门禁通过率 · 按用例加权</span></div><div class="panel-body">${trendSvg(trend)}</div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>按测试集健康</h2><span class="muted">最近运行优先 · 通过率按用例加权</span></div>${suiteHealthTable(health)}</section>

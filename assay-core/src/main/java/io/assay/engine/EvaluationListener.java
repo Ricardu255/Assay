@@ -35,6 +35,15 @@ public interface EvaluationListener {
     default void onCaseFinished(CaseResult result) {
     }
 
+    /**
+     * Called when a case never starts because the run budget cannot fund its next adapter call.
+     *
+     * <p>A skipped case is not a hard failure; it is an unexecuted case and must not enter the pass
+     * rate. The run summary carries the same information in {@code skipped_case_count}.
+     */
+    default void onCaseSkipped(String runId, EvalCase evalCase, String reason) {
+    }
+
     /** A unit of work inside a case or run, used for child spans and stage metrics. */
     enum Stage {
         ADAPTER,

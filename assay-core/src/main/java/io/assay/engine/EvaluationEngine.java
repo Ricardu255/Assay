@@ -1,9 +1,11 @@
 package io.assay.engine;
 
+import io.assay.compare.CostEstimator;
 import io.assay.json.Json;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
 import io.assay.model.EvalCase;
+import io.assay.model.EvaluationBudget;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.RunContext;
@@ -46,6 +48,7 @@ public final class EvaluationEngine {
     private final boolean collectFewShot;
     private final String runIdentity;
     private final EvaluationListener listener;
+    private final EvaluationBudget budget;
 
     public EvaluationEngine(ProjectAdapter adapter, Results store) {
         this(adapter, store, null, 1, 0, 30, false, null);
@@ -61,7 +64,7 @@ public final class EvaluationEngine {
             boolean collectFewShot,
             String runIdentity) {
         this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity,
-                EvaluationListener.NOOP);
+                EvaluationListener.NOOP, EvaluationBudget.disabled());
     }
 
     public EvaluationEngine(
@@ -74,6 +77,21 @@ public final class EvaluationEngine {
             boolean collectFewShot,
             String runIdentity,
             EvaluationListener listener) {
+        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener,
+                EvaluationBudget.disabled());
+    }
+
+    public EvaluationEngine(
+            ProjectAdapter adapter,
+            Results store,
+            LlmReviewer reviewer,
+            int workers,
+            int retries,
+            double timeoutSeconds,
+            boolean collectFewShot,
+            String runIdentity,
+            EvaluationListener listener,
+            EvaluationBudget budget) {
         if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
             throw new IllegalArgumentException("workers must be positive and bounded; retries must be non-negative");
         }
@@ -94,6 +112,7 @@ public final class EvaluationEngine {
         this.collectFewShot = collectFewShot;
         this.runIdentity = runIdentity;
         this.listener = listener == null ? EvaluationListener.NOOP : listener;
+        this.budget = budget == null ? EvaluationBudget.disabled() : budget;
     }
 
     public int requestedWorkers() {
@@ -111,6 +130,11 @@ public final class EvaluationEngine {
     /** The store this engine records into; the evolution engine needs it for its audit record. */
     public Results store() {
         return store;
+    }
+
+    /** The configured run budget; a disabled budget is a no-op. */
+    public EvaluationBudget budget() {
+        return budget;
     }
 
     private NormalizedTrace readOneTrace(EvalCase evalCase, String runId, String source, int attempt) {
@@ -163,7 +187,8 @@ public final class EvaluationEngine {
         return trace;
     }
 
-    private List<NormalizedTrace> collectTraces(EvalCase evalCase, String runId, String source) {
+    private List<NormalizedTrace> collectTraces(
+            EvalCase evalCase, String runId, String source, BudgetLedger ledger) {
         int consistencyRuns = intValue(evalCase.metadata().get("consistency_runs"), 1);
         if (Boolean.TRUE.equals(evalCase.metadata().get("consistency_check"))) {
             consistencyRuns = Math.max(2, consistencyRuns);
@@ -172,11 +197,18 @@ public final class EvaluationEngine {
         for (int runIndex = 0; runIndex < consistencyRuns; runIndex++) {
             RuntimeException lastError = null;
             for (int attempt = 0; attempt <= retries; attempt++) {
+                BudgetLedger.Reservation reservation = reserveBudget(ledger, evalCase);
                 try {
-                    traces.add(readOneTrace(evalCase, runId, source, attempt));
+                    NormalizedTrace trace = readOneTrace(evalCase, runId, source, attempt);
+                    ledger.settle(reservation, BudgetUsage.fromTrace(trace));
+                    traces.add(trace);
                     lastError = null;
                     break;
+                } catch (BudgetExhaustedException exhausted) {
+                    throw exhausted;
                 } catch (RuntimeException error) {
+                    // A failed call still may have consumed provider tokens; charge the reservation.
+                    ledger.settleFailure(reservation);
                     // Adapter boundary: keep the external failure and retry it while budget remains.
                     lastError = error;
                 }
@@ -186,6 +218,18 @@ public final class EvaluationEngine {
             }
         }
         return traces;
+    }
+
+    /** Reserves before a call so concurrent cases cannot all pass a check that is already spent. */
+    private static BudgetLedger.Reservation reserveBudget(BudgetLedger ledger, EvalCase evalCase) {
+        if (!ledger.enabled()) {
+            return null;
+        }
+        BudgetLedger.Reservation reservation = ledger.reserve(CostEstimator.tokens(evalCase.payload()));
+        if (reservation == null) {
+            throw new BudgetExhaustedException("run budget exhausted before case " + evalCase.caseId());
+        }
+        return reservation;
     }
 
     private List<CheckResult> evaluateRules(
@@ -221,9 +265,13 @@ public final class EvaluationEngine {
     }
 
     CaseResult evaluateCase(EvalCase evalCase, String runId, String source) {
+        return evaluateCase(evalCase, runId, source, new BudgetLedger(EvaluationBudget.disabled()));
+    }
+
+    CaseResult evaluateCase(EvalCase evalCase, String runId, String source, BudgetLedger ledger) {
         notifyCaseStarted(runId, evalCase);
         try {
-            List<NormalizedTrace> traces = collectTraces(evalCase, runId, source);
+            List<NormalizedTrace> traces = collectTraces(evalCase, runId, source, ledger);
             NormalizedTrace trace = traces.get(0);
             List<CheckResult> checks = evaluateRules(runId, evalCase, traces, trace);
             CaseResult result = new CaseResult(runId, evalCase.suite(), source, evalCase, trace, checks);
@@ -275,6 +323,9 @@ public final class EvaluationEngine {
             }
             notifyCaseFinished(result);
             return result;
+        } catch (BudgetExhaustedException exhausted) {
+            notifyCaseSkipped(runId, evalCase, exhausted.getMessage());
+            return null;
         } catch (RuntimeException error) {
             String message = messageOf(error);
             CaseResult failed = new CaseResult(
@@ -317,6 +368,14 @@ public final class EvaluationEngine {
     private void notifyCaseFinished(CaseResult result) {
         try {
             listener.onCaseFinished(result);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyCaseSkipped(String runId, EvalCase evalCase, String reason) {
+        try {
+            listener.onCaseSkipped(runId, evalCase, reason == null ? "run budget exhausted" : reason);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
         }
@@ -467,6 +526,16 @@ public final class EvaluationEngine {
         state.startedAtNanos = runStarted;
         notifyRunStarted(runId, suite, source, cases.size());
 
+        BudgetLedger ledger = new BudgetLedger(budget);
+        if (resume && ledger.enabled()) {
+            for (Map<String, Object> result : store.listResults(runId)) {
+                Object trace = result.get("trace");
+                if (trace instanceof Map<?, ?> traceMap && !traceMap.isEmpty()) {
+                    ledger.seed(BudgetUsage.fromTraceMap(asMap(trace)));
+                }
+            }
+        }
+
         List<EvalCase> pending = new ArrayList<>();
         for (EvalCase evalCase : cases) {
             if (!(resume && store.hasCase(runId, evalCase.caseId()))) {
@@ -476,6 +545,8 @@ public final class EvaluationEngine {
 
         List<CaseResult> batch = new ArrayList<>();
         int batchSize = Math.min(BATCH_SIZE_CAP, maxInFlight);
+        int skippedCases = 0;
+        boolean budgetExhausted = false;
         ExecutorService pool = Executors.newFixedThreadPool(workers);
         try {
             ExecutorCompletionService<CaseResult> completion = new ExecutorCompletionService<>(pool);
@@ -483,28 +554,47 @@ public final class EvaluationEngine {
             int inFlight = 0;
             for (int index = 0; index < maxInFlight && remaining.hasNext(); index++) {
                 EvalCase next = remaining.next();
-                completion.submit(() -> evaluateCase(next, runId, source));
+                completion.submit(() -> evaluateCase(next, runId, source, ledger));
                 inFlight++;
             }
             while (inFlight > 0) {
                 Future<CaseResult> finished = completion.take();
-                batch.add(finished.get());
                 inFlight--;
+                try {
+                    CaseResult result = finished.get();
+                    if (result == null) {
+                        skippedCases++;
+                        budgetExhausted = true;
+                    } else {
+                        batch.add(result);
+                    }
+                } catch (java.util.concurrent.ExecutionException error) {
+                    if (error.getCause() instanceof BudgetExhaustedException) {
+                        skippedCases++;
+                        budgetExhausted = true;
+                    } else {
+                        throw new IllegalStateException("evaluation worker failed", error.getCause());
+                    }
+                }
                 if (batch.size() >= batchSize) {
                     saveBatch(runId, batch);
                     batch.clear();
                 }
-                if (remaining.hasNext()) {
+                if (!budgetExhausted && remaining.hasNext()) {
                     EvalCase next = remaining.next();
-                    completion.submit(() -> evaluateCase(next, runId, source));
+                    completion.submit(() -> evaluateCase(next, runId, source, ledger));
                     inFlight++;
+                }
+            }
+            if (budgetExhausted) {
+                while (remaining.hasNext()) {
+                    remaining.next();
+                    skippedCases++;
                 }
             }
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("evaluation interrupted", error);
-        } catch (java.util.concurrent.ExecutionException error) {
-            throw new IllegalStateException("evaluation worker failed", error.getCause());
         } finally {
             pool.shutdownNow();
         }
@@ -551,7 +641,7 @@ public final class EvaluationEngine {
             }
             softWarnings += intValue(result.get("soft_warning_count"), 0);
         }
-        String status = hardFailures > 0 ? "failed" : "passed";
+        String status = hardFailures > 0 ? "failed" : budgetExhausted ? "budget_exhausted" : "passed";
         store.finishRun(runId, status);
 
         Map<String, Object> summary = new LinkedHashMap<>();
@@ -560,8 +650,13 @@ public final class EvaluationEngine {
         summary.put("source", source);
         summary.put("status", status);
         summary.put("case_count", results.size());
+        summary.put("requested_case_count", cases.size());
+        summary.put("skipped_case_count", skippedCases);
         summary.put("hard_failures", hardFailures);
         summary.put("soft_warnings", softWarnings);
+        if (budget.enabled()) {
+            summary.put("budget", ledger.snapshot());
+        }
         summary.put("results", results);
         notifyRunFinished(summary, System.nanoTime() - runStarted);
         return summary;
@@ -572,6 +667,7 @@ public final class EvaluationEngine {
         String effectiveReleaseId = releaseId != null ? releaseId : "release-" + shortId();
         List<Map<String, Object>> stages = new ArrayList<>();
         boolean failed = false;
+        boolean budgetExhausted = false;
         for (SuiteCases suite : suites) {
             Map<String, Object> summary =
                     runSuite(suite.cases(), suite.name(), source, effectiveReleaseId + "-" + suite.name(), false);
@@ -580,10 +676,14 @@ public final class EvaluationEngine {
                 failed = true;
                 break;
             }
+            if ("budget_exhausted".equals(summary.get("status"))) {
+                budgetExhausted = true;
+                break;
+            }
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("release_id", effectiveReleaseId);
-        result.put("status", failed ? "failed" : "passed");
+        result.put("status", failed ? "failed" : budgetExhausted ? "budget_exhausted" : "passed");
         result.put("stages", stages);
         return result;
     }

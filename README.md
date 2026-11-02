@@ -330,7 +330,38 @@ java -jar app/target/assay.jar run \
 | `export` | 导出已确认的 regression 或 few-shot 候选 |
 | `promote-review` | 把一条审核样本晋级到 improvement / regression / holdout |
 
-退出码是一份契约：`0` 正常，`1` 硬门禁失败或决策为负，`2` 用法错误或结果需要人工复核。需要人看的运行不会看起来像通过。
+退出码是一份契约：`0` 正常，`1` 硬门禁失败、预算用尽或决策为负，`2` 用法错误或结果需要人工复核。需要人看的运行不会看起来像通过。
+
+### 评测预算（Token / 成本）
+
+`run`、`submit`、`release` 等运行类命令支持在单次 suite 内限制被测 Agent 的消耗：
+
+```bash
+java -jar app/target/assay.jar run \
+  --adapter io.assay.examples.EchoAdapter \
+  --suite smoke \
+  --cases examples/cases.example.jsonl \
+  --max-total-tokens 200000 \
+  --max-cost-usd 2.50
+```
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `--max-total-tokens` | 不限制 | 本次 suite 的 Token 上限 |
+| `--max-cost-usd` | 不限制 | 本次 suite 的成本上限（USD） |
+| `--reserve-output-tokens` | `512` | 每次调用在输入估算之外预留的输出 Token |
+| `--reserve-cost-usd` | `0.01` | 每次调用预留的成本 |
+
+执行时先按用例输入估算加输出预留做预扣，Trace 返回后再按 `total_tokens`（或 `input_tokens + output_tokens`）和 `cost_usd` 结算：
+
+- 第一次预扣失败后不再提交新用例，正在执行的用例会跑完并结算。
+- 被预算挡下的用例不写入失败结果，也不进入通过率；运行状态为 `budget_exhausted`，`skipped_case_count` 记录数量，退出码为 `1`。
+- 已执行用例存在硬失败时，状态仍为 `failed`；预算信息保留在 `budget` 字段中。
+- Trace 没有上报 Token 或成本时，按预扣值计费并记录 `unreported_*_calls`，不会把缺失值当成 0。
+- 预扣是估算，实际值可能高于预留并产生 `overrun`；预算用于控制实验规模，不是供应商账单。
+- `--resume` 会把已落盘用例的消耗计入同一预算，避免恢复后重新获得完整额度。
+- `budget_exhausted` 表示样本不完整，不应直接拿来做版本对比或通过率结论。
+- 当前预算覆盖被测 Agent 的 adapter 调用；`--use-llm` 的评测复核调用暂不单独计入。
 
 所有子命令都有可直接运行的示例：
 
@@ -391,6 +422,7 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 | 数据模型 | `model.*`（不可变 `record`，`CaseResult` 可变） |
 | 评测规则 | `rules.Rules`、`rules.ValueOps`、`rules.RuleConfig` |
 | 评测执行 | `engine.EvaluationEngine`、`engine.CaseLoader`、`engine.EvaluationListener` |
+| 评测预算 | `engine.BudgetLedger`、`engine.BudgetUsage`、`model.EvaluationBudget` |
 | 结果存储 | `store.Results`（接口）、`store.ResultStore`、`store.jdbc.JdbcResultStore`、`store.Stores` |
 | 报告产物 | `report.Reporting`、`report.Fmt`、`audit.ScopeAuditReport` |
 | 可选 LLM | `llm.OpenAiCompatibleReviewer`、`llm.OpenAiCompatibleTextEvolver` |
@@ -465,6 +497,9 @@ java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store -
 - worker 持有租约并定期 heartbeat；租约过期后可被其他 worker 重新领取
 - 取消是协作式的：运行中的任务在当前 case 边界停止，不会强杀 Agent
 - 执行失败按 `max-attempts` 重试；超过上限进入 FAILED
+- 运行以非 0 退出（含硬门禁失败和 `budget_exhausted`）时任务进入 FAILED，需要人工提高预算或修复后 `replay`
+- 提交时可带 `--idempotency-key`；同一个 key 在队列中只对应一个任务，重复提交返回已有 job
+- FAILED 任务可用 `replay` 回到 QUEUED；`replay_count` 超过 `--max-replays` 后不再重放
 - 投递是 **at-least-once**，不是 exactly-once；重复执行通过 run id + resume + run lock 保底
 - `worker --once` 用于测试/单次执行；不传时持续轮询
 
@@ -666,6 +701,7 @@ mvn -q test
 - **测试集选择** —— 确定性规则的最低档位、AI 只能提高不能降低、本地/远程输入边界。
 - **范围审计** —— 发现分类与行号侧别、模型发现的校验与处置轨迹、报告产物。
 - **OpenAI Trace** —— span 类型识别的各种写法、token 与错误聚合、按 trace id 分组与非法输入拒绝。
+- **评测预算** —— Token/成本预扣与结算、缺失用量按预扣计费、并发预留不超卖、预算用尽后跳过用例、恢复时计入历史消耗。
 - **其余** —— JSON 编解码、评测指标、审核样本晋级、命令行退出码（`0` / `1` / `2`）。
 
 ## 扩展点

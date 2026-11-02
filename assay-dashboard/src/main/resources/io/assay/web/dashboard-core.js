@@ -321,7 +321,7 @@
       bucket.caseCount += cases;
       bucket.hardFailures += failures;
       bucket.softWarnings += itemCount(item.soft_warnings);
-      if (item.status === "failed") bucket.failedRuns++;
+      if (item.status === "failed" || item.status === "budget_exhausted") bucket.failedRuns++;
     }
     for (const bucket of buckets) bucket.passRate = rate(bucket.caseCount, bucket.hardFailures);
     const totals = buckets.reduce((sum, bucket) => ({

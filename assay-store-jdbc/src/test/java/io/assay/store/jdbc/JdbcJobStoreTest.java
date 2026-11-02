@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
+import io.assay.runner.JobStore;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -92,5 +93,42 @@ class JdbcJobStoreTest {
 
     private static JdbcJobStore store() {
         return JdbcJobStore.fromUrl("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");
+    }
+
+    @Test
+    void idempotentSubmitReturnsTheExistingJob() {
+        try (JobStore store = store()) {
+            Job first = store.submit("checkout-42", Map.of("suite", "smoke"), 2);
+            Job second = store.submit("checkout-42", Map.of("suite", "smoke"), 2);
+
+            assertEquals(first.id(), second.id());
+            assertEquals(1, store.list(10).size());
+            assertEquals("checkout-42", second.idempotencyKey());
+        }
+    }
+
+    @Test
+    void failedJobCanBeReplayedUpToTheLimit() {
+        try (JobStore store = store()) {
+            Job job = store.submit("replay-key", Map.of("suite", "smoke"), 1);
+            assertTrue(store.claim("worker-a", Duration.ofSeconds(30)).isPresent());
+            store.fail(job.id(), "worker-a", "adapter timeout");
+            assertEquals(JobStatus.FAILED, store.find(job.id()).orElseThrow().status());
+
+            Job firstReplay = store.replay(job.id(), 1, 2).orElseThrow();
+            assertEquals(JobStatus.QUEUED, firstReplay.status());
+            assertEquals(0, firstReplay.attempts());
+            assertEquals(1, firstReplay.replayCount());
+            assertEquals("replay-key", firstReplay.idempotencyKey());
+
+            assertTrue(store.claim("worker-b", Duration.ofSeconds(30)).isPresent());
+            store.fail(job.id(), "worker-b", "adapter timeout again");
+            Job secondReplay = store.replay(job.id(), 1, 2).orElseThrow();
+            assertEquals(2, secondReplay.replayCount());
+
+            assertTrue(store.claim("worker-c", Duration.ofSeconds(30)).isPresent());
+            store.fail(job.id(), "worker-c", "still failing");
+            assertTrue(store.replay(job.id(), 1, 2).isEmpty());
+        }
     }
 }

@@ -81,35 +81,69 @@ public final class JdbcJobStore implements JobStore {
                       created_at timestamp not null,
                       started_at timestamp,
                       finished_at timestamp,
-                      error text
+                      error text,
+                      idempotency_key varchar(128),
+                      replay_count int not null default 0
                     )
                     """);
+            // Existing local stores predate idempotency/replay; add the columns without a reset.
+            statement.execute("alter table assay_job add column if not exists idempotency_key varchar(128)");
+            statement.execute("alter table assay_job add column if not exists replay_count int not null default 0");
+            statement.execute("create unique index if not exists assay_job_idempotency on assay_job(idempotency_key)");
         } catch (SQLException error) {
             throw new IllegalStateException("cannot initialize job store", error);
         }
     }
 
     @Override
-    public Job submit(Map<String, Object> payload, int maxAttempts) {
+    public Job submit(String idempotencyKey, Map<String, Object> payload, int maxAttempts) {
         if (maxAttempts < 1) {
             throw new IllegalArgumentException("maxAttempts must be positive");
+        }
+        String key = idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey.trim();
+        if (key != null) {
+            Optional<Job> existing = findByIdempotencyKey(key);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
         }
         String id = "job-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         Instant now = Instant.now();
         try (Connection connection = connections.open();
                 PreparedStatement insert = connection.prepareStatement("""
                         insert into assay_job(job_id, status, payload_json, attempts, max_attempts,
-                          lease_owner, lease_expires_at, cancel_requested, created_at)
-                        values (?, 'QUEUED', ?, 0, ?, null, null, false, ?)
+                          lease_owner, lease_expires_at, cancel_requested, created_at, idempotency_key, replay_count)
+                        values (?, 'QUEUED', ?, 0, ?, null, null, false, ?, ?, 0)
                         """)) {
             insert.setString(1, id);
             insert.setString(2, Json.write(payload));
             insert.setInt(3, maxAttempts);
             insert.setTimestamp(4, Timestamp.from(now));
+            insert.setString(5, key);
             insert.executeUpdate();
-            return new Job(id, JobStatus.QUEUED, payload, 0, maxAttempts, null, null, false, now, null, null, null);
+            return new Job(id, JobStatus.QUEUED, payload, 0, maxAttempts, null, null, false, now, null, null, null,
+                    key, 0);
         } catch (SQLException error) {
+            if (key != null) {
+                Optional<Job> existing = findByIdempotencyKey(key);
+                if (existing.isPresent()) {
+                    return existing.get();
+                }
+            }
             throw new IllegalStateException("cannot submit job", error);
+        }
+    }
+
+    private Optional<Job> findByIdempotencyKey(String key) {
+        try (Connection connection = connections.open();
+                PreparedStatement select = connection.prepareStatement(
+                        "select * from assay_job where idempotency_key = ?")) {
+            select.setString(1, key);
+            try (ResultSet rows = select.executeQuery()) {
+                return rows.next() ? Optional.of(job(rows)) : Optional.empty();
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot read idempotency key", error);
         }
     }
 
@@ -127,7 +161,8 @@ public final class JdbcJobStore implements JobStore {
                 reapExpired(connection, now);
                 String jobId;
                 try (PreparedStatement select = connection.prepareStatement("""
-                        select job_id, payload_json, attempts, max_attempts, created_at, started_at
+                        select job_id, payload_json, attempts, max_attempts, created_at, started_at,
+                          idempotency_key, replay_count
                         from assay_job
                         where status = 'QUEUED' and cancel_requested = false
                         order by created_at
@@ -156,7 +191,8 @@ public final class JdbcJobStore implements JobStore {
                     }
                     connection.commit();
                     return Optional.of(new Job(
-                            jobId, JobStatus.RUNNING, payload, attempts, max, worker, expires, false, now, now, null, null));
+                            jobId, JobStatus.RUNNING, payload, attempts, max, worker, expires, false, now, now, null, null,
+                            rows.getString("idempotency_key"), rows.getInt("replay_count")));
                 }
             } catch (SQLException | RuntimeException error) {
                 rollback(connection);
@@ -384,7 +420,9 @@ public final class JdbcJobStore implements JobStore {
                 instant(rows.getTimestamp("created_at")),
                 instant(rows.getTimestamp("started_at")),
                 instant(rows.getTimestamp("finished_at")),
-                rows.getString("error"));
+                rows.getString("error"),
+                rows.getString("idempotency_key"),
+                rows.getInt("replay_count"));
     }
 
     private static Instant instant(Timestamp value) {
@@ -403,6 +441,54 @@ public final class JdbcJobStore implements JobStore {
             connection.rollback();
         } catch (SQLException ignored) {
             // The original failure is more useful.
+        }
+    }
+
+    @Override
+    public Optional<Job> replay(String jobId, int maxAttempts, int maxReplays) {
+        if (maxAttempts < 1 || maxReplays < 1) {
+            throw new IllegalArgumentException("maxAttempts and maxReplays must be positive");
+        }
+        try (Connection connection = connections.open()) {
+            connection.setAutoCommit(false);
+            try {
+                int currentReplay;
+                try (PreparedStatement select = connection.prepareStatement("""
+                        select replay_count from assay_job
+                        where job_id = ? and status = 'FAILED' for update
+                        """)) {
+                    select.setString(1, jobId);
+                    try (ResultSet rows = select.executeQuery()) {
+                        if (!rows.next()) {
+                            connection.commit();
+                            return Optional.empty();
+                        }
+                        currentReplay = rows.getInt(1);
+                    }
+                }
+                if (currentReplay >= maxReplays) {
+                    connection.commit();
+                    return Optional.empty();
+                }
+                try (PreparedStatement update = connection.prepareStatement("""
+                        update assay_job
+                        set status = 'QUEUED', attempts = 0, max_attempts = ?,
+                            replay_count = replay_count + 1, lease_owner = null, lease_expires_at = null,
+                            started_at = null, finished_at = null, error = null
+                        where job_id = ? and status = 'FAILED'
+                        """)) {
+                    update.setInt(1, maxAttempts);
+                    update.setString(2, jobId);
+                    update.executeUpdate();
+                }
+                connection.commit();
+                return find(jobId);
+            } catch (SQLException | RuntimeException error) {
+                rollback(connection);
+                throw error;
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot replay job", error);
         }
     }
 
