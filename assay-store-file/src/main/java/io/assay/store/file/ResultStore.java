@@ -9,6 +9,7 @@ import io.assay.support.AtomicFiles;
 import io.assay.support.ExclusiveFileLock;
 import io.assay.support.Names;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.CharacterCodingException;
@@ -508,6 +509,82 @@ public final class ResultStore implements Results {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
         return value instanceof Map ? (Map<String, Object>) value : new LinkedHashMap<>();
+    }
+
+    @Override
+    public List<String> pruneRuns(Instant cutoff, int keepLatest, boolean dryRun) {
+        if (cutoff == null) {
+            throw new IllegalArgumentException("cutoff must not be null");
+        }
+        if (keepLatest < 0) {
+            throw new IllegalArgumentException("keepLatest must be non-negative");
+        }
+        synchronized (lock) {
+            List<RunCandidate> candidates = new ArrayList<>();
+            try (Stream<Path> stream = Files.list(runsRoot())) {
+                for (Path directory : stream.filter(Files::isDirectory).toList()) {
+                    Map<String, Object> record = Map.of();
+                    Path recordFile = directory.resolve("run.json");
+                    if (Files.isRegularFile(recordFile)) {
+                        record = Json.parseObject(AtomicFiles.readText(recordFile));
+                    }
+                    String runId = String.valueOf(record.getOrDefault("run_id", directory.getFileName()));
+                    boolean running = "running".equals(record.get("status"));
+                    Instant finishedAt = instant(record.get("finished_at"));
+                    if (finishedAt == null) {
+                        try {
+                            finishedAt = Files.getLastModifiedTime(directory).toInstant();
+                        } catch (IOException error) {
+                            throw new UncheckedIOException(error);
+                        }
+                    }
+                    candidates.add(new RunCandidate(runId, finishedAt, running));
+                }
+            } catch (IOException error) {
+                throw new UncheckedIOException(error);
+            }
+            candidates.sort(Comparator.comparing(RunCandidate::finishedAt).reversed());
+            List<String> deleted = new ArrayList<>();
+            int kept = 0;
+            for (RunCandidate candidate : candidates) {
+                if (candidate.running() || kept < keepLatest || !candidate.finishedAt().isBefore(cutoff)) {
+                    kept++;
+                    continue;
+                }
+                deleted.add(candidate.runId());
+                if (dryRun) {
+                    continue;
+                }
+                AtomicFiles.deleteRecursively(runsRoot().resolve(Names.safeName(candidate.runId(), "run_id")));
+                deleteIfExists(reviewsRoot().resolve(Names.safeName(candidate.runId(), "run_id") + ".jsonl"));
+                deleteIfExists(locksRoot().resolve(Names.safeName(candidate.runId(), "run_id") + ".lock"));
+                caseIndex.remove(candidate.runId());
+                logTails.remove(candidate.runId());
+            }
+            return deleted;
+        }
+    }
+
+    private record RunCandidate(String runId, Instant finishedAt, boolean running) {
+    }
+
+    private static Instant instant(Object value) {
+        if (value == null || String.valueOf(value).isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(String.valueOf(value));
+        } catch (java.time.format.DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
+    private static void deleteIfExists(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
+        }
     }
 
     @Override

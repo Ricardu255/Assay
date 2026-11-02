@@ -329,6 +329,7 @@ java -jar app/target/assay.jar run \
 | `review` | 保存人工最终结论 |
 | `export` | 导出已确认的 regression 或 few-shot 候选 |
 | `promote-review` | 把一条审核样本晋级到 improvement / regression / holdout |
+| `prune` | 按保留策略清理已完成运行、报告目录和终态 job |
 
 退出码是一份契约：`0` 正常，`1` 硬门禁失败、预算用尽或决策为负，`2` 用法错误或结果需要人工复核。需要人看的运行不会看起来像通过。
 
@@ -362,6 +363,42 @@ java -jar app/target/assay.jar run \
 - `--resume` 会把已落盘用例的消耗计入同一预算，避免恢复后重新获得完整额度。
 - `budget_exhausted` 表示样本不完整，不应直接拿来做版本对比或通过率结论；`compare` 会以 `run_completeness` 阻断，`evolve` 直接给出 `rollback`。
 - 当前预算覆盖被测 Agent 的 adapter 调用；`--use-llm` 的评测复核调用暂不单独计入。
+
+### 重试与熔断
+
+运行类命令的 adapter 调用支持指数退避：
+
+```bash
+--retry-base-seconds 1
+--retry-max-seconds 16
+--retry-jitter 0.2
+--breaker-failures 5
+--breaker-reset-seconds 30
+```
+
+- 退避从 1s 起步、16s 封顶，默认加入 0.2 对称抖动。
+- 连续失败达到阈值后，adapter / LLM 复核各自进入 `OPEN`；冷却结束后只放行一个 `HALF_OPEN` 探针。
+- 熔断是进程内轻量状态机，不引入 Sentinel 等运行时依赖。
+- 运行 summary 会记录 `retry_policy` 与 `circuit_breaker` 状态。
+
+### 保留与清理
+
+```bash
+# 先预览，不删除
+java -jar app/target/assay.jar prune \
+  --store .assay/store --output .assay/runs \
+  --keep-days 30 --keep-runs 100 --keep-jobs 500 --dry-run
+
+# 确认后执行
+java -jar app/target/assay.jar prune \
+  --store .assay/store --output .assay/runs \
+  --keep-days 30 --keep-runs 100 --keep-jobs 500
+```
+
+- 永远保留最新的 `keep-runs` 个运行和 `keep-jobs` 个终态 job。
+- `running` / `QUEUED` 数据不会删除。
+- 只删除早于 `keep-days` 的已完成运行、报告目录和终态 job。
+- 文件存储和 JDBC 存储都支持；`--dry-run` 只返回待删除 ID。
 
 所有子命令都有可直接运行的示例：
 
@@ -497,9 +534,10 @@ java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store -
 - worker 持有租约并定期 heartbeat；租约过期后可被其他 worker 重新领取
 - 取消是协作式的：运行中的任务在当前 case 边界停止，不会强杀 Agent
 - 执行失败按 `max-attempts` 重试；退避默认 1s 起、16s 封顶并按 0.2 抖动，`next_attempt_at` 记录下次可领取时间
-- worker 可用 `--retry-base-seconds`、`--retry-max-seconds`、`--retry-jitter` 调整退避策略
+- worker 可用 `--retry-base-seconds`、`--retry-max-seconds`、`--retry-jitter` 调整退避策略；`run`/`submit` 的 adapter 调用复用同一组参数
+- `--breaker-failures`、`--breaker-reset-seconds` 控制 adapter / LLM 复核熔断
 - 超过重试上限进入 FAILED
-- 运行以非 0 退出（含硬门禁失败和 `budget_exhausted`）时任务进入 FAILED，需要人工提高预算或修复后 `replay`
+- 运行以非 0 退出（含硬门禁失败和 `budget_exhausted`）时任务进入 FAILED，error 会写明运行状态、硬失败数或跳过用例数；需要人工提高预算或修复后 `replay`
 - 提交时可带 `--idempotency-key`；同一个 key + 相同 payload 返回已有 job，key 相同但 payload 不同会明确报冲突
 - FAILED 任务可用 `replay` 回到 QUEUED；`replay_count` 超过 `--max-replays` 后不再重放
 - 投递是 **at-least-once**，不是 exactly-once；重复执行通过 run id + resume + run lock 保底
@@ -539,6 +577,8 @@ mvn -q -pl :assay-spring-boot-starter -am test
 - `assay.runs`、`assay.cases`、`assay.case.duration`
 - `assay.batches`、`assay.batch.size`、`assay.store.append`
 - `assay.runs.started`、`assay.run.duration`
+- `assay.retries`、`assay.retry.delay`
+- `assay.budget.tokens`、`assay.budget.cost_usd`、`assay.budget.exhausted`、`assay.budget.skipped_cases`
 
 标签只包含 `suite` / `source` / `status`，不带 `run_id` / `case_id`，避免时间序列基数爆炸。Starter 会自动注入容器里的 `EvaluationListener` bean。
 
@@ -705,6 +745,8 @@ mvn -q test
 - **OpenAI Trace** —— span 类型识别的各种写法、token 与错误聚合、按 trace id 分组与非法输入拒绝。
 - **评测预算** —— Token/成本预扣与结算、缺失用量按预扣计费、并发预留不超卖、预算用尽后跳过用例、恢复时计入历史消耗。
 - **异步队列** —— 幂等 key + payload 冲突、失败重放上限、指数退避与抖动、租约过期回收、预算用尽任务进入 FAILED。
+- **重试与熔断** —— adapter 调用退避、熔断阈值与冷却、半开探针、OPEN 后跳过外部调用。
+- **保留与清理** —— 文件/JDBC 运行与 job 清理、保留最新记录、dry-run 预览、运行中数据不删除。
 - **不完整运行** —— `budget_exhausted` 阻断 `compare`，并让 `evolve` 直接 rollback。
 - **其余** —— JSON 编解码、评测指标、审核样本晋级、命令行退出码（`0` / `1` / `2`）。
 

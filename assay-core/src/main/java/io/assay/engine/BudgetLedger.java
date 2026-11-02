@@ -72,7 +72,7 @@ public final class BudgetLedger {
         if (!enabled() || reservation == null) {
             return;
         }
-        release(reservation);
+        releaseReserved(reservation);
         BudgetUsage actual = usage == null ? BudgetUsage.unknown() : usage;
         calls++;
         if (actual.tokensReported()) {
@@ -95,7 +95,7 @@ public final class BudgetLedger {
         if (!enabled() || reservation == null) {
             return;
         }
-        release(reservation);
+        releaseReserved(reservation);
         calls++;
         failedCalls++;
         spentTokens = saturatingAdd(spentTokens, reservation.tokens());
@@ -132,6 +132,14 @@ public final class BudgetLedger {
         return exhausted;
     }
 
+    /** Releases a reservation without charging it, for a call that never reached the provider. */
+    public synchronized void release(Reservation reservation) {
+        if (!enabled() || reservation == null) {
+            return;
+        }
+        releaseReserved(reservation);
+    }
+
     public synchronized boolean overrun() {
         return overrun;
     }
@@ -163,7 +171,7 @@ public final class BudgetLedger {
         return result;
     }
 
-    private void release(Reservation reservation) {
+    private void releaseReserved(Reservation reservation) {
         reservedTokens = Math.max(0, reservedTokens - reservation.tokens());
         reservedCostUsd = Math.max(0, reservedCostUsd - reservation.costUsd());
     }

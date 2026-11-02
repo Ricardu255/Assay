@@ -8,6 +8,7 @@ import io.assay.compare.CompareGate;
 import io.assay.diff.DiffAnalysis;
 import io.assay.diff.DiffSnapshot;
 import io.assay.engine.CaseLoader;
+import io.assay.engine.CircuitBreaker;
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
 import io.assay.engine.LlmReviewer;
@@ -43,7 +44,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +56,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * The {@code assay} command line.
@@ -84,6 +88,7 @@ public final class AssayCli {
                 new CommandLine.Spec("jobs", "list queued evaluation jobs"),
                 new CommandLine.Spec("cancel", "cancel a queued or running job"),
                 new CommandLine.Spec("replay", "replay a failed evaluation job"),
+                new CommandLine.Spec("prune", "delete old runs and terminal job records"),
                 new CommandLine.Spec("run", "run one externally supplied suite"),
                 new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff"),
                 new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task"),
@@ -120,6 +125,7 @@ public final class AssayCli {
                 case "jobs" -> jobs(args);
                 case "cancel" -> cancelJob(args);
                 case "replay" -> replayJob(args);
+                case "prune" -> prune(args);
                 case "run" -> runSuite(args);
                 case "select-tests" -> selectTests(args);
                 case "audit-scope" -> auditScope(args);
@@ -196,6 +202,13 @@ public final class AssayCli {
                     .required("job-id", CommandLine.Kind.STRING)
                     .option("max-attempts", CommandLine.Kind.INTEGER, "3")
                     .option("max-replays", CommandLine.Kind.INTEGER, "3");
+            case "prune" -> new CommandLine.Spec("prune", "delete old runs and terminal job records")
+                    .option("store", CommandLine.Kind.STRING, ".assay/store")
+                    .option("output", CommandLine.Kind.STRING, ".assay/runs")
+                    .option("keep-days", CommandLine.Kind.INTEGER, "30")
+                    .option("keep-runs", CommandLine.Kind.INTEGER, "100")
+                    .option("keep-jobs", CommandLine.Kind.INTEGER, "500")
+                    .flag("dry-run");
             case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                     .required("adapter", CommandLine.Kind.STRING)
                     .option("adapter-class", CommandLine.Kind.STRING, null)
@@ -381,6 +394,11 @@ public final class AssayCli {
                 .option("max-cost-usd", CommandLine.Kind.DECIMAL, null)
                 .option("reserve-output-tokens", CommandLine.Kind.INTEGER, "512")
                 .option("reserve-cost-usd", CommandLine.Kind.DECIMAL, "0.01")
+                .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
+                .option("breaker-failures", CommandLine.Kind.INTEGER, "5")
+                .option("breaker-reset-seconds", CommandLine.Kind.DECIMAL, "30")
                 .flag("use-llm")
                 .flag("collect-few-shot")
                 .option("run-identity", CommandLine.Kind.STRING, null);
@@ -405,17 +423,30 @@ public final class AssayCli {
                 args.decimalOrNull("max-cost-usd"),
                 args.integer("reserve-output-tokens"),
                 args.decimal("reserve-cost-usd"));
+        RetryPolicy retryPolicy = retryPolicy(args);
+        CircuitBreaker adapterBreaker = breaker(args);
+        LlmReviewer reviewer = reviewer(args.flag("use-llm"));
+        CircuitBreaker reviewerBreaker = reviewer == null ? CircuitBreaker.disabled() : breaker(args);
         return new EvaluationEngine(
                 adapter,
                 store,
-                reviewer(args.flag("use-llm")),
+                reviewer,
                 args.integer("workers"),
                 args.integer("retries"),
                 args.decimal("timeout"),
                 args.flag("collect-few-shot"),
                 args.string("run-identity"),
                 EvaluationListener.NOOP,
-                budget);
+                budget,
+                retryPolicy,
+                adapterBreaker,
+                reviewerBreaker);
+    }
+
+    private static CircuitBreaker breaker(CommandLine.Namespace args) {
+        return new CircuitBreaker(
+                args.integer("breaker-failures"),
+                Duration.ofMillis(Math.round(args.decimal("breaker-reset-seconds") * 1000)));
     }
 
     private static int submit(CommandLine.Namespace args) {
@@ -448,6 +479,11 @@ public final class AssayCli {
             }
             payload.put("reserve_output_tokens", args.integer("reserve-output-tokens"));
             payload.put("reserve_cost_usd", args.decimal("reserve-cost-usd"));
+            payload.put("retry_base_seconds", args.decimal("retry-base-seconds"));
+            payload.put("retry_max_seconds", args.decimal("retry-max-seconds"));
+            payload.put("retry_jitter", args.decimal("retry-jitter"));
+            payload.put("breaker_failures", args.integer("breaker-failures"));
+            payload.put("breaker_reset_seconds", args.decimal("breaker-reset-seconds"));
             payload.put("use_llm", args.flag("use-llm"));
             payload.put("collect_few_shot", args.flag("collect-few-shot"));
             if (args.string("run-identity") != null) {
@@ -511,6 +547,74 @@ public final class AssayCli {
         }
     }
 
+    private static int prune(CommandLine.Namespace args) {
+        int keepDays = args.integer("keep-days");
+        int keepRuns = args.integer("keep-runs");
+        int keepJobs = args.integer("keep-jobs");
+        if (keepDays < 0 || keepRuns < 0 || keepJobs < 0) {
+            throw new CommandLine.UsageException("prune limits must be non-negative", 2, false);
+        }
+        boolean dryRun = args.flag("dry-run");
+        Instant cutoff = Instant.now().minus(Duration.ofDays(keepDays));
+        List<String> runs;
+        List<String> jobs;
+        try (Results results = Stores.open(args.string("store"));
+                JobStore jobsStore = jobStore(args)) {
+            runs = results.pruneRuns(cutoff, keepRuns, dryRun);
+            jobs = jobsStore.pruneJobs(cutoff, keepJobs, dryRun);
+        }
+        int artifacts = pruneOutputArtifacts(args.path("output"), cutoff, keepRuns, dryRun);
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("cutoff", cutoff.toString());
+        output.put("dry_run", dryRun);
+        output.put("runs", runs);
+        output.put("jobs", jobs);
+        output.put("artifacts", artifacts);
+        System.out.println(Json.write(output));
+        return 0;
+    }
+
+    private static int pruneOutputArtifacts(Path output, Instant cutoff, int keepLatest, boolean dryRun) {
+        if (output == null || !Files.isDirectory(output)) {
+            return 0;
+        }
+        List<Path> directories;
+        try (Stream<Path> stream = Files.list(output)) {
+            directories = stream.filter(Files::isDirectory)
+                    .filter(AssayCli::isRunArtifactDirectory)
+                    .sorted(Comparator.comparing(AssayCli::lastModified).reversed())
+                    .toList();
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
+        }
+        int deleted = 0;
+        for (int index = keepLatest; index < directories.size(); index++) {
+            Path directory = directories.get(index);
+            if (!lastModified(directory).isBefore(cutoff)) {
+                continue;
+            }
+            deleted++;
+            if (!dryRun) {
+                AtomicFiles.deleteRecursively(directory);
+            }
+        }
+        return deleted;
+    }
+
+    private static Instant lastModified(Path path) {
+        try {
+            return Files.getLastModifiedTime(path).toInstant();
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
+        }
+    }
+
+    /** A report directory, not an arbitrary directory that happens to live under --output. */
+    private static boolean isRunArtifactDirectory(Path directory) {
+        return Files.isRegularFile(directory.resolve("results.json"))
+                || Files.isRegularFile(directory.resolve("report.md"));
+    }
+
     private static int worker(CommandLine.Namespace args) {
         int leaseSeconds = Math.max(1, args.integer("lease-seconds"));
         long pollMillis = Math.max(250, Math.round(Math.max(0.25, args.decimal("poll")) * 1000));
@@ -572,7 +676,7 @@ public final class AssayCli {
             } else if (code == 0) {
                 store.succeed(job.id(), workerId);
             } else {
-                store.finish(job.id(), workerId, JobStatus.FAILED, "exit code " + code);
+                store.finish(job.id(), workerId, JobStatus.FAILED, failureReason(job, code));
             }
         } catch (RuntimeException error) {
             if (store.isCancelRequested(job.id())) {
@@ -586,6 +690,34 @@ public final class AssayCli {
             Thread.interrupted();
         }
         System.out.println("job " + job.id() + " finished with exit code " + code);
+    }
+
+    /** Reads the produced summary so a failed job says why, not only which exit code it returned. */
+    private static String failureReason(Job job, int code) {
+        Object output = job.payload().get("output");
+        Object runId = job.payload().get("run_id");
+        if (output == null || runId == null) {
+            return "exit code " + code;
+        }
+        Path results = Path.of(String.valueOf(output)).resolve(String.valueOf(runId)).resolve("results.json");
+        if (!Files.isRegularFile(results)) {
+            return "exit code " + code;
+        }
+        try {
+            Map<String, Object> summary = Json.parseObject(AtomicFiles.readText(results));
+            String status = String.valueOf(summary.getOrDefault("status", "unknown"));
+            if ("budget_exhausted".equals(status)) {
+                return "run budget_exhausted: skipped "
+                        + summary.getOrDefault("skipped_case_count", 0) + " cases (exit code " + code + ")";
+            }
+            if ("failed".equals(status)) {
+                return "run failed: " + summary.getOrDefault("hard_failures", 0)
+                        + " hard failures (exit code " + code + ")";
+            }
+            return "run status " + status + " (exit code " + code + ")";
+        } catch (RuntimeException malformed) {
+            return "exit code " + code;
+        }
     }
 
     private static String[] runArgs(Job job) {
@@ -620,6 +752,11 @@ public final class AssayCli {
         addOption(args, payload, "max_cost_usd", "--max-cost-usd");
         addOption(args, payload, "reserve_output_tokens", "--reserve-output-tokens");
         addOption(args, payload, "reserve_cost_usd", "--reserve-cost-usd");
+        addOption(args, payload, "retry_base_seconds", "--retry-base-seconds");
+        addOption(args, payload, "retry_max_seconds", "--retry-max-seconds");
+        addOption(args, payload, "retry_jitter", "--retry-jitter");
+        addOption(args, payload, "breaker_failures", "--breaker-failures");
+        addOption(args, payload, "breaker_reset_seconds", "--breaker-reset-seconds");
         if (job.attempts() > 1) {
             args.add("--resume");
         }

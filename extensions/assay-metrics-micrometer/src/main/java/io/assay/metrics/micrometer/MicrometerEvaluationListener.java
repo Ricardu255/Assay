@@ -46,6 +46,13 @@ public final class MicrometerEvaluationListener implements EvaluationListener {
         recordCase(evalCase, "budget_exhausted");
     }
 
+    @Override
+    public void onRetry(String runId, EvalCase evalCase, int attempt, long delayMillis) {
+        String suite = tag(evalCase.suite());
+        registry.counter("assay.retries", "suite", suite, "attempt", String.valueOf(attempt)).increment();
+        registry.timer("assay.retry.delay", "suite", suite).record(Duration.ofMillis(Math.max(0, delayMillis)));
+    }
+
     private void recordCase(EvalCase evalCase, String status) {
         Long started = caseStarts.get();
         caseStarts.remove();
@@ -76,6 +83,28 @@ public final class MicrometerEvaluationListener implements EvaluationListener {
                 ? started.source()
                 : tag(String.valueOf(summary.getOrDefault("source", "unknown")));
         recordRun(suite, source, status, durationNanos);
+        recordBudget(suite, summary);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void recordBudget(String suite, Map<String, Object> summary) {
+        Object raw = summary.get("budget");
+        if (!(raw instanceof Map<?, ?> budget) || !Boolean.TRUE.equals(budget.get("enabled"))) {
+            return;
+        }
+        Object tokens = budget.get("spent_tokens");
+        if (tokens instanceof Number number) {
+            registry.summary("assay.budget.tokens", "suite", suite).record(number.doubleValue());
+        }
+        Object cost = budget.get("spent_cost_usd");
+        if (cost instanceof Number number) {
+            registry.summary("assay.budget.cost_usd", "suite", suite).record(number.doubleValue());
+        }
+        Object skipped = summary.get("skipped_case_count");
+        if (skipped instanceof Number number && number.doubleValue() > 0) {
+            registry.counter("assay.budget.exhausted", "suite", suite).increment();
+            registry.summary("assay.budget.skipped_cases", "suite", suite).record(number.doubleValue());
+        }
     }
 
     @Override

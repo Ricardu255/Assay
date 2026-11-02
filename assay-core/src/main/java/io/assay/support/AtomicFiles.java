@@ -7,6 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Text file helpers.
@@ -80,6 +83,25 @@ public final class AtomicFiles {
     public static void createDirectories(Path path) {
         try {
             Files.createDirectories(path);
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
+        }
+    }
+
+    /** Deletes a file or directory tree; returns the number of removed entries. */
+    public static int deleteRecursively(Path root) {
+        if (!Files.exists(root)) {
+            return 0;
+        }
+        try (Stream<Path> stream = Files.walk(root)) {
+            List<Path> paths = stream.sorted(Comparator.reverseOrder()).toList();
+            int deleted = 0;
+            for (Path path : paths) {
+                if (Files.deleteIfExists(path)) {
+                    deleted++;
+                }
+            }
+            return deleted;
         } catch (IOException error) {
             throw new UncheckedIOException(error);
         }

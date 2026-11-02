@@ -2,6 +2,7 @@ package io.assay.store;
 
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -53,6 +54,18 @@ public interface Results extends AutoCloseable {
     void saveEvolution(String experimentId, String candidateId, String decision, Map<String, Object> result);
 
     Map<String, Object> getEvolution(String experimentId);
+
+    /**
+     * Deletes finished runs older than the cutoff while always keeping the newest {@code keepLatest}.
+     *
+     * <p>Running runs are never deleted. A dry run returns the would-be-deleted run ids without
+     * touching storage, which lets an operator review the list before a destructive cleanup.
+     *
+     * @return run ids that were deleted, or would be deleted in dry-run mode
+     */
+    default List<String> pruneRuns(Instant cutoff, int keepLatest, boolean dryRun) {
+        throw new UnsupportedOperationException("this result store does not support pruning");
+    }
 
     @Override
     void close();

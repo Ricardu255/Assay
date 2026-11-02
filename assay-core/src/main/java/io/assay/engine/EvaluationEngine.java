@@ -11,7 +11,9 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.RunContext;
 import io.assay.model.TraceEvent;
 import io.assay.rules.Rules;
+import io.assay.runner.RetryPolicy;
 import io.assay.store.Results;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -49,6 +51,9 @@ public final class EvaluationEngine {
     private final String runIdentity;
     private final EvaluationListener listener;
     private final EvaluationBudget budget;
+    private final RetryPolicy retryPolicy;
+    private final CircuitBreaker adapterBreaker;
+    private final CircuitBreaker reviewerBreaker;
 
     public EvaluationEngine(ProjectAdapter adapter, Results store) {
         this(adapter, store, null, 1, 0, 30, false, null);
@@ -92,6 +97,24 @@ public final class EvaluationEngine {
             String runIdentity,
             EvaluationListener listener,
             EvaluationBudget budget) {
+        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener,
+                budget, RetryPolicy.none(), CircuitBreaker.disabled(), CircuitBreaker.disabled());
+    }
+
+    public EvaluationEngine(
+            ProjectAdapter adapter,
+            Results store,
+            LlmReviewer reviewer,
+            int workers,
+            int retries,
+            double timeoutSeconds,
+            boolean collectFewShot,
+            String runIdentity,
+            EvaluationListener listener,
+            EvaluationBudget budget,
+            RetryPolicy retryPolicy,
+            CircuitBreaker adapterBreaker,
+            CircuitBreaker reviewerBreaker) {
         if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
             throw new IllegalArgumentException("workers must be positive and bounded; retries must be non-negative");
         }
@@ -113,6 +136,9 @@ public final class EvaluationEngine {
         this.runIdentity = runIdentity;
         this.listener = listener == null ? EvaluationListener.NOOP : listener;
         this.budget = budget == null ? EvaluationBudget.disabled() : budget;
+        this.retryPolicy = retryPolicy == null ? RetryPolicy.none() : retryPolicy;
+        this.adapterBreaker = adapterBreaker == null ? CircuitBreaker.disabled() : adapterBreaker;
+        this.reviewerBreaker = reviewerBreaker == null ? CircuitBreaker.disabled() : reviewerBreaker;
     }
 
     public int requestedWorkers() {
@@ -135,6 +161,18 @@ public final class EvaluationEngine {
     /** The configured run budget; a disabled budget is a no-op. */
     public EvaluationBudget budget() {
         return budget;
+    }
+
+    public RetryPolicy retryPolicy() {
+        return retryPolicy;
+    }
+
+    public CircuitBreaker adapterBreaker() {
+        return adapterBreaker;
+    }
+
+    public CircuitBreaker reviewerBreaker() {
+        return reviewerBreaker;
     }
 
     private NormalizedTrace readOneTrace(EvalCase evalCase, String runId, String source, int attempt) {
@@ -197,16 +235,26 @@ public final class EvaluationEngine {
         for (int runIndex = 0; runIndex < consistencyRuns; runIndex++) {
             RuntimeException lastError = null;
             for (int attempt = 0; attempt <= retries; attempt++) {
+                if (attempt > 0) {
+                    pauseForRetry(runId, evalCase, attempt);
+                }
                 BudgetLedger.Reservation reservation = reserveBudget(ledger, evalCase);
                 try {
+                    adapterBreaker.beforeCall();
                     NormalizedTrace trace = readOneTrace(evalCase, runId, source, attempt);
+                    adapterBreaker.recordSuccess();
                     ledger.settle(reservation, BudgetUsage.fromTrace(trace));
                     traces.add(trace);
                     lastError = null;
                     break;
+                } catch (CircuitOpenException open) {
+                    ledger.release(reservation);
+                    throw open;
                 } catch (BudgetExhaustedException exhausted) {
+                    ledger.release(reservation);
                     throw exhausted;
                 } catch (RuntimeException error) {
+                    adapterBreaker.recordFailure();
                     // A failed call still may have consumed provider tokens; charge the reservation.
                     ledger.settleFailure(reservation);
                     // Adapter boundary: keep the external failure and retry it while budget remains.
@@ -218,6 +266,20 @@ public final class EvaluationEngine {
             }
         }
         return traces;
+    }
+
+    private void pauseForRetry(String runId, EvalCase evalCase, int attempt) {
+        Duration delay = retryPolicy.delayFor(attempt);
+        if (delay.isZero()) {
+            return;
+        }
+        notifyRetry(runId, evalCase, attempt, delay.toMillis());
+        try {
+            Thread.sleep(delay.toMillis());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("evaluation retry interrupted", interrupted);
+        }
     }
 
     /** Reserves before a call so concurrent cases cannot all pass a check that is already spent. */
@@ -289,12 +351,14 @@ public final class EvaluationEngine {
                 notifyStageStarted(runId, EvaluationListener.Stage.LLM, evalCase);
                 long llmStarted = System.nanoTime();
                 try {
+                    reviewerBreaker.beforeCall();
                     result.setLlmReview(
                             reviewer.analyze(
                                     evalCase,
                                     traces,
                                     checks,
                                     collectFewShot && result.hardPass() && result.softWarningCount() == 0));
+                    reviewerBreaker.recordSuccess();
                     notifyStageFinished(
                             runId,
                             EvaluationListener.Stage.LLM,
@@ -303,6 +367,9 @@ public final class EvaluationEngine {
                             null,
                             Map.of("collect_few_shot", collectFewShot));
                 } catch (RuntimeException error) {
+                    if (!(error instanceof CircuitOpenException)) {
+                        reviewerBreaker.recordFailure();
+                    }
                     notifyStageFinished(
                             runId,
                             EvaluationListener.Stage.LLM,
@@ -314,6 +381,9 @@ public final class EvaluationEngine {
                     Map<String, Object> failure = new LinkedHashMap<>();
                     failure.put("error", String.valueOf(error));
                     failure.put("authoritative", false);
+                    if (error instanceof CircuitOpenException) {
+                        failure.put("circuit_open", true);
+                    }
                     result.setLlmReview(failure);
                 }
             }
@@ -376,6 +446,14 @@ public final class EvaluationEngine {
     private void notifyCaseSkipped(String runId, EvalCase evalCase, String reason) {
         try {
             listener.onCaseSkipped(runId, evalCase, reason == null ? "run budget exhausted" : reason);
+        } catch (RuntimeException ignored) {
+            // Observers never change evaluation truth.
+        }
+    }
+
+    private void notifyRetry(String runId, EvalCase evalCase, int attempt, long delayMillis) {
+        try {
+            listener.onRetry(runId, evalCase, attempt, delayMillis);
         } catch (RuntimeException ignored) {
             // Observers never change evaluation truth.
         }
@@ -656,6 +734,19 @@ public final class EvaluationEngine {
         summary.put("soft_warnings", softWarnings);
         if (budget.enabled()) {
             summary.put("budget", ledger.snapshot());
+        }
+        if (retryPolicy.enabled()) {
+            Map<String, Object> retry = new LinkedHashMap<>();
+            retry.put("base_delay_ms", retryPolicy.baseDelay().toMillis());
+            retry.put("max_delay_ms", retryPolicy.maxDelay().toMillis());
+            retry.put("jitter", retryPolicy.jitter());
+            summary.put("retry_policy", retry);
+        }
+        if (adapterBreaker.enabled() || reviewerBreaker.enabled()) {
+            Map<String, Object> breaker = new LinkedHashMap<>();
+            breaker.put("adapter", adapterBreaker.snapshot());
+            breaker.put("reviewer", reviewerBreaker.snapshot());
+            summary.put("circuit_breaker", breaker);
         }
         summary.put("results", results);
         notifyRunFinished(summary, System.nanoTime() - runStarted);

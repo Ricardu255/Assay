@@ -44,6 +44,10 @@ public interface EvaluationListener {
     default void onCaseSkipped(String runId, EvalCase evalCase, String reason) {
     }
 
+    /** A retryable adapter call is about to sleep before its next attempt. */
+    default void onRetry(String runId, EvalCase evalCase, int attempt, long delayMillis) {
+    }
+
     /** A unit of work inside a case or run, used for child spans and stage metrics. */
     enum Stage {
         ADAPTER,

@@ -4,6 +4,7 @@ import io.assay.engine.EvaluationListener;
 import io.assay.model.CaseResult;
 import io.assay.model.EvalCase;
 import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
@@ -98,6 +99,19 @@ public final class OtelEvaluationListener implements EvaluationListener {
         span.setAttribute(STATUS, "budget_exhausted");
         span.setAttribute(SKIP_REASON, reason);
         span.end();
+    }
+
+    @Override
+    public void onRetry(String runId, EvalCase evalCase, int attempt, long delayMillis) {
+        Span span = caseSpans.get();
+        if (span == null) {
+            return;
+        }
+        span.addEvent(
+                "assay.retry",
+                Attributes.of(
+                        AttributeKey.longKey("attempt"), (long) attempt,
+                        AttributeKey.longKey("delay_ms"), Math.max(0, delayMillis)));
     }
 
     @Override

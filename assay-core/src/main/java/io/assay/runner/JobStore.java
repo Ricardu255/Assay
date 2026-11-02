@@ -1,6 +1,7 @@
 package io.assay.runner;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,6 +63,15 @@ public interface JobStore extends AutoCloseable {
      * @return the requeued job, or empty if it is not failed or the replay limit is reached
      */
     Optional<Job> replay(String jobId, int maxAttempts, int maxReplays);
+
+    /**
+     * Deletes terminal jobs older than the cutoff while always keeping the newest {@code keepLatest}.
+     *
+     * <p>Queued and running jobs are never deleted. A dry run returns the would-be-deleted job ids.
+     */
+    default List<String> pruneJobs(Instant cutoff, int keepLatest, boolean dryRun) {
+        throw new UnsupportedOperationException("this job store does not support pruning");
+    }
 
     @Override
     void close();

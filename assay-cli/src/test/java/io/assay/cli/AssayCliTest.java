@@ -338,6 +338,7 @@ class AssayCliTest {
 
             Job finished = jobs.find(queued.id()).orElseThrow();
             assertEquals(JobStatus.FAILED, finished.status());
+            assertTrue(finished.error().contains("budget_exhausted"), finished.error());
             Map<String, Object> results = Json.parseObject(AtomicFiles.readText(
                     root.resolve("runs").resolve(queued.payload().get("run_id").toString()).resolve("results.json")));
             assertEquals("budget_exhausted", results.get("status"));
@@ -374,6 +375,39 @@ class AssayCliTest {
         Map<String, Object> budget = asMap(results.get("budget"));
         assertEquals(4L, budget.get("spent_tokens"));
         assertTrue(AtomicFiles.readText(runDir.resolve("report.md")).contains("Budget tokens"));
+    }
+
+    @Test
+    void pruneKeepsTheNewestRunAndDeletesOlderArtifacts(@TempDir Path root) throws Exception {
+        Path cases = writeCases(root, "prune.jsonl", List.of(echoCase("C1", "hello", "ECHO", "hello")));
+        Path store = root.resolve("store");
+        Path output = root.resolve("runs");
+        for (String runId : List.of("prune-old", "prune-new")) {
+            assertEquals(0, AssayCli.run(new String[] {
+                "run",
+                "--adapter", "io.assay.examples.EchoAdapter",
+                "--suite", "prune",
+                "--cases", cases.toString(),
+                "--store", store.toString(),
+                "--output", output.toString(),
+                "--run-id", runId
+            }));
+        }
+
+        assertEquals(0, AssayCli.run(new String[] {
+            "prune",
+            "--store", store.toString(),
+            "--output", output.toString(),
+            "--keep-days", "0",
+            "--keep-runs", "1",
+            "--keep-jobs", "0"
+        }));
+
+        try (var runDirs = Files.list(output);
+                var storedRuns = Files.list(store.resolve("runs"))) {
+            assertEquals(1, runDirs.filter(Files::isDirectory).count());
+            assertEquals(1, storedRuns.filter(Files::isDirectory).count());
+        }
     }
 
     @Test

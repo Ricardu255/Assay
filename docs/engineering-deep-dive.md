@@ -228,6 +228,21 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 - 租约过期回收后立即允许重领：租约本身已经提供了等待时间，再叠加一层退避会拖慢恢复。
 - 超过 `max_attempts` 进入 FAILED；`replay` 显式重置 attempts、退避时间和失败原因，并受 `max_replays` 约束。
 
+### 4.8 评测调用退避与熔断
+
+- 同一个 `RetryPolicy` 同时服务队列 job 和评测 adapter 调用；单次评测内重试也先等待退避。
+- 熔断器是进程内状态机：`CLOSED → OPEN → HALF_OPEN → CLOSED`，不依赖 Sentinel。
+- `HALF_OPEN` 只放行一个探针；成功关闭，失败立即重新 `OPEN`，避免恢复瞬间把并发流量全部打到故障服务。
+- adapter 和 LLM 复核各有独立 breaker；LLM 熔断只影响非权威分析，不改变评测结论。
+- 预算与熔断的交互：熔断打开时释放预扣，不把“没有真正发出的调用”记成消耗。
+
+### 4.9 保留与清理
+
+- `prune` 同时处理结果存储、报告目录和终态 job；`running` / `QUEUED` 永不删除。
+- 始终保留最新 `keep-runs` / `keep-jobs`，只删除早于 `keep-days` 的记录。
+- 文件存储删除 run 目录、review 文件和 lock 文件；JDBC 在事务内删除 case、manifest、review、lock 和 run 行。
+- `--dry-run` 只返回待删除 ID，便于上线前先看清单。
+
 ---
 
 ## 五、隔离：候选不能乱跑

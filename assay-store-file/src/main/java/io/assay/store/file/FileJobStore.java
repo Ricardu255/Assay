@@ -268,6 +268,40 @@ public final class FileJobStore implements JobStore {
     }
 
     @Override
+    public List<String> pruneJobs(Instant cutoff, int keepLatest, boolean dryRun) {
+        if (cutoff == null) {
+            throw new IllegalArgumentException("cutoff must not be null");
+        }
+        if (keepLatest < 0) {
+            throw new IllegalArgumentException("keepLatest must be non-negative");
+        }
+        return locked(() -> {
+            List<Job> terminal = new ArrayList<>();
+            for (Path file : files()) {
+                Job job = read(file);
+                if (job.status() == JobStatus.SUCCEEDED
+                        || job.status() == JobStatus.FAILED
+                        || job.status() == JobStatus.CANCELLED) {
+                    terminal.add(job);
+                }
+            }
+            terminal.sort(Comparator.comparing(Job::createdAt).reversed());
+            List<String> deleted = new ArrayList<>();
+            for (int index = keepLatest; index < terminal.size(); index++) {
+                Job job = terminal.get(index);
+                if (!job.createdAt().isBefore(cutoff)) {
+                    continue;
+                }
+                deleted.add(job.id());
+                if (!dryRun) {
+                    Files.deleteIfExists(path(job.id()));
+                }
+            }
+            return deleted;
+        });
+    }
+
+    @Override
     public void close() {
         // No open resources.
     }

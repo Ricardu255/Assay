@@ -524,6 +524,63 @@ public final class JdbcJobStore implements JobStore {
     }
 
     @Override
+    public List<String> pruneJobs(Instant cutoff, int keepLatest, boolean dryRun) {
+        if (cutoff == null) {
+            throw new IllegalArgumentException("cutoff must not be null");
+        }
+        if (keepLatest < 0) {
+            throw new IllegalArgumentException("keepLatest must be non-negative");
+        }
+        List<JobRow> rows = new ArrayList<>();
+        try (Connection connection = connections.open();
+                PreparedStatement select = connection.prepareStatement("""
+                        select job_id, coalesce(finished_at, created_at) as ended_at
+                        from assay_job
+                        where status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
+                        order by ended_at desc
+                        """)) {
+            try (ResultSet result = select.executeQuery()) {
+                while (result.next()) {
+                    rows.add(new JobRow(result.getString("job_id"), instant(result.getTimestamp("ended_at"))));
+                }
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot list jobs for pruning", error);
+        }
+        List<String> deleted = new ArrayList<>();
+        for (int index = keepLatest; index < rows.size(); index++) {
+            JobRow row = rows.get(index);
+            if (row.endedAt() == null || !row.endedAt().isBefore(cutoff)) {
+                continue;
+            }
+            deleted.add(row.jobId());
+        }
+        if (dryRun || deleted.isEmpty()) {
+            return deleted;
+        }
+        try (Connection connection = connections.open()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement delete = connection.prepareStatement("delete from assay_job where job_id = ?")) {
+                for (String jobId : deleted) {
+                    delete.setString(1, jobId);
+                    delete.addBatch();
+                }
+                delete.executeBatch();
+                connection.commit();
+                return deleted;
+            } catch (SQLException error) {
+                rollback(connection);
+                throw new IllegalStateException("cannot prune jobs", error);
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot prune jobs", error);
+        }
+    }
+
+    private record JobRow(String jobId, Instant endedAt) {
+    }
+
+    @Override
     public void close() {
         // Connections are opened per operation.
     }

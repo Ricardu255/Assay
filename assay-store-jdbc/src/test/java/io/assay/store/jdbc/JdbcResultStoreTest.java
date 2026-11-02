@@ -12,6 +12,7 @@ import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
 import io.assay.store.Results;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +50,24 @@ class JdbcResultStoreTest {
         store.finishRun("run-1", "passed");
         assertThrows(IllegalArgumentException.class, () -> store.startRun(
                 "run-1", "adapter", "suite", "online", Map.of("workers", 1), false, Map.of()));
+    }
+
+    @Test
+    void prunesOldFinishedRunsAndTheirCases() {
+        for (int index = 1; index <= 3; index++) {
+            String runId = "prune-" + index;
+            store.startRun(runId, "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash"));
+            store.saveCases(List.of(caseResult(runId, "C1", true)));
+            store.finishRun(runId, "passed");
+        }
+        Instant cutoff = Instant.now().plusSeconds(60);
+
+        assertEquals(2, store.pruneRuns(cutoff, 1, true).size());
+        assertEquals(2, store.pruneRuns(cutoff, 1, false).size());
+        int remaining = store.listResults("prune-1").size()
+                + store.listResults("prune-2").size()
+                + store.listResults("prune-3").size();
+        assertEquals(1, remaining);
     }
 
     @Test

@@ -114,6 +114,22 @@ class JdbcJobStoreTest {
     }
 
     @Test
+    void prunesOldTerminalJobsButKeepsQueuedWork() {
+        try (JdbcJobStore store = store()) {
+            for (int index = 1; index <= 3; index++) {
+                Job job = store.submit(Map.of("suite", "suite-" + index), 1);
+                assertTrue(store.claim("worker", Duration.ofSeconds(30)).isPresent());
+                store.succeed(job.id(), "worker");
+            }
+            Job queued = store.submit(Map.of("suite", "queued"), 1);
+
+            assertEquals(2, store.pruneJobs(Instant.now().plusSeconds(60), 1, false).size());
+            assertEquals(2, store.list(10).size());
+            assertTrue(store.find(queued.id()).isPresent());
+        }
+    }
+
+    @Test
     void idempotentSubmitRejectsADifferentPayload() {
         try (JobStore store = store()) {
             Job first = store.submit("checkout-42", Map.of("suite", "smoke", "cases", "a"), 2);
