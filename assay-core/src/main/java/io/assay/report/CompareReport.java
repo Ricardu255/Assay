@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Renders the comparison report produced by {@link io.assay.compare.CompareEngine}.
+ * Renders the comparison report produced by {@link io.assay.release.CompareEngine}.
  *
  * <p>The JSON report is the source of truth; this Markdown view is the one-screen artifact a release
  * owner reads first. Every section answers one question: can this candidate ship, which cases moved,

@@ -8,6 +8,7 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.model.RunContext;
 import io.assay.model.TraceEvent;
+import io.assay.opentrace.OpenAiTrace;
 import io.assay.rules.RuleConfig;
 import io.assay.support.AtomicFiles;
 import java.io.IOException;
@@ -28,14 +29,13 @@ import java.util.Set;
 /**
  * Evaluates traces exported by another runtime, without a compiled Java adapter.
  *
- * <p>Two input shapes are accepted. {@code normalized} is the JSON projection of
+ * <p>Three input shapes are accepted. {@code normalized} is the JSON projection of
  * {@link NormalizedTrace}; {@code openinference} reads the attribute conventions used by Phoenix and
- * OpenTelemetry exports, including OTLP's attribute arrays and {@code resourceSpans} wrapper. A run is
- * associated with an evaluation case by {@code case_id} (normalized) or an attribute such as
- * {@code assay.case_id} (OpenInference).
- *
- * <p>The adapter is read-only: it never calls an agent, so the CLI must run with
- * {@code --source offline}. A case missing from the export fails with an explicit message rather than
+ * OpenTelemetry exports, including OTLP's attribute arrays and {@code resourceSpans} wrapper;
+ * {@code openai} reads the JSONL span export of the OpenAI Agents SDK. A run is associated with an
+ * evaluation case by {@code case_id} (normalized) or an attribute such as {@code assay.case_id}
+ * (OpenInference); for {@code openai} exports the case metadata {@code trace_ref} must name the
+ * OpenAI trace id. A case missing from the export fails with an explicit message rather than
  * silently disappearing from the report.
  */
 public final class TraceFileAdapter {
@@ -65,8 +65,9 @@ public final class TraceFileAdapter {
 
         String name = optionalText(config.get("name")) == null ? "trace-file" : optionalText(config.get("name"));
         String format = optionalText(config.get("format")) == null ? "normalized" : optionalText(config.get("format"));
-        if (!List.of("normalized", "openinference").contains(format)) {
-            throw new IllegalArgumentException("trace configuration format must be normalized or openinference");
+        if (!List.of("normalized", "openinference", "openai").contains(format)) {
+            throw new IllegalArgumentException(
+                    "trace configuration format must be normalized, openinference, or openai");
         }
         String runsText = optionalText(config.get("runs"));
         if (runsText == null) {
@@ -88,6 +89,7 @@ public final class TraceFileAdapter {
             case "normalized" -> loadNormalized(runs, targetType, targetId, targetVersion);
             case "openinference" ->
                     loadOpenInference(runs, targetType, targetId, targetVersion, caseIdAttribute);
+            case "openai" -> loadOpenAi(runs, targetId, targetVersion);
             default -> throw new IllegalArgumentException("unsupported trace format: " + format);
         };
         TraceFileAdapter adapter = new TraceFileAdapter(traces);
@@ -143,6 +145,14 @@ public final class TraceFileAdapter {
             throw new IllegalArgumentException("normalized trace file contains no runs: " + path);
         }
         return traces;
+    }
+
+    private static Map<String, NormalizedTrace> loadOpenAi(
+            Path path, String targetId, String targetVersion) {
+        return OpenAiTrace.loadOpenAiTraces(
+                path,
+                targetId == null ? "openai-agent" : targetId,
+                targetVersion == null ? "unknown" : targetVersion);
     }
 
     private static Map<String, NormalizedTrace> loadOpenInference(

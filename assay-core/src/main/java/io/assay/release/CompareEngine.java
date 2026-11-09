@@ -1,5 +1,7 @@
-package io.assay.compare;
+package io.assay.release;
 
+import io.assay.compare.CompareGate;
+import io.assay.engine.CostEstimator;
 import io.assay.evolve.EvolutionEngine;
 import io.assay.model.EvalCase;
 import java.util.ArrayList;

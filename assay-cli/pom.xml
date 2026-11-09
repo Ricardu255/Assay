@@ -14,13 +14,17 @@
   <artifactId>assay-cli</artifactId>
   <packaging>jar</packaging>
 
-  <name>Assay CLI and Adapters</name>
-  <description>Command line, HTTP/trace adapters, sandbox, audit, selection, and review</description>
+  <name>Assay CLI</name>
+  <description>Command line entry point, argument parsing, and adapter loading</description>
 
   <dependencies>
     <dependency>
       <groupId>io.assay</groupId>
       <artifactId>assay-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-runtime</artifactId>
     </dependency>
     <dependency>
       <groupId>io.assay</groupId>
@@ -39,6 +43,18 @@
       <artifactId>assay-core</artifactId>
       <version>${project.version}</version>
       <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-runtime</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-examples</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

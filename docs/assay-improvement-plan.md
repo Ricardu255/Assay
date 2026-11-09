@@ -156,16 +156,18 @@
 
 #### 4.2.1 目标结构
 
-Phase 2B 已落地：核心、存储、Dashboard、CLI 独立，app 只负责分发：
+Phase 2B 已落地，并在 0.5 之后进一步把运行服务与示例从 CLI 中拆出：
 
 ```text
 assay-parent/
 ├── pom.xml                     # parent + dependencyManagement
-├── assay-core/                 # model, rules, engine, evolve, report, json, support, Results
+├── assay-core/                 # model, rules, engine, evolve, report, release, json, support, Results
 ├── assay-store-file/           # io.assay.store.file.ResultStore
 ├── assay-store-jdbc/           # io.assay.store.jdbc.JdbcResultStore
 ├── assay-dashboard/            # web + resources
-├── assay-cli/                  # CLI, adapters, sandbox, audit, selection, review
+├── assay-runtime/              # audit, diff, trace, process, workspace, selection, review 等运行服务
+├── assay-examples/             # Echo/IntentRouter 等示例适配器（保留在 distribution 中）
+├── assay-cli/                  # 纯命令行入口与命令分发
 ├── app/                        # distribution：shade 成 assay.jar
 └── extensions/
     ├── assay-spring-boot-starter/
@@ -188,8 +190,10 @@ assay-metrics-micrometer/
 - `assay-core` 只依赖 JDK，不依赖 Spring/存储实现。
 - `assay-store-file` / `assay-store-jdbc` 依赖 `assay-core`。
 - `assay-dashboard` 依赖 `assay-core`。
-- `assay-cli` 依赖 core + 两个 store + dashboard。
-- `app` 依赖 `assay-cli`，只负责 shade 分发。
+- `assay-runtime` 依赖 `assay-core`（audit、diff、trace、process、workspace、selection、review 等运行服务）。
+- `assay-examples` 只依赖 `assay-core`（示例适配器，仍打进 distribution）。
+- `assay-cli` 依赖 core + runtime + 两个 store + dashboard。
+- `app` 依赖 `assay-cli` + `assay-examples`，只负责 shade 分发。
 - `assay-spring-boot-starter` 依赖 core + 两个 store + Spring Boot autoconfigure。
 - 用 `maven-enforcer-plugin` 禁止 `app` 引入 Spring/Micrometer/OTel。
 
@@ -420,7 +424,7 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 
 1. **工具链序列规则**：`sequence_eq` 或适配器暴露 `fields.tool_chain`；支持“工具序列 + 参数”断言。
 2. **数据集版本管理**：dataset name/version/hash 进入 run metadata 和报告；恢复时校验。
-3. **评估器校准**：`EvaluatorMetrics` 已有 agreement/FP/FN/stability；加校准报告（人工标签 vs 自动判定）。
+3. **评估器校准**：目前没有内置自动指标；`review.ReviewSamples` 的人工复核结论可用于统计 agreement/FP/FN，校准报告仍是待补项。
 4. **统计置信**：场景已有 Wilson；可加 delta 的 bootstrap 区间，但不要过度承诺显著性。
 5. **Badcase 回流**：review → export → promote-review 已经存在；补一个 dashboard 视图或 CLI 汇总。
 

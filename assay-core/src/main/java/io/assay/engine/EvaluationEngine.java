@@ -1,6 +1,5 @@
 package io.assay.engine;
 
-import io.assay.compare.CostEstimator;
 import io.assay.json.Json;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;

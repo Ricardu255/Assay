@@ -1,8 +1,9 @@
-package io.assay.compare;
+package io.assay.release;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.assay.compare.CompareGate;
 import io.assay.model.CheckResult;
 import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;

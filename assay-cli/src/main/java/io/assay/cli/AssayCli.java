@@ -3,7 +3,7 @@ package io.assay.cli;
 import io.assay.audit.ScopeAudit;
 import io.assay.audit.ScopeAuditReport;
 import io.assay.autoevolve.AutoEvolutionLoop;
-import io.assay.compare.CompareEngine;
+import io.assay.release.CompareEngine;
 import io.assay.compare.CompareGate;
 import io.assay.diff.DiffAnalysis;
 import io.assay.diff.DiffSnapshot;
@@ -71,6 +71,214 @@ public final class AssayCli {
     private static final BufferedReader INPUT =
             new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
 
+    @FunctionalInterface
+    private interface Handler {
+        int handle(CommandLine.Namespace args);
+    }
+
+    private record Command(CommandLine.Spec spec, Handler handler) {
+        String name() {
+            return spec.name();
+        }
+    }
+
+    /** Every subcommand in help order; the single source for parsing, dispatch, and usage text. */
+    private static final List<Command> COMMANDS = List.of(
+            new Command(
+                    new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
+                            .option("output", CommandLine.Kind.STRING, ".assay/runs")
+                            .option("port", CommandLine.Kind.INTEGER, "8080")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("worker-id", CommandLine.Kind.STRING, null)
+                            .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
+                            .option("poll", CommandLine.Kind.DECIMAL, "2")
+                            .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                            .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                            .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
+                            .flag("worker")
+                            .flag("open-browser"),
+                    AssayCli::serve),
+            new Command(
+                    new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation")
+                            .option("endpoint", CommandLine.Kind.STRING, null)
+                            .option("output-path", CommandLine.Kind.STRING, "output")
+                            .option("keyword", CommandLine.Kind.STRING, "hello")
+                            .option("events-path", CommandLine.Kind.STRING, null)
+                            .option("request", CommandLine.Kind.STRING, "{\"message\":\"hello agent\"}")
+                            .option("dir", CommandLine.Kind.STRING, ".assay/quickstart")
+                            .option("workers", CommandLine.Kind.INTEGER, "1")
+                            .option("timeout", CommandLine.Kind.DECIMAL, "30")
+                            .flag("generate-only")
+                            .flag("no-serve"),
+                    AssayCli::quickstart),
+            new Command(
+                    runtime(new CommandLine.Spec("submit", "queue an evaluation run"))
+                            .required("adapter", CommandLine.Kind.STRING)
+                            .option("adapter-class", CommandLine.Kind.STRING, null)
+                            .required("suite", CommandLine.Kind.STRING)
+                            .required("cases", CommandLine.Kind.STRING)
+                            .option("run-id", CommandLine.Kind.STRING, null)
+                            .option("idempotency-key", CommandLine.Kind.STRING, null)
+                            .option("max-attempts", CommandLine.Kind.INTEGER, "3"),
+                    AssayCli::submit),
+            new Command(
+                    new CommandLine.Spec("worker", "execute queued evaluation jobs")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("worker-id", CommandLine.Kind.STRING, null)
+                            .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
+                            .option("poll", CommandLine.Kind.DECIMAL, "2")
+                            .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                            .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                            .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
+                            .flag("once"),
+                    AssayCli::worker),
+            new Command(
+                    new CommandLine.Spec("jobs", "list queued evaluation jobs")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("limit", CommandLine.Kind.INTEGER, "20"),
+                    AssayCli::jobs),
+            new Command(
+                    new CommandLine.Spec("cancel", "cancel a queued or running job")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .required("job-id", CommandLine.Kind.STRING),
+                    AssayCli::cancelJob),
+            new Command(
+                    new CommandLine.Spec("replay", "replay a failed evaluation job")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .required("job-id", CommandLine.Kind.STRING)
+                            .option("max-attempts", CommandLine.Kind.INTEGER, "3")
+                            .option("max-replays", CommandLine.Kind.INTEGER, "3"),
+                    AssayCli::replayJob),
+            new Command(
+                    new CommandLine.Spec("prune", "delete old runs and terminal job records")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("output", CommandLine.Kind.STRING, ".assay/runs")
+                            .option("keep-days", CommandLine.Kind.INTEGER, "30")
+                            .option("keep-runs", CommandLine.Kind.INTEGER, "100")
+                            .option("keep-jobs", CommandLine.Kind.INTEGER, "500")
+                            .flag("dry-run"),
+                    AssayCli::prune),
+            new Command(
+                    runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
+                            .required("adapter", CommandLine.Kind.STRING)
+                            .option("adapter-class", CommandLine.Kind.STRING, null)
+                            .required("suite", CommandLine.Kind.STRING)
+                            .required("cases", CommandLine.Kind.STRING)
+                            .option("run-id", CommandLine.Kind.STRING, null)
+                            .flag("resume"),
+                    AssayCli::runSuite),
+            new Command(
+                    new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff")
+                            .option("repository", CommandLine.Kind.STRING, ".")
+                            .option("base", CommandLine.Kind.STRING, "HEAD")
+                            .option("ai-provider", CommandLine.Kind.STRING, "none", "none", "local", "remote")
+                            .option("ai-input", CommandLine.Kind.STRING, "auto", "auto", "raw", "summary")
+                            .option("confidence-threshold", CommandLine.Kind.DECIMAL, "0.7")
+                            .option("output", CommandLine.Kind.STRING, null),
+                    AssayCli::selectTests),
+            new Command(
+                    new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task")
+                            .required("repository", CommandLine.Kind.STRING)
+                            .required("base", CommandLine.Kind.STRING)
+                            .required("target", CommandLine.Kind.STRING)
+                            .required("spec", CommandLine.Kind.STRING)
+                            .option("ai-provider", CommandLine.Kind.STRING, "none", "none", "local")
+                            .option("adapter", CommandLine.Kind.STRING, null)
+                            .option("adapter-class", CommandLine.Kind.STRING, null)
+                            .option("regression", CommandLine.Kind.STRING, null)
+                            .option("smoke", CommandLine.Kind.STRING, null)
+                            .option("full", CommandLine.Kind.STRING, null)
+                            .option("store", CommandLine.Kind.STRING, null)
+                            .option("output", CommandLine.Kind.STRING, null)
+                            .option("workers", CommandLine.Kind.INTEGER, "1")
+                            .option("retries", CommandLine.Kind.INTEGER, "0")
+                            .option("timeout", CommandLine.Kind.DECIMAL, "30"),
+                    AssayCli::auditScope),
+            new Command(
+                    runtime(new CommandLine.Spec("release", "run targeted regression, smoke, then optional full"))
+                            .required("adapter", CommandLine.Kind.STRING)
+                            .option("adapter-class", CommandLine.Kind.STRING, null)
+                            .required("regression", CommandLine.Kind.STRING)
+                            .required("smoke", CommandLine.Kind.STRING)
+                            .option("full", CommandLine.Kind.STRING, null)
+                            .option("release-id", CommandLine.Kind.STRING, null),
+                    AssayCli::release),
+            new Command(
+                    new CommandLine.Spec("compare", "compare two stored runs with a flat release gate")
+                            .required("baseline", CommandLine.Kind.STRING)
+                            .required("candidate", CommandLine.Kind.STRING)
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("config", CommandLine.Kind.STRING, null)
+                            .option("profile", CommandLine.Kind.STRING, "balanced", "none", "balanced", "strict")
+                            .option("format", CommandLine.Kind.STRING, "markdown", "markdown", "json")
+                            .option("output", CommandLine.Kind.STRING, null),
+                    AssayCli::compare),
+            new Command(
+                    runtime(new CommandLine.Spec("evolve", "compare a baseline and candidate across improvement, regression, and holdout"))
+                            .required("baseline-adapter", CommandLine.Kind.STRING)
+                            .option("baseline-adapter-class", CommandLine.Kind.STRING, null)
+                            .required("candidate-adapter", CommandLine.Kind.STRING)
+                            .option("candidate-adapter-class", CommandLine.Kind.STRING, null)
+                            .required("candidate", CommandLine.Kind.STRING)
+                            .option("policy", CommandLine.Kind.STRING, null)
+                            .required("improvement", CommandLine.Kind.STRING)
+                            .required("regression", CommandLine.Kind.STRING)
+                            .required("holdout", CommandLine.Kind.STRING)
+                            .option("experiment-id", CommandLine.Kind.STRING, null),
+                    AssayCli::evolve),
+            new Command(
+                    runtime(new CommandLine.Spec("evolve-auto", "diagnose, generate, apply, and evaluate text candidates in a sandbox"))
+                            .required("auto-adapter", CommandLine.Kind.STRING)
+                            .option("adapter-class", CommandLine.Kind.STRING, null)
+                            .option("policy", CommandLine.Kind.STRING, null)
+                            .required("improvement", CommandLine.Kind.STRING)
+                            .required("regression", CommandLine.Kind.STRING)
+                            .required("holdout", CommandLine.Kind.STRING)
+                            .option("loop-id", CommandLine.Kind.STRING, null)
+                            .option("workspace", CommandLine.Kind.STRING, ".assay/workspaces")
+                            .option("max-rounds", CommandLine.Kind.INTEGER, "3")
+                            .option("max-candidates-per-round", CommandLine.Kind.INTEGER, "3")
+                            .option("max-elapsed-seconds", CommandLine.Kind.DECIMAL, null)
+                            .option("max-evolver-calls", CommandLine.Kind.INTEGER, null)
+                            .flag("resume"),
+                    AssayCli::autoEvolve),
+            new Command(
+                    new CommandLine.Spec("review", "store the human final conclusion")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .required("run-id", CommandLine.Kind.STRING)
+                            .required("case-id", CommandLine.Kind.STRING)
+                            .required(
+                                    "decision",
+                                    CommandLine.Kind.STRING,
+                                    "confirmed_badcase",
+                                    "false_positive",
+                                    "accepted",
+                                    "needs_follow_up")
+                            .required("conclusion", CommandLine.Kind.STRING),
+                    AssayCli::review),
+            new Command(
+                    new CommandLine.Spec("export", "export human-confirmed regression or few-shot candidates")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .required("kind", CommandLine.Kind.STRING, "regression", "few-shot")
+                            .required("output", CommandLine.Kind.STRING),
+                    AssayCli::export),
+            new Command(
+                    new CommandLine.Spec("promote-review", "adjudicate one evaluator-Skill review sample")
+                            .required("input", CommandLine.Kind.STRING)
+                            .required("output", CommandLine.Kind.STRING)
+                            .required(
+                                    "outcome",
+                                    CommandLine.Kind.STRING,
+                                    "CORRECT",
+                                    "PARTIALLY_CORRECT",
+                                    "INCORRECT",
+                                    "UNRESOLVED")
+                            .required("role", CommandLine.Kind.STRING, "improvement", "regression", "holdout", "pending")
+                            .required("conclusion", CommandLine.Kind.STRING)
+                            .required("reviewer", CommandLine.Kind.STRING)
+                            .option("reviewed-at", CommandLine.Kind.STRING, null),
+                    AssayCli::promoteReview));
+
     private AssayCli() {
     }
 
@@ -80,66 +288,28 @@ public final class AssayCli {
 
     /** Runs the CLI and returns the process exit code; exposed for tests. */
     public static int run(String[] argv) {
-        List<CommandLine.Spec> commands = List.of(
-                new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard"),
-                new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation"),
-                new CommandLine.Spec("submit", "queue an evaluation run"),
-                new CommandLine.Spec("worker", "execute queued evaluation jobs"),
-                new CommandLine.Spec("jobs", "list queued evaluation jobs"),
-                new CommandLine.Spec("cancel", "cancel a queued or running job"),
-                new CommandLine.Spec("replay", "replay a failed evaluation job"),
-                new CommandLine.Spec("prune", "delete old runs and terminal job records"),
-                new CommandLine.Spec("run", "run one externally supplied suite"),
-                new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff"),
-                new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task"),
-                new CommandLine.Spec("release", "run targeted regression, smoke, then optional full"),
-                new CommandLine.Spec("compare", "compare two stored runs with a flat release gate"),
-                new CommandLine.Spec("evolve", "compare a baseline and candidate across improvement, regression, and holdout"),
-                new CommandLine.Spec("evolve-auto", "diagnose, generate, apply, and evaluate text candidates in a sandbox"),
-                new CommandLine.Spec("review", "store the human final conclusion"),
-                new CommandLine.Spec("export", "export human-confirmed regression or few-shot candidates"),
-                new CommandLine.Spec("promote-review", "adjudicate one evaluator-Skill review sample"));
         if (argv.length == 0) {
-            System.err.print(CommandLine.usage(PROGRAM, commands));
+            System.err.print(CommandLine.usage(PROGRAM, specs()));
             return 2;
         }
         String command = argv[0];
         if ("-h".equals(command) || "--help".equals(command)) {
-            System.out.print(CommandLine.usage(PROGRAM, commands));
+            System.out.print(CommandLine.usage(PROGRAM, specs()));
             return 0;
         }
         String[] rest = java.util.Arrays.copyOfRange(argv, 1, argv.length);
         try {
-            CommandLine.Spec spec = specFor(command, commands);
-            if (spec == null) {
-                System.err.print(CommandLine.usage(PROGRAM, commands));
+            Command selected = select(command);
+            if (selected == null) {
+                System.err.print(CommandLine.usage(PROGRAM, specs()));
                 System.err.println(PROGRAM + ": error: unknown command: " + command);
                 return 2;
             }
-            CommandLine.Namespace args = CommandLine.parse(spec, rest);
-            return switch (command) {
-                case "serve" -> serve(args);
-                case "quickstart" -> quickstart(args);
-                case "submit" -> submit(args);
-                case "worker" -> worker(args);
-                case "jobs" -> jobs(args);
-                case "cancel" -> cancelJob(args);
-                case "replay" -> replayJob(args);
-                case "prune" -> prune(args);
-                case "run" -> runSuite(args);
-                case "select-tests" -> selectTests(args);
-                case "audit-scope" -> auditScope(args);
-                case "release" -> release(args);
-                case "compare" -> compare(args);
-                case "evolve" -> evolve(args);
-                case "evolve-auto" -> autoEvolve(args);
-                case "review" -> review(args);
-                case "export" -> export(args);
-                default -> promoteReview(args);
-            };
+            CommandLine.Namespace args = CommandLine.parse(selected.spec(), rest);
+            return selected.handler().handle(args);
         } catch (CommandLine.UsageException error) {
             if (error.showUsage()) {
-                System.err.print(CommandLine.usage(PROGRAM, commands));
+                System.err.print(CommandLine.usage(PROGRAM, specs()));
             }
             System.err.println(PROGRAM + ": error: " + error.getMessage());
             return error.exitCode();
@@ -149,168 +319,12 @@ public final class AssayCli {
         }
     }
 
-    private static CommandLine.Spec specFor(String command, List<CommandLine.Spec> commands) {
-        return switch (command) {
-            case "serve" -> new CommandLine.Spec("serve", "view reports and optionally run the local job queue")
-                    .option("output", CommandLine.Kind.STRING, ".assay/runs")
-                    .option("port", CommandLine.Kind.INTEGER, "8080")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .option("worker-id", CommandLine.Kind.STRING, null)
-                    .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
-                    .option("poll", CommandLine.Kind.DECIMAL, "2")
-                    .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
-                    .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
-                    .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
-                    .flag("worker")
-                    .flag("open-browser");
-            case "quickstart" -> new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation")
-                    .option("endpoint", CommandLine.Kind.STRING, null)
-                    .option("output-path", CommandLine.Kind.STRING, "output")
-                    .option("keyword", CommandLine.Kind.STRING, "hello")
-                    .option("events-path", CommandLine.Kind.STRING, null)
-                    .option("request", CommandLine.Kind.STRING, "{\"message\":\"hello agent\"}")
-                    .option("dir", CommandLine.Kind.STRING, ".assay/quickstart")
-                    .option("workers", CommandLine.Kind.INTEGER, "1")
-                    .option("timeout", CommandLine.Kind.DECIMAL, "30")
-                    .flag("generate-only")
-                    .flag("no-serve");
-            case "submit" -> runtime(new CommandLine.Spec("submit", "queue an evaluation run"))
-                    .required("adapter", CommandLine.Kind.STRING)
-                    .option("adapter-class", CommandLine.Kind.STRING, null)
-                    .required("suite", CommandLine.Kind.STRING)
-                    .required("cases", CommandLine.Kind.STRING)
-                    .option("run-id", CommandLine.Kind.STRING, null)
-                    .option("idempotency-key", CommandLine.Kind.STRING, null)
-                    .option("max-attempts", CommandLine.Kind.INTEGER, "3");
-            case "worker" -> new CommandLine.Spec("worker", "execute queued evaluation jobs")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .option("worker-id", CommandLine.Kind.STRING, null)
-                    .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
-                    .option("poll", CommandLine.Kind.DECIMAL, "2")
-                    .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
-                    .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
-                    .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
-                    .flag("once");
-            case "jobs" -> new CommandLine.Spec("jobs", "list queued evaluation jobs")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .option("limit", CommandLine.Kind.INTEGER, "20");
-            case "cancel" -> new CommandLine.Spec("cancel", "cancel a queued or running job")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .required("job-id", CommandLine.Kind.STRING);
-            case "replay" -> new CommandLine.Spec("replay", "replay a failed evaluation job")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .required("job-id", CommandLine.Kind.STRING)
-                    .option("max-attempts", CommandLine.Kind.INTEGER, "3")
-                    .option("max-replays", CommandLine.Kind.INTEGER, "3");
-            case "prune" -> new CommandLine.Spec("prune", "delete old runs and terminal job records")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .option("output", CommandLine.Kind.STRING, ".assay/runs")
-                    .option("keep-days", CommandLine.Kind.INTEGER, "30")
-                    .option("keep-runs", CommandLine.Kind.INTEGER, "100")
-                    .option("keep-jobs", CommandLine.Kind.INTEGER, "500")
-                    .flag("dry-run");
-            case "run" -> runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
-                    .required("adapter", CommandLine.Kind.STRING)
-                    .option("adapter-class", CommandLine.Kind.STRING, null)
-                    .required("suite", CommandLine.Kind.STRING)
-                    .required("cases", CommandLine.Kind.STRING)
-                    .option("run-id", CommandLine.Kind.STRING, null)
-                    .flag("resume");
-            case "select-tests" -> new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff")
-                    .option("repository", CommandLine.Kind.STRING, ".")
-                    .option("base", CommandLine.Kind.STRING, "HEAD")
-                    .option("ai-provider", CommandLine.Kind.STRING, "none", "none", "local", "remote")
-                    .option("ai-input", CommandLine.Kind.STRING, "auto", "auto", "raw", "summary")
-                    .option("confidence-threshold", CommandLine.Kind.DECIMAL, "0.7")
-                    .option("output", CommandLine.Kind.STRING, null);
-            case "audit-scope" -> new CommandLine.Spec("audit-scope", "audit a committed AI code change against a task")
-                    .required("repository", CommandLine.Kind.STRING)
-                    .required("base", CommandLine.Kind.STRING)
-                    .required("target", CommandLine.Kind.STRING)
-                    .required("spec", CommandLine.Kind.STRING)
-                    .option("ai-provider", CommandLine.Kind.STRING, "none", "none", "local")
-                    .option("adapter", CommandLine.Kind.STRING, null)
-                    .option("adapter-class", CommandLine.Kind.STRING, null)
-                    .option("regression", CommandLine.Kind.STRING, null)
-                    .option("smoke", CommandLine.Kind.STRING, null)
-                    .option("full", CommandLine.Kind.STRING, null)
-                    .option("store", CommandLine.Kind.STRING, null)
-                    .option("output", CommandLine.Kind.STRING, null)
-                    .option("workers", CommandLine.Kind.INTEGER, "1")
-                    .option("retries", CommandLine.Kind.INTEGER, "0")
-                    .option("timeout", CommandLine.Kind.DECIMAL, "30");
-            case "release" -> runtime(new CommandLine.Spec("release", "run targeted regression, smoke, then optional full"))
-                    .required("adapter", CommandLine.Kind.STRING)
-                    .option("adapter-class", CommandLine.Kind.STRING, null)
-                    .required("regression", CommandLine.Kind.STRING)
-                    .required("smoke", CommandLine.Kind.STRING)
-                    .option("full", CommandLine.Kind.STRING, null)
-                    .option("release-id", CommandLine.Kind.STRING, null);
-            case "compare" -> new CommandLine.Spec("compare", "compare two stored runs with a flat release gate")
-                    .required("baseline", CommandLine.Kind.STRING)
-                    .required("candidate", CommandLine.Kind.STRING)
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .option("config", CommandLine.Kind.STRING, null)
-                    .option("profile", CommandLine.Kind.STRING, "balanced", "none", "balanced", "strict")
-                    .option("format", CommandLine.Kind.STRING, "markdown", "markdown", "json")
-                    .option("output", CommandLine.Kind.STRING, null);
-            case "evolve" -> runtime(new CommandLine.Spec("evolve", "compare a baseline and candidate"))
-                    .required("baseline-adapter", CommandLine.Kind.STRING)
-                    .option("baseline-adapter-class", CommandLine.Kind.STRING, null)
-                    .required("candidate-adapter", CommandLine.Kind.STRING)
-                    .option("candidate-adapter-class", CommandLine.Kind.STRING, null)
-                    .required("candidate", CommandLine.Kind.STRING)
-                    .option("policy", CommandLine.Kind.STRING, null)
-                    .required("improvement", CommandLine.Kind.STRING)
-                    .required("regression", CommandLine.Kind.STRING)
-                    .required("holdout", CommandLine.Kind.STRING)
-                    .option("experiment-id", CommandLine.Kind.STRING, null);
-            case "evolve-auto" -> runtime(new CommandLine.Spec("evolve-auto", "automatic text evolution in a sandbox"))
-                    .required("auto-adapter", CommandLine.Kind.STRING)
-                    .option("adapter-class", CommandLine.Kind.STRING, null)
-                    .option("policy", CommandLine.Kind.STRING, null)
-                    .required("improvement", CommandLine.Kind.STRING)
-                    .required("regression", CommandLine.Kind.STRING)
-                    .required("holdout", CommandLine.Kind.STRING)
-                    .option("loop-id", CommandLine.Kind.STRING, null)
-                    .option("workspace", CommandLine.Kind.STRING, ".assay/workspaces")
-                    .option("max-rounds", CommandLine.Kind.INTEGER, "3")
-                    .option("max-candidates-per-round", CommandLine.Kind.INTEGER, "3")
-                    .option("max-elapsed-seconds", CommandLine.Kind.DECIMAL, null)
-                    .option("max-evolver-calls", CommandLine.Kind.INTEGER, null)
-                    .flag("resume");
-            case "review" -> new CommandLine.Spec("review", "store the human final conclusion")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .required("run-id", CommandLine.Kind.STRING)
-                    .required("case-id", CommandLine.Kind.STRING)
-                    .required(
-                            "decision",
-                            CommandLine.Kind.STRING,
-                            "confirmed_badcase",
-                            "false_positive",
-                            "accepted",
-                            "needs_follow_up")
-                    .required("conclusion", CommandLine.Kind.STRING);
-            case "export" -> new CommandLine.Spec("export", "export human-confirmed candidates")
-                    .option("store", CommandLine.Kind.STRING, ".assay/store")
-                    .required("kind", CommandLine.Kind.STRING, "regression", "few-shot")
-                    .required("output", CommandLine.Kind.STRING);
-            case "promote-review" -> new CommandLine.Spec("promote-review", "adjudicate one review sample")
-                    .required("input", CommandLine.Kind.STRING)
-                    .required("output", CommandLine.Kind.STRING)
-                    .required(
-                            "outcome",
-                            CommandLine.Kind.STRING,
-                            "CORRECT",
-                            "PARTIALLY_CORRECT",
-                            "INCORRECT",
-                            "UNRESOLVED")
-                    .required("role", CommandLine.Kind.STRING, "improvement", "regression", "holdout", "pending")
-                    .required("conclusion", CommandLine.Kind.STRING)
-                    .required("reviewer", CommandLine.Kind.STRING)
-                    .option("reviewed-at", CommandLine.Kind.STRING, null);
-            default -> null;
-        };
+    private static List<CommandLine.Spec> specs() {
+        return COMMANDS.stream().map(Command::spec).toList();
+    }
+
+    private static Command select(String name) {
+        return COMMANDS.stream().filter(candidate -> candidate.name().equals(name)).findFirst().orElse(null);
     }
 
     private static int serve(CommandLine.Namespace args) {

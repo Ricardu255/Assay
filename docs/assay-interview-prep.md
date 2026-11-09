@@ -73,11 +73,13 @@ Candidate run ┘        │                  │
 
 | 模块 | 职责 |
 |---|---|
-| `assay-core` | `model`、`engine`、`rules`、`evolve`、`report`、`json`、`support`、`metrics`、`Results` 接口 |
+| `assay-core` | `model`、`engine`、`rules`、`evolve`、`release`、`compare`、`report`、`json`、`support`、`Results` 接口 |
 | `assay-store-file` | `ResultStore`、`FileJobStore`、JSONL 落盘、锁、恢复 |
 | `assay-store-jdbc` | `JdbcResultStore`、`JdbcJobStore`、事务、`SELECT FOR UPDATE`、JDBC 契约 |
 | `assay-dashboard` | 只读 Dashboard、静态资源、`/api/catalog`、`/api/rule-history` |
-| `assay-cli` | `AssayCli`、adapters、`autoevolve`、`process`、`workspace`、`audit`、`diff`、`selection` |
+| `assay-runtime` | `autoevolve`、`audit`、`diff`、`http`、`opentrace`、`process`、`review`、`selection`、`trace`、`workspace`、`llm` 适配器 |
+| `assay-examples` | 示例适配器，只用于演示与测试，不进入核心依赖 |
+| `assay-cli` | `AssayCli`、`CommandLine`、`AdapterLoader`、`Stores`；命令注册与分发 |
 | `app` | 纯分发模块；shade 成 `app/target/assay.jar` |
 | `extensions/*` | Starter、Micrometer、OTel，均不反向污染 core |
 
@@ -111,7 +113,7 @@ Candidate run ┘        │                  │
 - **运行规则统计**：`RuleStats` 把每次 run 的 checks 聚合为 `rule_stats`，写进 `results.json` 和 `report.md`；运行页新增规则统计 tab。
 - **规则历史趋势**：`/api/rule-history` 按 suite 返回最近 N 次运行的规则通过率；运行页可点「查看趋势」，用折线、评测数和缺失样本判断退化、抖动或覆盖率变化。
 - **工具链序列规则**：新增 `sequence_contains` / `sequence_eq`，按 `events` 的 `module/action` 断言工具调用顺序；支持 `args` 参数匹配和嵌套连续块，失败时指出缺失步骤、参数差异或首个顺序不匹配，运行页用步骤 chips 展示。
-- **0.9 模块化**：拆成 core、store-file、store-jdbc、dashboard、cli 和 app 分发六个代码模块，加三个扩展；测试随包迁移，`app/target/assay.jar` 仍可直接运行。
+- **0.9 模块化**：拆成 core、store-file、store-jdbc、dashboard、runtime、examples、cli 和 app 分发八个代码模块，加三个扩展；`assay-cli` 只留命令入口，运行服务集中到 `assay-runtime`；测试随包迁移，`app/target/assay.jar` 仍可直接运行。
 - **易用性**：新增 `QUICKSTART.md`、`assay quickstart`（三个问题→生成配置→跑评测→开报告）和免 Maven 的 `scripts/package-dist.ps1` 发行包脚本。
 - **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，并新增 H2 file 重连测试。H2 file URL 自动补 `DB_CLOSE_DELAY=-1`，避免重连后 read-only。
 - **异步队列**：新增 `JobStore`（文件/JDBC）、submit/worker/jobs/cancel、worker 租约与心跳、过期回收、协作式取消和最大重试；Dashboard 任务队列页支持单击提交/查看/取消，`serve --worker` 内置 worker；at-least-once 投递，通过 run id + resume 保底。
@@ -674,11 +676,11 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 242 项分布：core 42、store-file 41、store-jdbc 11、dashboard 8、cli 140；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
+测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 315 项分布：core 75、store-file 55、store-jdbc 17、dashboard 9、runtime 105（1 skipped）、cli 46；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 
-**可追问**：怎么评估评测器本身？答：`EvaluatorMetrics` 有 agreement、false positive/negative、field accuracy、repeat stability；人工 adjudication 做校准。
+**可追问**：怎么评估评测器本身？答：目前没有内置的自动指标；`review.ReviewSamples` 保存人工复核结论，可以据此统计 agreement、false positive/negative 和字段命中率，重复运行看稳定性；自动校准报告仍是待补项，不能宣称已有。
 
 ### 21. 项目有什么不足？数据量大了怎么办？非确定性 Agent 还有意义吗？
 

@@ -245,6 +245,61 @@ class TraceFileAdapterTest {
         assertEquals(trace, restored);
     }
 
+    @Test
+    void loadsOpenAiAgentSpansAndResolvesCasesByTraceRef(@TempDir Path root) {
+        Path traces = root.resolve("openai.jsonl");
+        AtomicFiles.writeText(
+                traces,
+                Json.write(openAiSpan("agent", "workflow", "done")) + "\n"
+                        + Json.write(openAiSpan("function", "lookup", Map.of("rows", 1))) + "\n");
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("format", "openai");
+        options.put("runs", traces.toString());
+        options.put("target_id", "support-agent");
+        options.put("target_version", "2");
+        ProjectAdapter adapter = TraceFileAdapter.load(config(root, options));
+        EvalCase evalCase = new EvalCase(
+                "C1", Map.of(), Map.of(), "default", Map.of("trace_ref", "trace-1"), "suite");
+
+        NormalizedTrace trace = adapter.readTrace().read(null, evalCase);
+        assertEquals("trace-1", trace.traceId());
+        assertEquals("support-agent", trace.targetId());
+        assertEquals("2", trace.targetVersion());
+        assertEquals("done", trace.finalOutput());
+        assertEquals(List.of("OpenAIAgent", "OpenAITool"), modules(trace));
+    }
+
+    @Test
+    void rejectsAnUnknownTraceFormat(@TempDir Path root) {
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("format", "vendor-json");
+        options.put("runs", write(root, "traces.json", Map.of("runs", List.of())).toString());
+        IllegalArgumentException error =
+                assertThrows(IllegalArgumentException.class, () -> TraceFileAdapter.load(config(root, options)));
+        assertTrue(error.getMessage().contains("normalized, openinference, or openai"), error.getMessage());
+    }
+
+    private static Map<String, Object> openAiSpan(String type, String name, Object output) {
+        Map<String, Object> spanData = new LinkedHashMap<>();
+        spanData.put("type", type);
+        spanData.put("name", name);
+        spanData.put("output", output);
+        Map<String, Object> span = new LinkedHashMap<>();
+        span.put("trace_id", "trace-1");
+        span.put("id", "span-" + name);
+        span.put("span_data", spanData);
+        return span;
+    }
+
+    private static List<String> modules(NormalizedTrace trace) {
+        List<String> modules = new ArrayList<>();
+        for (io.assay.model.TraceEvent event : trace.events()) {
+            modules.add(event.module());
+        }
+        return modules;
+    }
+
     private static Map<String, Object> attribute(String key, String value) {
         return Map.of("key", key, "value", Map.of("stringValue", value));
     }
