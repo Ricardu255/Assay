@@ -1,5 +1,6 @@
 package io.assay.cli;
 
+import io.assay.adapters.AdapterLoader;
 import io.assay.audit.ScopeAudit;
 import io.assay.audit.ScopeAuditReport;
 import io.assay.autoevolve.AutoEvolutionLoop;

@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.assay.cli.AssayCli;
-import io.assay.cli.AdapterLoader;
+import io.assay.adapters.AdapterLoader;
 import io.assay.json.Json;
 import io.assay.model.EvalCase;
 import io.assay.model.ProjectAdapter;

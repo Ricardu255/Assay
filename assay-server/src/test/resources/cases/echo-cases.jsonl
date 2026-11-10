@@ -1,0 +1,1 @@
+{"id":"SERVER-001","scenario":"direct","input":{"message":"hello server"},"expected":{"route":"ECHO","keyword":"hello"},"metadata":{"system_constraints":{"max_steps":3,"max_retries":0}}}

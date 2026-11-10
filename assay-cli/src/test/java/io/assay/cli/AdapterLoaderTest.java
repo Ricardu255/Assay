@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.assay.adapters.AdapterLoader;
 import io.assay.model.ProjectAdapter;
 import io.assay.support.AtomicFiles;
 import java.io.IOException;
@@ -56,7 +57,8 @@ class AdapterLoaderTest {
                     package %s;
 
                     import io.assay.engine.ProjectAdapterFactory;
-                    import io.assay.model.ProjectAdapter;
+                    import io.assay.adapters.AdapterLoader;
+import io.assay.model.ProjectAdapter;
                     import java.util.List;
 
                     public final class %s implements ProjectAdapterFactory {

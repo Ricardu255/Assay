@@ -117,7 +117,7 @@ assay-dashboard/                       # 只读 Dashboard 与静态资源
 assay-runtime/                         # 审计、diff、trace、process、workspace 等运行服务
 assay-examples/                        # 示例适配器（不参与评测核心）
 assay-cli/                             # 命令行接口与命令分发
-assay-server/                          # Spring Boot HTTP 服务（骨架，后续接入运行提交与报告读取）
+assay-server/                          # Spring Boot HTTP 服务（/api/runs 运行提交与查询）
 app/                                   # 分发模块：shade 成 assay.jar
 extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
 extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
@@ -130,6 +130,24 @@ extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 
 宽屏下可以拖动用例与 Trace 之间的分隔条；左右键调节宽度，双击或 Enter 恢复平分，拖动中按 Escape 撤销。分栏宽度与折叠状态保存在当前浏览器。窄面板自动上下排列。用例列表支持上下键、Home / End、PageUp / PageDown，详情标签支持左右键。目录中的报告、嵌套报告、用例和筛选条件保存在页面地址中，可刷新恢复或复制链接；临时导入的 JSON 仍仅保留在当前页面。
 
+## 通过 Server API 提交评测（M1）
+
+`assay-server` 提供同步 HTTP API，适合 CI 或内部平台按需提交一次评测并读回结果：
+
+```powershell
+java -jar assay-server/target/assay-server-0.5.0.jar --server.port=8080
+```
+
+```bash
+curl -s http://127.0.0.1:8080/api/ping
+curl -s -X POST http://127.0.0.1:8080/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"adapter":"io.assay.examples.EchoAdapter","cases":"examples/cases.example.jsonl","suite":"smoke"}'
+curl -s http://127.0.0.1:8080/api/runs/<run_id>
+curl -s http://127.0.0.1:8080/api/runs/<run_id>/cases
+```
+
+存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置，执行参数包括 `workers`、`retries`、`timeout-seconds`、`collect-few-shot`。当前 M1 为同步执行、单实例内存注册表，`resume` 暂不支持（返回 400）；异步队列、重启后查询与多实例共享存储见路线图。
 ## 通过 HTTP 接口测试自己的 Agent
 
 普通的同步 JSON HTTP 接口不需要编写 Java 代码。推荐使用页面向导；也可以修改 `examples/http-agent.example.json` 的 `endpoint` 和 `output_path`，以及 `examples/http-cases.example.jsonl` 的请求和期望值，然后运行：

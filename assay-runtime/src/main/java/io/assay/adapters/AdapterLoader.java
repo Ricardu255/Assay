@@ -1,4 +1,4 @@
-package io.assay.cli;
+package io.assay.adapters;
 
 import io.assay.engine.AutoEvolutionAdapterFactory;
 import io.assay.engine.ProjectAdapterFactory;
