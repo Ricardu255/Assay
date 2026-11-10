@@ -677,7 +677,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 339 项分布：core 79、store-file 56、store-jdbc 21、dashboard 9、runtime 109（1 skipped）、agentscope 2、cli 46、server 9；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
+测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、多实例 job 队列（租约/幂等/取消）、API token 鉴权、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 346 项分布：core 79、store-file 56、store-jdbc 21、dashboard 9、runtime 111（1 skipped）、agentscope 2、cli 46、server 14；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 

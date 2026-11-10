@@ -131,9 +131,9 @@ extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 
 宽屏下可以拖动用例与 Trace 之间的分隔条；左右键调节宽度，双击或 Enter 恢复平分，拖动中按 Escape 撤销。分栏宽度与折叠状态保存在当前浏览器。窄面板自动上下排列。用例列表支持上下键、Home / End、PageUp / PageDown，详情标签支持左右键。目录中的报告、嵌套报告、用例和筛选条件保存在页面地址中，可刷新恢复或复制链接；临时导入的 JSON 仍仅保留在当前页面。
 
-## 通过 Server API 提交评测（M2）
+## 通过 Server API 提交评测（M4：多实例队列与鉴权）
 
-`assay-server` 提供异步 HTTP API：提交后立即返回 `run_id`，执行在后台线程池中进行，可按 `run_id` 轮询状态与结果；已完成 run 的列表与详情从存储后端读取，服务重启后仍可查询。
+`assay-server` 提供异步 HTTP API：提交后立即返回 202 与 `run_id`，执行交给存储后端上的 durable job 队列；可按 `run_id` 轮询状态与结果。多个 server 实例共享同一 `FileJobStore`（同一目录）或 `JdbcJobStore`（同一数据库）即可横向扩展：实例通过 job lease 竞争执行，lease 期间心跳续租，单次评测不会被两个实例同时跑；实例重启后任务仍在，列表与详情跨实例可见。状态流转为 `queued → running → passed | failed | budget_exhausted | cancelled`。
 
 ```powershell
 java -jar assay-server/target/assay-server-0.5.0.jar --server.port=8080
@@ -141,20 +141,29 @@ java -jar assay-server/target/assay-server-0.5.0.jar --server.port=8080
 
 ```bash
 curl -s http://127.0.0.1:8080/api/ping
-# 202 Accepted: {"run_id":"smoke-...","status":"queued","status_url":"/api/runs/smoke-..."}
+
+# 202 Accepted: {"run_id":"smoke-...","job_id":"...","status":"queued","status_url":"/api/runs/smoke-..."}
 curl -s -X POST http://127.0.0.1:8080/api/runs \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: nightly-smoke-2026-11-10" \
   -d '{"adapter":"io.assay.examples.EchoAdapter","cases":"examples/cases.example.jsonl","suite":"smoke"}'
+
 curl -s http://127.0.0.1:8080/api/runs
 curl -s http://127.0.0.1:8080/api/runs/smoke-...
 curl -s http://127.0.0.1:8080/api/runs/smoke-.../cases
+
 # 断点续跑：需显式 run_id 且身份/执行配置不变
 curl -s -X POST http://127.0.0.1:8080/api/runs \
   -H "Content-Type: application/json" \
   -d '{"adapter":"io.assay.examples.EchoAdapter","cases":"examples/cases.example.jsonl","suite":"smoke","run_id":"my-run","resume":true}'
 ```
 
-存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置；执行参数包括 `workers`、`retries`、`timeout-seconds`、`collect-few-shot`、`executor-threads`、`queue-capacity`。状态流转为 `queued → running → passed | failed | budget_exhausted`；队列满返回 503。`resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。当前仍是单实例进程内队列（持久化在 store 后端）；服务重启时正在执行的 run 会被标记为 failed，之后可用 `resume` 继续。
+- 队列与并发：`worker-threads`（每个实例的 worker 数）、`job-lease-seconds`（lease 时长，心跳按 1/3 续租）、`poll-millis`（空转轮询间隔）、`job-max-attempts`（可重试次数）。
+- 幂等：`Idempotency-Key` 相同的提交返回同一个 `job_id`；payload 不同则明确报冲突。
+- 执行参数：`workers`、`retries`、`timeout-seconds`、`collect-few-shot`；存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置。
+- 结果合并：队列 worker 会把本次 summary 写入 `<output>/<run_id>/run-summary.json`，GET 详情时与持久化的 run 记录合并，返回 `hard_failures`、`case_count`、`budget`、`retry_policy`、`circuit_breaker` 等字段。
+- 鉴权：配置 `assay.server.auth-tokens`（列表）后，除 `GET /api/ping`、`GET /actuator/health`、`GET /actuator/info` 外的接口都要求 `X-API-Key: <token>` 或 `Authorization: Bearer <token>`，token 使用常量时间比较；列表为空时保持本地开放模式。未授权请求返回 401 ProblemDetail。
+- `resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。
 
 ## 接入 AgentScope 事件（M3）
 

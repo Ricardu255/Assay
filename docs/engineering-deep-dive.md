@@ -243,6 +243,14 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 - 文件存储删除 run 目录、review 文件和 lock 文件；JDBC 在事务内删除 case、manifest、review、lock 和 run 行。
 - `--dry-run` 只返回待删除 ID，便于上线前先看清单。
 
+### 4.10 Server 多实例：共享队列与鉴权
+
+- `assay-server` 不再使用进程内内存队列，而是把提交写成 `JobStore` 中的 durable job；`FileJobStore`（共享目录）和 `JdbcJobStore`（共享数据库）都能让多个 server 实例看到同一批任务。
+- 实例启动后每实例起 `worker-threads` 个 worker：`claim` 抢租约 → 后台心跳按租约 1/3 续租 → 执行评测 → `succeed` / `fail`；租约丢失或收到取消请求时中断执行线程，失败按 `job-max-attempts` 重试。
+- job payload 只存 `RunSpec` 的稳定字段（adapter/adapter_class/cases/suite/source/run_id/run_identity/resume），不写提交时间，避免同 `Idempotency-Key` 因时间戳不同被误判为冲突。
+- 评测结束后 worker 把 summary 写进 `<output>/<run_id>/run-summary.json`；GET 详情时把持久化 run 记录与 summary 合并，保证跨实例、重启后仍能看到 `hard_failures`、`case_count`、`budget` 等字段。
+- 鉴权：配置 `assay.server.auth-tokens` 后，除 ping 与 health/info 外的接口要求 `X-API-Key` 或 `Authorization: Bearer`；token 用 `MessageDigest.isEqual` 常量时间比较，空列表保持本地开放模式。过滤器不创建 session，`SecurityConfig` 关闭 CSRF 与表单登录，401 返回 ProblemDetail。
+
 ---
 
 ## 五、隔离：候选不能乱跑
