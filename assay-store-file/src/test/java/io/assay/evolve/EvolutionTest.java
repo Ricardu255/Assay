@@ -465,10 +465,10 @@ class EvolutionTest {
 
     @Test
     void p95UsesLinearInterpolationAndStaysMissingWithoutSamples() {
-        assertEquals(9.55, EvolutionEngine.aggregate(List.of(1.0, 10.0), "p95"), 1e-9);
-        assertEquals(5.0, EvolutionEngine.aggregate(List.of(5.0), "p95"), 1e-9);
-        assertNull(EvolutionEngine.aggregate(List.of(), "p95"));
-        assertEquals(9.55, EvolutionEngine.percentile(List.of(10.0, 1.0), 0.95), 1e-9);
+        assertEquals(9.55, MetricStats.aggregate(List.of(1.0, 10.0), "p95"), 1e-9);
+        assertEquals(5.0, MetricStats.aggregate(List.of(5.0), "p95"), 1e-9);
+        assertNull(MetricStats.aggregate(List.of(), "p95"));
+        assertEquals(9.55, MetricStats.percentile(List.of(10.0, 1.0), 0.95), 1e-9);
     }
 
     /** A candidate can match the baseline and still be unacceptable on its own. */

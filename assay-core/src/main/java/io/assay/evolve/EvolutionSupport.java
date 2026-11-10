@@ -7,6 +7,9 @@ import java.util.UUID;
 /** Small shared helpers for the evolution split; keeps the helper casts in one place. */
 final class EvolutionSupport {
 
+    /** The three datasets every evolution experiment compares. */
+    static final List<String> ROLES = List.of("improvement", "regression", "holdout");
+
     private EvolutionSupport() {
     }
 

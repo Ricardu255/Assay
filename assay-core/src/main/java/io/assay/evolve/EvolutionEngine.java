@@ -26,8 +26,6 @@ import java.util.Map;
  */
 public final class EvolutionEngine {
 
-    private static final List<String> ROLES = List.of("improvement", "regression", "holdout");
-
     private final EvaluationEngine baseline;
     private final EvaluationEngine candidate;
     private final EvolutionPolicy policy;
@@ -61,7 +59,7 @@ public final class EvolutionEngine {
             String experimentId,
             boolean resume) {
         List<String> missing = new ArrayList<>();
-        for (String role : ROLES) {
+        for (String role : EvolutionSupport.ROLES) {
             if (!datasets.containsKey(role)) {
                 missing.add(role);
             }
@@ -71,7 +69,7 @@ public final class EvolutionEngine {
             throw new IllegalArgumentException(
                     "evolution datasets require: " + String.join(", ", missing));
         }
-        for (String role : ROLES) {
+        for (String role : EvolutionSupport.ROLES) {
             if (datasets.get(role).isEmpty()) {
                 throw new IllegalArgumentException("evolution datasets must not be empty");
             }
@@ -83,7 +81,7 @@ public final class EvolutionEngine {
         Map<String, Object> comparisons = new LinkedHashMap<>();
         List<String> incompleteRuns = new ArrayList<>();
 
-        for (String role : ROLES) {
+        for (String role : EvolutionSupport.ROLES) {
             List<EvalCase> cases = datasets.get(role);
             Map<String, Object> baselineSummary =
                     baseline.runSuite(cases, role, source, effectiveId + "-" + role + "-baseline", resume);
@@ -174,13 +172,5 @@ public final class EvolutionEngine {
     public static Map<String, Object> compareCases(
             List<EvalCase> cases, Map<String, Object> baseline, Map<String, Object> candidate) {
         return EvolutionComparison.compareCases(cases, baseline, candidate);
-    }
-
-    static Double aggregate(List<Double> values, String aggregation) {
-        return MetricStats.aggregate(values, aggregation);
-    }
-
-    static Double percentile(List<Double> values, double fraction) {
-        return MetricStats.percentile(values, fraction);
     }
 }

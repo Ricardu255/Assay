@@ -895,7 +895,7 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 #### 10.2.2 决策顺序
 
-`EvolutionEngine.decide` 的实际顺序：
+`EvolutionPolicyEvaluator.decide` 的实际顺序：
 
 1. 版本身份/目标不匹配 → rollback。
 2. regression 集：候选硬失败（如果 `require_regression_pass`）、通过率下降、软告警增加 → rollback。

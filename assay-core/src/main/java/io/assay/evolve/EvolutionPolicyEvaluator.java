@@ -12,8 +12,6 @@ import java.util.Map;
 /** Applies the configured policy to three dataset comparisons and returns a verdict plus evidence. */
 final class EvolutionPolicyEvaluator {
 
-    private static final List<String> ROLES = List.of("improvement", "regression", "holdout");
-
     private final EvolutionPolicy policy;
 
     EvolutionPolicyEvaluator(EvolutionPolicy policy) {
@@ -33,7 +31,7 @@ final class EvolutionPolicyEvaluator {
         List<String> reject = new ArrayList<>();
         List<String> improvementEvidence = new ArrayList<>();
 
-        for (String role : ROLES) {
+        for (String role : EvolutionSupport.ROLES) {
             if (!matchesTarget(EvolutionSupport.asMap(baselineRuns.get(role)), change, change.baselineVersion())
                     || !matchesTarget(
                             EvolutionSupport.asMap(candidateRuns.get(role)), change, change.candidateVersion())) {
@@ -142,7 +140,7 @@ final class EvolutionPolicyEvaluator {
         }
 
         for (MetricObjective objective : policy.objectives()) {
-            for (String role : ROLES) {
+            for (String role : EvolutionSupport.ROLES) {
                 Map<String, Object> comparison = EvolutionSupport.asMap(comparisons.get(role));
                 Object baselineValue = EvolutionSupport.asMap(
                                 EvolutionSupport.asMap(comparison.get("baseline")).get("objectives"))

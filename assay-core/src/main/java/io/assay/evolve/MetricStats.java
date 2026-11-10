@@ -213,13 +213,6 @@ public final class MetricStats {
         return null;
     }
 
-    static Double objectiveValue(Map<String, Object> summary, MetricObjective objective) {
-        List<Double> values = objectiveSamples(summary, objective);
-        return values.size() == EvolutionSupport.asList(summary.get("results")).size()
-                ? aggregate(values, objective.aggregation())
-                : null;
-    }
-
     private static List<Double> objectiveSamples(Map<String, Object> summary, MetricObjective objective) {
         List<Object> results = EvolutionSupport.asList(summary.get("results"));
         List<Double> values = new ArrayList<>();
