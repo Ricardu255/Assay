@@ -731,6 +731,11 @@ export ASSAY_API_KEY=...
 mvn -q test
 ```
 
+质量门禁：
+
+- `mvn -q verify` 还会执行 JaCoCo 报告、SpotBugs（`Max` effort / `Medium` threshold）和 Checkstyle；任一违规都会让构建失败。规则与抑制范围分别记录在 `config/spotbugs/exclude.xml` 和 `config/checkstyle/checkstyle.xml`。
+- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **81.8% 行 / 65.6% 分支**（`assay-core` 约 85.7% 行）。CI 在 Linux job 上以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
+
 覆盖范围：
 
 - **评测闭环** —— 硬门禁、软告警、人工审核、few-shot 候选、release 分阶段执行与提前停止。

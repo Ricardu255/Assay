@@ -835,10 +835,6 @@ public final class EvaluationEngine {
         return traceId == null || String.valueOf(traceId).isEmpty() ? null : String.valueOf(traceId);
     }
 
-    private static int intValue(Object value) {
-        return intValue(value, 1);
-    }
-
     private static int intValue(Object value, int fallback) {
         if (value instanceof Number number) {
             return number.intValue();

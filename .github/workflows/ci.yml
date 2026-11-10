@@ -26,6 +26,26 @@ jobs:
           java-version: "17"
           cache: maven
       - run: mvn -B --no-transfer-progress clean verify
+      - name: Enforce aggregate line coverage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          awk -F, 'NR > 1 { line_missed += $8; line_covered += $9 } END {
+            total = line_missed + line_covered
+            pct = 100 * line_covered / total
+            printf "aggregate line coverage: %.1f%% (%d/%d)\n", pct, line_covered, total
+            if (pct < 70) { exit 1 }
+          }' app/target/site/jacoco-aggregate/jacoco.csv
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports-${{ runner.os }}
+          path: |
+            app/target/site/jacoco-aggregate
+            **/target/spotbugsXml.xml
+            **/target/checkstyle-result.xml
+          if-no-files-found: ignore
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

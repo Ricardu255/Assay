@@ -136,7 +136,7 @@ public final class ArtifactCatalog {
         }
         String relative = root.relativize(file).toString().replace('\\', '/');
         String id = Base64.getUrlEncoder().withoutPadding().encodeToString(relative.getBytes(StandardCharsets.UTF_8));
-        String kind = KINDS.get(file.getFileName().toString());
+        String kind = KINDS.get(fileName(file));
         Map<String, Object> payload = Json.parseObject(readText(file, MAX_FILE_BYTES));
         Map<String, Object> gate = asMap(payload.get("gate"));
         Map<String, Object> baseline = asMap(payload.get("baseline"));
@@ -208,11 +208,16 @@ public final class ArtifactCatalog {
     private static Map<String, Object> asMap(Object value) {
         return value instanceof Map ? (Map<String, Object>) value : Map.of();
     }
+    /** Never-null file-name view: Path.getFileName() returns null for root and empty paths. */
+    private static String fileName(Path path) {
+        Path name = path.getFileName();
+        return name == null ? "" : name.toString();
+    }
 
     /** Only the fixed patch next to an audit report is exposed, never arbitrary workspace files. */
     public Map<String, Object> readAuditPatch(String id) throws IOException {
         Path report = reportPath(id);
-        if (!report.getFileName().toString().equals("scope_audit.json")) {
+        if (!fileName(report).equals("scope_audit.json")) {
             throw new IllegalArgumentException("patches are only available for scope audits");
         }
         Map<String, Object> audit = read(id);
@@ -244,7 +249,7 @@ public final class ArtifactCatalog {
         }
         SafePath.require("artifact", relative);
         Path path = root.resolve(relative).normalize();
-        if (!path.startsWith(root) || !KINDS.containsKey(path.getFileName().toString())) {
+        if (!path.startsWith(root) || !KINDS.containsKey(fileName(path))) {
             throw new IllegalArgumentException("unsupported artifact path");
         }
         validateContainedFile(path);
@@ -258,7 +263,7 @@ public final class ArtifactCatalog {
             }
         }
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !path.toRealPath().startsWith(root)) {
-            throw new java.nio.file.NoSuchFileException(path.getFileName().toString());
+            throw new java.nio.file.NoSuchFileException(fileName(path));
         }
     }
 

@@ -26,11 +26,46 @@
       <groupId>io.assay</groupId>
       <artifactId>assay-examples</artifactId>
     </dependency>
+    <!-- Direct module dependencies: already transitive through the CLI, declared
+         explicitly so the JaCoCo aggregate report covers every module. -->
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-runtime</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-file</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-store-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-dashboard</artifactId>
+    </dependency>
   </dependencies>
 
   <build>
     <finalName>assay</finalName>
     <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>report-aggregate</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report-aggregate</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

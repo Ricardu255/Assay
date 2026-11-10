@@ -17,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 
@@ -683,7 +682,7 @@ public final class EvolutionEngine {
                     value = null;
                 }
             }
-            if (value instanceof Number number && !(value instanceof Boolean) && Double.isFinite(number.doubleValue())) {
+            if (value instanceof Number number && Double.isFinite(number.doubleValue())) {
                 values.add(number.doubleValue());
             }
         }

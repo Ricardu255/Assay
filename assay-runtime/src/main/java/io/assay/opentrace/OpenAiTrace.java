@@ -354,7 +354,7 @@ public final class OpenAiTrace {
     }
 
     private static Double timestamp(Object value) {
-        if (value instanceof Number number && !(value instanceof Boolean)) {
+        if (value instanceof Number number) {
             double epoch = number.doubleValue();
             // Values past ten billion are milliseconds; anything smaller is already seconds.
             return epoch > 10_000_000_000d ? epoch / 1000d : epoch;
@@ -444,7 +444,7 @@ public final class OpenAiTrace {
     }
 
     private static Double toDoubleOrNull(Object value) {
-        if (value instanceof Number number && !(value instanceof Boolean)) {
+        if (value instanceof Number number) {
             return number.doubleValue();
         }
         if (value instanceof String text) {

@@ -105,6 +105,13 @@ public final class AutoEvolutionLoop {
         }
     }
 
+    private static String baselineFileName(Path artifact) {
+        Path name = artifact.getFileName();
+        if (name == null) {
+            throw new IllegalArgumentException("baseline artifact must be a file: " + artifact);
+        }
+        return name.toString();
+    }
     private static void validateCandidate(TextCandidate candidate, String baselineVersion) {
         Names.safeName(candidate.candidateId(), "candidate_id");
         Names.safeName(candidate.candidateVersion(), "candidate_version");
@@ -417,7 +424,7 @@ public final class AutoEvolutionLoop {
                                     loopId,
                                     roundNumber,
                                     candidate,
-                                    adapter.baselineArtifact().getFileName().toString(),
+                                    baselineFileName(adapter.baselineArtifact()),
                                     evaluationPath);
                     EvolutionCandidate change =
                             new EvolutionCandidate(

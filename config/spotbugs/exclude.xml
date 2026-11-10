@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+  Assay SpotBugs exclusions.
+
+  EI_EXPOSE_REP / EI_EXPOSE_REP2 are excluded globally: the domain model is a set
+  of Java records whose collection components are immutable by convention at the
+  boundary (results are produced from parsed JSON, never mutated in place), and
+  adding defensive copies to every record would add allocation noise across hot
+  paths without changing observable behaviour. Revisit if records start holding
+  caller-owned mutable lists.
+
+  NP_BOOLEAN_RETURN_NULL is excluded for ValueOps only: its comparison helpers
+  intentionally use a tri-state Boolean (true / false / null = not comparable) to
+  model the JSON value set, so returning null is part of the API contract.
+-->
+<FindBugsFilter>
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP"/>
+  </Match>
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+  </Match>
+  <Match>
+    <Class name="io.assay.rules.ValueOps"/>
+    <Bug pattern="NP_BOOLEAN_RETURN_NULL"/>
+  </Match>
+</FindBugsFilter>

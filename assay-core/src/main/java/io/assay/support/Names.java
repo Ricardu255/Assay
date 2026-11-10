@@ -14,12 +14,14 @@ public final class Names {
      */
     public static String safeName(String value, String field) {
         String trimmed = value == null ? "" : value.trim();
+        Path fileName = trimmed.isEmpty() ? null : Path.of(trimmed).getFileName();
         if (trimmed.isEmpty()
                 || trimmed.equals(".")
                 || trimmed.equals("..")
                 || trimmed.contains("/")
                 || trimmed.contains("\\")
-                || !Path.of(trimmed).getFileName().toString().equals(trimmed)) {
+                || fileName == null
+                || !fileName.toString().equals(trimmed)) {
             throw new IllegalArgumentException(field + " must be a safe non-empty name");
         }
         return trimmed;

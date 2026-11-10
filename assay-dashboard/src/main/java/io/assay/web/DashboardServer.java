@@ -25,6 +25,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Serves a browser dashboard on IPv4 loopback, with GET-only report APIs. */
 public final class DashboardServer implements AutoCloseable {
+    private static final Map<String, String> STATIC_RESOURCES = Map.of(
+            "/", "index.html",
+            "/index.html", "index.html",
+            "/app.js", "app.js",
+            "/dashboard-core.js", "dashboard-core.js",
+            "/style.css", "style.css",
+            "/theme.js", "theme.js",
+            "/theme.css", "theme.css");
     private final HttpServer server;
     private final ArtifactCatalog catalog;
     private final JobStore jobs;
@@ -104,7 +112,7 @@ public final class DashboardServer implements AutoCloseable {
                     sendJson(exchange, 200, catalog.read(path.substring("/api/artifacts/".length())));
                 } else if (path.startsWith("/api/audit-patch/")) {
                     sendJson(exchange, 200, catalog.readAuditPatch(path.substring("/api/audit-patch/".length())));
-                } else if (Map.of("/", "index.html", "/index.html", "index.html", "/app.js", "app.js", "/dashboard-core.js", "dashboard-core.js", "/style.css", "style.css", "/theme.js", "theme.js", "/theme.css", "theme.css").containsKey(path)) {
+                } else if (STATIC_RESOURCES.containsKey(path)) {
                     String name = "/".equals(path) ? "index.html" : path.substring(1);
                     try (InputStream input = DashboardServer.class.getResourceAsStream("/io/assay/web/" + name)) {
                         if (input == null) {

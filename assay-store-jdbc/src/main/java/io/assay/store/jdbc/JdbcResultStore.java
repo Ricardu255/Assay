@@ -727,7 +727,7 @@ public final class JdbcResultStore implements Results {
         // Connections are opened per operation; an injected DataSource owns its own lifecycle.
     }
 
-    private final class JdbcRunLock implements RunLock {
+    private static final class JdbcRunLock implements RunLock {
         private final Connection connection;
         private final String runId;
         private boolean closed;

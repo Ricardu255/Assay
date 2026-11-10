@@ -144,8 +144,12 @@ public final class TextFileOperations {
     }
 
     private static void createParents(java.nio.file.Path path) {
+        java.nio.file.Path parent = path.getParent();
+        if (parent == null) {
+            return;
+        }
         try {
-            java.nio.file.Files.createDirectories(path.getParent());
+            java.nio.file.Files.createDirectories(parent);
         } catch (java.io.IOException error) {
             throw new java.io.UncheckedIOException(error);
         }

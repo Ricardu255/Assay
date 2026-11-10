@@ -86,10 +86,7 @@ public final class ResultStore implements Results {
     /** Holds the run's cross-process lock for the duration of a suite execution. */
     @Override
     public Handle lockRun(String runId) {
-        String safe = runId == null ? "" : runId.trim();
-        if (safe.isEmpty() || !Path.of(safe).getFileName().toString().equals(safe)) {
-            throw new IllegalArgumentException("run_id must be a safe non-empty name");
-        }
+        String safe = Names.safeName(runId, "run_id");
         return new Handle(ExclusiveFileLock.acquire(locksRoot().resolve(safe + ".lock"), "evaluation run " + runId));
     }
 

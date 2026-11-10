@@ -90,7 +90,7 @@ public final class TextArtifactWorkspace {
         if (Files.exists(loopRoot)) {
             throw new IllegalArgumentException("auto evolution workspace already exists: " + loopRoot);
         }
-        Path target = loopRoot.resolve("baseline").resolve(source.getFileName().toString());
+        Path target = loopRoot.resolve("baseline").resolve(fileName(source));
         AtomicFiles.createDirectories(target.getParent());
         readArtifact(source);
         try {
@@ -165,7 +165,7 @@ public final class TextArtifactWorkspace {
             }
             List<TextFileOperations.Validated> validated = TextFileOperations.validate(asStringMap(current), operations);
 
-            Path manifestPath = target.getParent().resolve("artifact-manifest.json");
+            Path manifestPath = target.resolveSibling("artifact-manifest.json");
             if (Files.exists(manifestPath, LinkOption.NOFOLLOW_LINKS)) {
                 if (Files.isSymbolicLink(manifestPath) || !Files.isRegularFile(manifestPath)) {
                     throw new IllegalArgumentException("invalid candidate manifest: " + manifestPath);
@@ -185,8 +185,9 @@ public final class TextArtifactWorkspace {
                 }
                 return target;
             }
-            Path candidateRoot = target.getParent();
-            Path stagingRoot = candidateRoot.getParent().resolve(STAGING_DIRECTORY).resolve(candidateId);
+            Path candidateRoot = parentOrThrow(target, "candidate target");
+            Path roundRoot = parentOrThrow(candidateRoot, "round directory");
+            Path stagingRoot = roundRoot.resolve(STAGING_DIRECTORY).resolve(candidateId);
             Path stagingTarget = stagingRoot.resolve(name);
             try {
                 // Uncommitted directories from older versions and interrupted staging can be rebuilt.
@@ -293,6 +294,21 @@ public final class TextArtifactWorkspace {
         return builder.toString();
     }
 
+    private static String fileName(Path path) {
+        Path name = path.getFileName();
+        if (name == null) {
+            throw new IllegalArgumentException("artifact must have a file name: " + path);
+        }
+        return name.toString();
+    }
+
+    private static Path parentOrThrow(Path path, String what) {
+        Path parent = path.getParent();
+        if (parent == null) {
+            throw new IllegalStateException(what + " has no parent directory: " + path);
+        }
+        return parent;
+    }
     private static void copyTree(Path source, Path target) throws IOException {
         Files.createDirectories(target);
         for (Path item : listRecursively(source)) {
@@ -302,7 +318,7 @@ public final class TextArtifactWorkspace {
             } else if (Files.isDirectory(item)) {
                 Files.createDirectories(destination);
             } else {
-                Files.createDirectories(destination.getParent());
+                Files.createDirectories(parentOrThrow(destination, "copy destination"));
                 Files.copy(item, destination, StandardCopyOption.COPY_ATTRIBUTES);
             }
         }
