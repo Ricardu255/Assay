@@ -1,5 +1,7 @@
 package io.assay.server.config;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Configuration for the optional HTTP server. */
@@ -12,8 +14,11 @@ public class AssayServerProperties {
     private int retries = 0;
     private double timeoutSeconds = 30;
     private boolean collectFewShot = false;
-    private int executorThreads = 2;
-    private int queueCapacity = 100;
+    private int workerThreads = 2;
+    private int jobLeaseSeconds = 60;
+    private long pollMillis = 500;
+    private int jobMaxAttempts = 1;
+    private List<String> authTokens = new ArrayList<>();
 
     public String getStore() {
         return store;
@@ -63,19 +68,43 @@ public class AssayServerProperties {
         this.collectFewShot = collectFewShot;
     }
 
-    public int getExecutorThreads() {
-        return executorThreads;
+    public int getWorkerThreads() {
+        return workerThreads;
     }
 
-    public void setExecutorThreads(int executorThreads) {
-        this.executorThreads = executorThreads;
+    public void setWorkerThreads(int workerThreads) {
+        this.workerThreads = workerThreads;
     }
 
-    public int getQueueCapacity() {
-        return queueCapacity;
+    public int getJobLeaseSeconds() {
+        return jobLeaseSeconds;
     }
 
-    public void setQueueCapacity(int queueCapacity) {
-        this.queueCapacity = queueCapacity;
+    public void setJobLeaseSeconds(int jobLeaseSeconds) {
+        this.jobLeaseSeconds = jobLeaseSeconds;
+    }
+
+    public long getPollMillis() {
+        return pollMillis;
+    }
+
+    public void setPollMillis(long pollMillis) {
+        this.pollMillis = pollMillis;
+    }
+
+    public int getJobMaxAttempts() {
+        return jobMaxAttempts;
+    }
+
+    public void setJobMaxAttempts(int jobMaxAttempts) {
+        this.jobMaxAttempts = jobMaxAttempts;
+    }
+
+    public List<String> getAuthTokens() {
+        return authTokens;
+    }
+
+    public void setAuthTokens(List<String> authTokens) {
+        this.authTokens = authTokens == null ? new ArrayList<>() : new ArrayList<>(authTokens);
     }
 }

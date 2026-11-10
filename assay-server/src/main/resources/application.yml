@@ -9,8 +9,11 @@ assay:
     retries: 0
     timeout-seconds: 30
     collect-few-shot: false
-    executor-threads: 2
-    queue-capacity: 100
+    worker-threads: 2
+    job-lease-seconds: 60
+    poll-millis: 500
+    job-max-attempts: 1
+    # auth-tokens: [dev-token]   # uncomment to require Authorization: Bearer / X-API-Key
 
 management:
   endpoints:

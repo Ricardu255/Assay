@@ -25,7 +25,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
         properties = {
             "assay.server.store=target/server-api-test/store",
             "assay.server.output=target/server-api-test/runs",
-            "assay.server.executor-threads=2"
+            "assay.server.worker-threads=1"
         })
 class RunApiTest {
 
