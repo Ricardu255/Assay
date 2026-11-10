@@ -115,6 +115,7 @@ assay-store-file/                      # 文件存储 ResultStore
 assay-store-jdbc/                      # JDBC 存储 JdbcResultStore
 assay-dashboard/                       # 只读 Dashboard 与静态资源
 assay-runtime/                         # 审计、diff、trace、process、workspace 等运行服务
+assay-agentscope/                      # AgentScope 2.0 typed event 到 NormalizedTrace 的适配
 assay-examples/                        # 示例适配器（不参与评测核心）
 assay-cli/                             # 命令行接口与命令分发
 assay-server/                          # Spring Boot HTTP 服务（/api/runs 运行提交与查询）
@@ -124,7 +125,7 @@ extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建十二个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建十三个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
@@ -154,6 +155,19 @@ curl -s -X POST http://127.0.0.1:8080/api/runs \
 ```
 
 存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置；执行参数包括 `workers`、`retries`、`timeout-seconds`、`collect-few-shot`、`executor-threads`、`queue-capacity`。状态流转为 `queued → running → passed | failed | budget_exhausted`；队列满返回 503。`resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。当前仍是单实例进程内队列（持久化在 store 后端）；服务重启时正在执行的 run 会被标记为 failed，之后可用 `resume` 继续。
+
+## 接入 AgentScope 事件（M3）
+
+`assay-agentscope` 把 [AgentScope Java 2.0](https://github.com/agentscope-ai/agentscope-java) 的 typed event 映射成 Assay 的 `NormalizedTrace`：模型调用、工具调用、subagent 暴露、HITL/权限拒绝、超迭代都会变成普通 trace 事件，多智能体计数写入 `trace.fields.metrics`，并汇总进 `results.json`、`report.md` 与 `scenario_stats.json` 的 `multi_agent` 段。
+
+```java
+AgentScopeEventRecorder recorder = new AgentScopeEventRecorder();
+// agent 运行时把事件发到 recorder（AgentEventEmitter）
+NormalizedTrace trace = recorder.trace("trace-001");
+```
+
+适配器模块只依赖 `assay-core` 与 AgentScope core/harness，不把 AgentScope 引入评测核心；`assay-core` 与 `app` 的 enforcer 边界保持不变。
+
 ## 通过 HTTP 接口测试自己的 Agent
 
 普通的同步 JSON HTTP 接口不需要编写 Java 代码。推荐使用页面向导；也可以修改 `examples/http-agent.example.json` 的 `endpoint` 和 `output_path`，以及 `examples/http-cases.example.jsonl` 的请求和期望值，然后运行：
@@ -759,7 +773,7 @@ mvn -q test
 质量门禁：
 
 - `mvn -q verify` 还会执行 JaCoCo 报告、SpotBugs（`Max` effort / `Medium` threshold）和 Checkstyle；任一违规都会让构建失败。规则与抑制范围分别记录在 `config/spotbugs/exclude.xml` 和 `config/checkstyle/checkstyle.xml`。
-- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **81.8% 行 / 65.6% 分支**（`assay-core` 约 85.7% 行）。CI 在 Linux job 上以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
+- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.0% 行 / 65.7% 分支**（`assay-core` 约 86.2% 行）。CI 在 Linux job 上以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
 
 覆盖范围：
 

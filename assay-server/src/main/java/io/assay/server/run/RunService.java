@@ -1,15 +1,10 @@
 package io.assay.server.run;
 
-import io.assay.adapters.AdapterLoader;
-import io.assay.engine.CaseLoader;
-import io.assay.engine.CircuitBreaker;
-import io.assay.engine.EvaluationEngine;
-import io.assay.engine.EvaluationListener;
-import io.assay.model.EvalCase;
-import io.assay.model.EvaluationBudget;
-import io.assay.model.ProjectAdapter;
-import io.assay.report.Reporting;
-import io.assay.runner.RetryPolicy;
+import io.assay.execution.RunExecution;
+import io.assay.execution.RunIds;
+import io.assay.execution.RunOptions;
+import io.assay.execution.RunSpec;
+import io.assay.execution.SuiteRunner;
 import io.assay.server.config.AssayServerProperties;
 import io.assay.store.Results;
 import io.assay.store.file.ResultStore;
@@ -26,7 +21,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -54,20 +48,19 @@ public class RunService {
 
     private final String storePath;
     private final String outputDir;
-    private final int workers;
-    private final int retries;
-    private final double timeoutSeconds;
-    private final boolean collectFewShot;
+    private final RunOptions options;
+    private final SuiteRunner runner = new SuiteRunner();
     private final ConcurrentMap<String, Map<String, Object>> runs = new ConcurrentHashMap<>();
     private final ExecutorService executor;
 
     public RunService(AssayServerProperties properties) {
         this.storePath = properties.getStore();
         this.outputDir = properties.getOutput();
-        this.workers = properties.getWorkers();
-        this.retries = properties.getRetries();
-        this.timeoutSeconds = properties.getTimeoutSeconds();
-        this.collectFewShot = properties.isCollectFewShot();
+        this.options = new RunOptions(
+                properties.getWorkers(),
+                properties.getRetries(),
+                properties.getTimeoutSeconds(),
+                properties.isCollectFewShot());
         int threads = Math.max(1, properties.getExecutorThreads());
         int queueCapacity = Math.max(1, properties.getQueueCapacity());
         this.executor = new ThreadPoolExecutor(
@@ -91,87 +84,54 @@ public class RunService {
         String requestedRunId = request.runId() == null || request.runId().isBlank()
                 ? null
                 : Names.safeName(request.runId(), "run_id");
-        boolean resume = Boolean.TRUE.equals(request.resume());
-        if (resume && requestedRunId == null) {
-            throw new IllegalArgumentException("resume requires a run_id");
-        }
-        String runId = requestedRunId != null ? requestedRunId : suite + "-" + shortId();
-        String runIdentity = requestedRunId;
+        RunSpec spec = new RunSpec(
+                adapterRef,
+                request.adapterClass(),
+                casesRef,
+                suite,
+                source,
+                requestedRunId != null ? requestedRunId : RunIds.newRunId(suite),
+                requestedRunId,
+                Boolean.TRUE.equals(request.resume()));
         String submittedAt = Instant.now().toString();
-        runs.put(runId, snapshot(runId, QUEUED, adapterRef, suite, source, null, submittedAt, null));
+        runs.put(spec.runId(), snapshot(spec.runId(), QUEUED, adapterRef, suite, source, null, submittedAt, null));
         try {
-            executor.execute(() -> execute(
-                    runId,
-                    adapterRef,
-                    request.adapterClass(),
-                    casesRef,
-                    suite,
-                    source,
-                    resume,
-                    runIdentity,
-                    submittedAt));
+            executor.execute(() -> execute(spec, submittedAt));
         } catch (RejectedExecutionException error) {
-            runs.remove(runId);
+            runs.remove(spec.runId());
             throw error;
         }
         Map<String, Object> submitted = new LinkedHashMap<>();
-        submitted.put("run_id", runId);
+        submitted.put("run_id", spec.runId());
         submitted.put("status", QUEUED);
-        submitted.put("status_url", "/api/runs/" + runId);
+        submitted.put("status_url", "/api/runs/" + spec.runId());
         return submitted;
     }
 
     /** Runs the suite in the background and replaces the in-memory record with its final summary. */
-    private void execute(
-            String runId,
-            String adapterRef,
-            String adapterClass,
-            String casesRef,
-            String suite,
-            String source,
-            boolean resume,
-            String runIdentity,
-            String submittedAt) {
-        runs.put(runId, snapshot(runId, RUNNING, adapterRef, suite, source, null, submittedAt, null));
-        try {
-            List<EvalCase> cases = CaseLoader.loadCases(Path.of(casesRef), suite);
-            ProjectAdapter adapter = AdapterLoader.loadProjectAdapter(adapterRef, adapterClass);
-            try (Results store = openStore()) {
-                EvaluationEngine engine = new EvaluationEngine(
-                        adapter,
-                        store,
-                        null,
-                        workers,
-                        retries,
-                        timeoutSeconds,
-                        collectFewShot,
-                        runIdentity,
-                        EvaluationListener.NOOP,
-                        EvaluationBudget.disabled(),
-                        RetryPolicy.defaults(),
-                        CircuitBreaker.disabled(),
-                        CircuitBreaker.disabled());
-                Map<String, Object> summary = engine.runSuite(cases, suite, source, runId, resume);
-                Path reports = Path.of(outputDir).resolve(runId);
-                Reporting.writeRunArtifacts(summary, reports);
-                Map<String, Object> finished = new LinkedHashMap<>(summary);
-                finished.put("status", summary.getOrDefault("status", FAILED));
-                finished.put("started_at", submittedAt);
-                finished.put("finished_at", Instant.now().toString());
-                finished.put("report_dir", reports.toString());
-                finished.put("report_path", reports.resolve("report.md").toString());
-                runs.put(runId, Collections.unmodifiableMap(finished));
-            }
+    private void execute(RunSpec spec, String submittedAt) {
+        runs.put(
+                spec.runId(),
+                snapshot(spec.runId(), RUNNING, spec.adapterRef(), spec.suite(), spec.source(), null, submittedAt, null));
+        try (Results store = openStore()) {
+            RunExecution execution = runner.run(spec, options, store, Path.of(outputDir));
+            Map<String, Object> finished = new LinkedHashMap<>(execution.summary());
+            finished.put("status", execution.summary().getOrDefault("status", FAILED));
+            finished.put("started_at", submittedAt);
+            finished.put("finished_at", Instant.now().toString());
+            finished.put("report_dir", execution.reportDir().toString());
+            finished.put("report_path", execution.reportDir().resolve("report.md").toString());
+            runs.put(spec.runId(), Collections.unmodifiableMap(finished));
         } catch (RuntimeException error) {
-            markStoreFailed(runId);
+            markStoreFailed(spec.runId());
             runs.put(
-                    runId,
+                    spec.runId(),
                     snapshot(
-                            runId,
+                            spec.runId(),
                             FAILED,
-                            adapterRef,
-                            suite,
-                            source,
+                            spec.adapterRef(),
+                            spec.suite(),
+                            spec.source(),
                             error.getMessage(),
                             submittedAt,
                             Instant.now().toString()));
@@ -293,10 +253,6 @@ public class RunService {
             thread.setDaemon(true);
             return thread;
         };
-    }
-
-    private static String shortId() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
     private static String requireText(String value, String field) {

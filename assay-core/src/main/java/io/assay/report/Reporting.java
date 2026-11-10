@@ -6,8 +6,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -56,6 +58,10 @@ public final class Reporting {
         Map<String, Object> ruleStats = RuleStats.fromResults(
                 asList(summary.get("results")), intValue(summary.get("case_count")));
         summary.put("rule_stats", ruleStats);
+        Map<String, Object> multiAgent = multiAgentMetrics(asList(summary.get("results")));
+        if (!multiAgent.isEmpty()) {
+            summary.put("multi_agent", multiAgent);
+        }
         AtomicFiles.writeText(outputDir.resolve("results.json"), Json.write(summary, 2) + "\n");
 
         Map<String, Integer> moduleCounts = new LinkedHashMap<>();
@@ -168,6 +174,18 @@ public final class Reporting {
             row.put("hard_pass_rate", (double) stats.get("hard_passes") / stats.get("cases"));
             row.put("confidence_95", List.of(interval[0], interval[1]));
             targetScenarios.put(entry.getKey(), row);
+        }
+        if (!multiAgent.isEmpty()) {
+            scenarioOutput.put("multi_agent", multiAgent);
+            report.add("");
+            report.add("## Multi-agent metrics");
+            report.add("");
+            report.add("- Cases with trace metrics: " + multiAgent.get("cases"));
+            report.add("- Steps: " + multiAgent.get("steps") + ", model calls: " + multiAgent.get("model_calls")
+                    + ", tool calls: " + multiAgent.get("tool_calls") + ", handoffs: " + multiAgent.get("handoffs")
+                    + ", denied tools: " + multiAgent.get("denied_tools"));
+            report.add("- Longest repeated step: " + multiAgent.get("max_repeated_step"));
+            report.add("- Agents: " + multiAgent.get("agents"));
         }
 
         if (!ruleStats.isEmpty()) {
@@ -572,6 +590,51 @@ public final class Reporting {
         report.add("> Accepted artifacts remain inside the sandbox. Production promotion is outside this loop.");
         report.add("");
         AtomicFiles.writeText(outputDir.resolve("auto_evolution_report.md"), Fmt.join(report));
+    }
+
+    /** Aggregates the multi-agent counters that adapters attach to trace fields, when present. */
+    private static Map<String, Object> multiAgentMetrics(List<Object> results) {
+        long steps = 0;
+        long modelCalls = 0;
+        long toolCalls = 0;
+        long handoffs = 0;
+        long deniedTools = 0;
+        int cases = 0;
+        int maxRepeatedStep = 0;
+        Set<String> agents = new LinkedHashSet<>();
+        for (Object rawResult : results) {
+            Map<String, Object> result = asMap(rawResult);
+            Map<String, Object> trace = result.get("trace") instanceof Map ? asMap(result.get("trace")) : Map.of();
+            Map<String, Object> metrics = asMap(trace.get("metrics"));
+            if (metrics.isEmpty()) {
+                continue;
+            }
+            cases++;
+            steps += intValue(metrics.get("steps"));
+            modelCalls += intValue(metrics.get("model_calls"));
+            toolCalls += intValue(metrics.get("tool_calls"));
+            handoffs += intValue(metrics.get("handoffs"));
+            deniedTools += intValue(metrics.get("denied_tools"));
+            maxRepeatedStep = Math.max(maxRepeatedStep, intValue(metrics.get("max_repeated_step")));
+            for (Object agent : asList(metrics.get("agents"))) {
+                if (agent != null) {
+                    agents.add(String.valueOf(agent));
+                }
+            }
+        }
+        Map<String, Object> aggregated = new LinkedHashMap<>();
+        if (cases == 0) {
+            return aggregated;
+        }
+        aggregated.put("cases", cases);
+        aggregated.put("steps", steps);
+        aggregated.put("model_calls", modelCalls);
+        aggregated.put("tool_calls", toolCalls);
+        aggregated.put("handoffs", handoffs);
+        aggregated.put("denied_tools", deniedTools);
+        aggregated.put("max_repeated_step", maxRepeatedStep);
+        aggregated.put("agents", new ArrayList<>(agents));
+        return aggregated;
     }
 
     private static Map<String, Integer> newStats() {

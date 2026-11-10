@@ -20,6 +20,7 @@
     <spring-boot.version>3.5.9</spring-boot.version>
     <micrometer.version>1.15.7</micrometer.version>
     <opentelemetry.version>1.31.0</opentelemetry.version>
+    <agentscope.version>2.0.4</agentscope.version>
     <jacoco.version>0.8.12</jacoco.version>
     <spotbugs.version>4.8.6.6</spotbugs.version>
     <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
@@ -31,6 +32,7 @@
     <module>assay-store-jdbc</module>
     <module>assay-dashboard</module>
     <module>assay-runtime</module>
+    <module>assay-agentscope</module>
     <module>assay-examples</module>
     <module>assay-cli</module>
     <module>assay-server</module>
@@ -78,6 +80,21 @@
         <groupId>io.assay</groupId>
         <artifactId>assay-runtime</artifactId>
         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.assay</groupId>
+        <artifactId>assay-agentscope</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.agentscope</groupId>
+        <artifactId>agentscope-core</artifactId>
+        <version>${agentscope.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.agentscope</groupId>
+        <artifactId>agentscope-harness</artifactId>
+        <version>${agentscope.version}</version>
       </dependency>
       <dependency>
         <groupId>io.assay</groupId>
