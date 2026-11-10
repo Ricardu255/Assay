@@ -36,6 +36,12 @@ jobs:
             printf "aggregate line coverage: %.1f%% (%d/%d)\n", pct, line_covered, total
             if (pct < 70) { exit 1 }
           }' app/target/site/jacoco-aggregate/jacoco.csv
+          awk -F, 'NR > 1 { line_missed += $8; line_covered += $9 } END {
+            total = line_missed + line_covered
+            pct = 100 * line_covered / total
+            printf "agentscope module line coverage: %.1f%% (%d/%d)\n", pct, line_covered, total
+            if (pct < 70) { exit 1 }
+          }' assay-agentscope/target/site/jacoco/jacoco.csv
       - name: Upload quality reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,6 +49,7 @@ jobs:
           name: quality-reports-${{ runner.os }}
           path: |
             app/target/site/jacoco-aggregate
+            assay-agentscope/target/site/jacoco
             **/target/spotbugsXml.xml
             **/target/checkstyle-result.xml
           if-no-files-found: ignore

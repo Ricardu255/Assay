@@ -773,7 +773,7 @@ mvn -q test
 质量门禁：
 
 - `mvn -q verify` 还会执行 JaCoCo 报告、SpotBugs（`Max` effort / `Medium` threshold）和 Checkstyle；任一违规都会让构建失败。规则与抑制范围分别记录在 `config/spotbugs/exclude.xml` 和 `config/checkstyle/checkstyle.xml`。
-- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.0% 行 / 65.7% 分支**（`assay-core` 约 86.2% 行）。CI 在 Linux job 上以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
+- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.0% 行 / 65.7% 分支**（`assay-core` 约 86.2% 行）。`assay-agentscope` 不进入该聚合——它的 AgentScope/OpenTelemetry 传递依赖与 `app` 的 framework-free 边界冲突——因此由模块级 JaCoCo 单独门禁：当前约 **77.3% 行**，CI 同样以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
 
 覆盖范围：
 
