@@ -15,6 +15,12 @@ COPY assay-cli/src ./assay-cli/src
 COPY extensions/assay-spring-boot-starter/pom.xml ./extensions/assay-spring-boot-starter/pom.xml
 COPY extensions/assay-metrics-micrometer/pom.xml ./extensions/assay-metrics-micrometer/pom.xml
 COPY extensions/assay-tracing-otel/pom.xml ./extensions/assay-tracing-otel/pom.xml
+COPY assay-runtime/pom.xml ./assay-runtime/pom.xml
+COPY assay-runtime/src ./assay-runtime/src
+COPY assay-examples/pom.xml ./assay-examples/pom.xml
+COPY assay-examples/src ./assay-examples/src
+COPY assay-server/pom.xml ./assay-server/pom.xml
+COPY assay-agentscope/pom.xml ./assay-agentscope/pom.xml
 COPY app/pom.xml ./app/pom.xml
 RUN mvn -q -DskipTests -pl :assay -am package
 
