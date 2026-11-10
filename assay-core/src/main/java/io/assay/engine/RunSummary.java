@@ -9,6 +9,15 @@ import java.util.Map;
 /** Builds the persisted run metadata and the summary returned by one evaluation run. */
 final class RunSummary {
 
+    /** The five result counts of one finished run, grouped so call sites cannot transpose them. */
+    record Counts(
+            int caseCount,
+            int requestedCaseCount,
+            int skippedCaseCount,
+            int hardFailures,
+            int softWarnings) {
+    }
+
     private RunSummary() {
     }
 
@@ -38,11 +47,7 @@ final class RunSummary {
             String suite,
             String source,
             String status,
-            int caseCount,
-            int requestedCaseCount,
-            int skippedCaseCount,
-            int hardFailures,
-            int softWarnings,
+            Counts counts,
             EvaluationBudget budget,
             BudgetLedger ledger,
             RetryPolicy retryPolicy,
@@ -54,11 +59,11 @@ final class RunSummary {
         summary.put("suite", suite);
         summary.put("source", source);
         summary.put("status", status);
-        summary.put("case_count", caseCount);
-        summary.put("requested_case_count", requestedCaseCount);
-        summary.put("skipped_case_count", skippedCaseCount);
-        summary.put("hard_failures", hardFailures);
-        summary.put("soft_warnings", softWarnings);
+        summary.put("case_count", counts.caseCount());
+        summary.put("requested_case_count", counts.requestedCaseCount());
+        summary.put("skipped_case_count", counts.skippedCaseCount());
+        summary.put("hard_failures", counts.hardFailures());
+        summary.put("soft_warnings", counts.softWarnings());
         if (budget.enabled()) {
             summary.put("budget", ledger.snapshot());
         }

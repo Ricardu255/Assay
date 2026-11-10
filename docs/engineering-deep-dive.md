@@ -115,7 +115,7 @@ Candidate run ┘        │                  │
 
 取舍：核心仍零运行时依赖，JDBC driver 由使用方提供；schema 自动创建，没有迁移框架；`text/boolean/timestamp` 是便携子集，生产要按数据库类型和锁超时验证。
 
-测试：`JdbcResultStoreTest` 5 项 + CLI JDBC 测试 1 项；实际用 H2 跑过完整 `run`。
+测试：`JdbcResultStoreTest` 11 项 + CLI JDBC 测试 1 项；实际用 H2 跑过完整 `run`。
 
 ### 2.9 可观测性：零依赖 SPI + 可选实现
 
