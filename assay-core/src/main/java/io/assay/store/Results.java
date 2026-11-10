@@ -45,6 +45,22 @@ public interface Results extends AutoCloseable {
 
     List<Map<String, Object>> listResults(String runId);
 
+    /**
+     * Lists the persisted runs, newest first.
+     *
+     * <p>Backends that cannot enumerate runs keep this default; the server falls back to the runs
+     * it started in this process. Implementations should return the same record shape the engine
+     * persists: run_id, adapter, suite, source, status, started_at, finished_at, metadata_json.
+     */
+    default List<Map<String, Object>> listRuns() {
+        throw new UnsupportedOperationException("this result store does not support listing runs");
+    }
+
+    /** Returns one persisted run record, or {@code null} when the run does not exist. */
+    default Map<String, Object> getRun(String runId) {
+        throw new UnsupportedOperationException("this result store does not support reading runs");
+    }
+
     void addCaseCheck(String runId, String caseId, CheckResult check);
 
     void saveReview(String runId, String caseId, String decision, String finalConclusion);

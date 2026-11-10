@@ -1,5 +1,6 @@
 package io.assay.server.api;
 
+import java.util.concurrent.RejectedExecutionException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +14,14 @@ public class ApiExceptionHandler {
     public ProblemDetail badRequest(IllegalArgumentException error) {
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, error.getMessage());
         detail.setTitle("Invalid request");
+        return detail;
+    }
+
+    @ExceptionHandler(RejectedExecutionException.class)
+    public ProblemDetail serverBusy(RejectedExecutionException error) {
+        ProblemDetail detail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, "the run queue is full; retry later");
+        detail.setTitle("Server busy");
         return detail;
     }
 }

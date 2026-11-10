@@ -2,6 +2,7 @@ package io.assay.store.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +51,23 @@ class JdbcResultStoreTest {
         store.finishRun("run-1", "passed");
         assertThrows(IllegalArgumentException.class, () -> store.startRun(
                 "run-1", "adapter", "suite", "online", Map.of("workers", 1), false, Map.of()));
+    }
+
+    @Test
+    void listsAndReadsRunRecords() {
+        store.startRun("run-record", "adapter", "smoke", "online", Map.of("workers", 1));
+        store.finishRun("run-record", "passed");
+
+        Map<String, Object> run = store.getRun("run-record");
+        assertEquals("passed", run.get("status"));
+        assertEquals("adapter", run.get("adapter"));
+        assertEquals("smoke", run.get("suite"));
+        assertEquals("online", run.get("source"));
+        assertNull(store.getRun("missing"));
+
+        List<Map<String, Object>> runs = store.listRuns();
+        assertEquals(1, runs.size());
+        assertEquals("run-record", runs.get(0).get("run_id"));
     }
 
     @Test

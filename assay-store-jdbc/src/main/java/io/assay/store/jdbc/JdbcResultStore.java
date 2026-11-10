@@ -464,6 +464,56 @@ public final class JdbcResultStore implements Results {
     }
 
     @Override
+    public List<Map<String, Object>> listRuns() {
+        List<Map<String, Object>> runs = new ArrayList<>();
+        try (Connection connection = connections.open();
+                PreparedStatement select = connection.prepareStatement("""
+                        select run_id, adapter, suite, source, status, started_at, finished_at, metadata_json
+                        from assay_run order by started_at desc
+                        """);
+                ResultSet rows = select.executeQuery()) {
+            while (rows.next()) {
+                runs.add(runRecord(rows));
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot list runs", error);
+        }
+        return runs;
+    }
+
+    @Override
+    public Map<String, Object> getRun(String runId) {
+        String safe = Names.safeName(runId, "run_id");
+        try (Connection connection = connections.open();
+                PreparedStatement select = connection.prepareStatement("""
+                        select run_id, adapter, suite, source, status, started_at, finished_at, metadata_json
+                        from assay_run where run_id = ?
+                        """)) {
+            select.setString(1, safe);
+            try (ResultSet rows = select.executeQuery()) {
+                return rows.next() ? runRecord(rows) : null;
+            }
+        } catch (SQLException error) {
+            throw new IllegalStateException("cannot read run: " + runId, error);
+        }
+    }
+
+    private static Map<String, Object> runRecord(ResultSet rows) throws SQLException {
+        Map<String, Object> run = new LinkedHashMap<>();
+        run.put("run_id", rows.getString(1));
+        run.put("adapter", rows.getString(2));
+        run.put("suite", rows.getString(3));
+        run.put("source", rows.getString(4));
+        run.put("status", rows.getString(5));
+        Timestamp startedAt = rows.getTimestamp(6);
+        run.put("started_at", startedAt == null ? null : startedAt.toInstant().toString());
+        Timestamp finishedAt = rows.getTimestamp(7);
+        run.put("finished_at", finishedAt == null ? null : finishedAt.toInstant().toString());
+        run.put("metadata_json", Json.parseObject(rows.getString(8)));
+        return run;
+    }
+
+    @Override
     public void addCaseCheck(String runId, String caseId, CheckResult check) {
         String safe = Names.safeName(runId, "run_id");
         try (Connection connection = connections.open()) {

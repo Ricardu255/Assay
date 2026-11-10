@@ -130,9 +130,9 @@ extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 
 宽屏下可以拖动用例与 Trace 之间的分隔条；左右键调节宽度，双击或 Enter 恢复平分，拖动中按 Escape 撤销。分栏宽度与折叠状态保存在当前浏览器。窄面板自动上下排列。用例列表支持上下键、Home / End、PageUp / PageDown，详情标签支持左右键。目录中的报告、嵌套报告、用例和筛选条件保存在页面地址中，可刷新恢复或复制链接；临时导入的 JSON 仍仅保留在当前页面。
 
-## 通过 Server API 提交评测（M1）
+## 通过 Server API 提交评测（M2）
 
-`assay-server` 提供同步 HTTP API，适合 CI 或内部平台按需提交一次评测并读回结果：
+`assay-server` 提供异步 HTTP API：提交后立即返回 `run_id`，执行在后台线程池中进行，可按 `run_id` 轮询状态与结果；已完成 run 的列表与详情从存储后端读取，服务重启后仍可查询。
 
 ```powershell
 java -jar assay-server/target/assay-server-0.5.0.jar --server.port=8080
@@ -140,14 +140,20 @@ java -jar assay-server/target/assay-server-0.5.0.jar --server.port=8080
 
 ```bash
 curl -s http://127.0.0.1:8080/api/ping
+# 202 Accepted: {"run_id":"smoke-...","status":"queued","status_url":"/api/runs/smoke-..."}
 curl -s -X POST http://127.0.0.1:8080/api/runs \
   -H "Content-Type: application/json" \
   -d '{"adapter":"io.assay.examples.EchoAdapter","cases":"examples/cases.example.jsonl","suite":"smoke"}'
-curl -s http://127.0.0.1:8080/api/runs/<run_id>
-curl -s http://127.0.0.1:8080/api/runs/<run_id>/cases
+curl -s http://127.0.0.1:8080/api/runs
+curl -s http://127.0.0.1:8080/api/runs/smoke-...
+curl -s http://127.0.0.1:8080/api/runs/smoke-.../cases
+# 断点续跑：需显式 run_id 且身份/执行配置不变
+curl -s -X POST http://127.0.0.1:8080/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"adapter":"io.assay.examples.EchoAdapter","cases":"examples/cases.example.jsonl","suite":"smoke","run_id":"my-run","resume":true}'
 ```
 
-存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置，执行参数包括 `workers`、`retries`、`timeout-seconds`、`collect-few-shot`。当前 M1 为同步执行、单实例内存注册表，`resume` 暂不支持（返回 400）；异步队列、重启后查询与多实例共享存储见路线图。
+存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置；执行参数包括 `workers`、`retries`、`timeout-seconds`、`collect-few-shot`、`executor-threads`、`queue-capacity`。状态流转为 `queued → running → passed | failed | budget_exhausted`；队列满返回 503。`resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。当前仍是单实例进程内队列（持久化在 store 后端）；服务重启时正在执行的 run 会被标记为 failed，之后可用 `resume` 继续。
 ## 通过 HTTP 接口测试自己的 Agent
 
 普通的同步 JSON HTTP 接口不需要编写 Java 代码。推荐使用页面向导；也可以修改 `examples/http-agent.example.json` 的 `endpoint` 和 `output_path`，以及 `examples/http-cases.example.jsonl` 的请求和期望值，然后运行：

@@ -277,6 +277,39 @@ public final class ResultStore implements Results {
         }
     }
 
+    /** Lists every run directory that has a readable run.json, newest first. */
+    @Override
+    public List<Map<String, Object>> listRuns() {
+        synchronized (lock) {
+            List<Map<String, Object>> runs = new ArrayList<>();
+            if (!Files.isDirectory(runsRoot())) {
+                return runs;
+            }
+            try (Stream<Path> children = Files.list(runsRoot())) {
+                children.filter(Files::isDirectory)
+                        .map(directory -> directory.resolve("run.json"))
+                        .filter(Files::isRegularFile)
+                        .map(AtomicFiles::readText)
+                        .map(Json::parseObject)
+                        .forEach(runs::add);
+            } catch (IOException error) {
+                throw new UncheckedIOException("cannot list runs", error);
+            }
+            runs.sort(Comparator.comparing(
+                            (Map<String, Object> run) -> String.valueOf(run.get("started_at")))
+                    .reversed());
+            return runs;
+        }
+    }
+
+    @Override
+    public Map<String, Object> getRun(String runId) {
+        synchronized (lock) {
+            Path runFile = runDir(runId).resolve("run.json");
+            return Files.isRegularFile(runFile) ? Json.parseObject(AtomicFiles.readText(runFile)) : null;
+        }
+    }
+
     /** Adds a check that could only be decided once the whole run was visible. */
     @Override
     public void addCaseCheck(String runId, String caseId, CheckResult check) {

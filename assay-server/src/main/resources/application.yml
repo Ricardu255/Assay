@@ -1,6 +1,17 @@
 server:
   port: 8080
 
+assay:
+  server:
+    store: .assay/store
+    output: .assay/runs
+    workers: 1
+    retries: 0
+    timeout-seconds: 30
+    collect-few-shot: false
+    executor-threads: 2
+    queue-capacity: 100
+
 management:
   endpoints:
     web:

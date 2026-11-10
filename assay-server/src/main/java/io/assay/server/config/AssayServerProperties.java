@@ -12,6 +12,8 @@ public class AssayServerProperties {
     private int retries = 0;
     private double timeoutSeconds = 30;
     private boolean collectFewShot = false;
+    private int executorThreads = 2;
+    private int queueCapacity = 100;
 
     public String getStore() {
         return store;
@@ -59,5 +61,21 @@ public class AssayServerProperties {
 
     public void setCollectFewShot(boolean collectFewShot) {
         this.collectFewShot = collectFewShot;
+    }
+
+    public int getExecutorThreads() {
+        return executorThreads;
+    }
+
+    public void setExecutorThreads(int executorThreads) {
+        this.executorThreads = executorThreads;
+    }
+
+    public int getQueueCapacity() {
+        return queueCapacity;
+    }
+
+    public void setQueueCapacity(int queueCapacity) {
+        this.queueCapacity = queueCapacity;
     }
 }
