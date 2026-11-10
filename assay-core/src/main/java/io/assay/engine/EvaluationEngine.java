@@ -48,14 +48,14 @@ public final class EvaluationEngine {
     private final double timeoutSeconds;
     private final boolean collectFewShot;
     private final String runIdentity;
-    private final EvaluationListener listener;
+    private final RunNotifier notifier;
     private final EvaluationBudget budget;
     private final RetryPolicy retryPolicy;
     private final CircuitBreaker adapterBreaker;
     private final CircuitBreaker reviewerBreaker;
 
     public EvaluationEngine(ProjectAdapter adapter, Results store) {
-        this(adapter, store, null, 1, 0, 30, false, null);
+        this(adapter, store, null, EvaluationSettings.defaults(1, 0, 30, false, null));
     }
 
     public EvaluationEngine(
@@ -67,8 +67,7 @@ public final class EvaluationEngine {
             double timeoutSeconds,
             boolean collectFewShot,
             String runIdentity) {
-        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity,
-                EvaluationListener.NOOP, EvaluationBudget.disabled());
+        this(adapter, store, reviewer, EvaluationSettings.defaults(workers, retries, timeoutSeconds, collectFewShot, runIdentity));
     }
 
     public EvaluationEngine(
@@ -81,8 +80,17 @@ public final class EvaluationEngine {
             boolean collectFewShot,
             String runIdentity,
             EvaluationListener listener) {
-        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener,
-                EvaluationBudget.disabled());
+        this(adapter, store, reviewer, new EvaluationSettings(
+                workers,
+                retries,
+                timeoutSeconds,
+                collectFewShot,
+                runIdentity,
+                listener,
+                EvaluationBudget.disabled(),
+                RetryPolicy.none(),
+                CircuitBreaker.disabled(),
+                CircuitBreaker.disabled()));
     }
 
     public EvaluationEngine(
@@ -96,8 +104,17 @@ public final class EvaluationEngine {
             String runIdentity,
             EvaluationListener listener,
             EvaluationBudget budget) {
-        this(adapter, store, reviewer, workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener,
-                budget, RetryPolicy.none(), CircuitBreaker.disabled(), CircuitBreaker.disabled());
+        this(adapter, store, reviewer, new EvaluationSettings(
+                workers,
+                retries,
+                timeoutSeconds,
+                collectFewShot,
+                runIdentity,
+                listener,
+                budget,
+                RetryPolicy.none(),
+                CircuitBreaker.disabled(),
+                CircuitBreaker.disabled()));
     }
 
     public EvaluationEngine(
@@ -114,30 +131,38 @@ public final class EvaluationEngine {
             RetryPolicy retryPolicy,
             CircuitBreaker adapterBreaker,
             CircuitBreaker reviewerBreaker) {
-        if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
-            throw new IllegalArgumentException("workers must be positive and bounded; retries must be non-negative");
-        }
-        if (!Double.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-            throw new IllegalArgumentException("timeout_seconds must be finite and positive");
-        }
+        this(adapter, store, reviewer, new EvaluationSettings(
+                workers,
+                retries,
+                timeoutSeconds,
+                collectFewShot,
+                runIdentity,
+                listener,
+                budget,
+                retryPolicy,
+                adapterBreaker,
+                reviewerBreaker));
+    }
+
+    private EvaluationEngine(ProjectAdapter adapter, Results store, LlmReviewer reviewer, EvaluationSettings settings) {
         this.adapter = adapter;
         this.store = store;
         this.reviewer = reviewer;
-        this.requestedWorkers = workers;
+        this.requestedWorkers = settings.workers();
         this.workers =
                 adapter.maxConcurrency() != null
                         ? Math.min(this.requestedWorkers, adapter.maxConcurrency())
                         : this.requestedWorkers;
         this.maxInFlight = this.workers * 2;
-        this.retries = retries;
-        this.timeoutSeconds = timeoutSeconds;
-        this.collectFewShot = collectFewShot;
-        this.runIdentity = runIdentity;
-        this.listener = listener == null ? EvaluationListener.NOOP : listener;
-        this.budget = budget == null ? EvaluationBudget.disabled() : budget;
-        this.retryPolicy = retryPolicy == null ? RetryPolicy.none() : retryPolicy;
-        this.adapterBreaker = adapterBreaker == null ? CircuitBreaker.disabled() : adapterBreaker;
-        this.reviewerBreaker = reviewerBreaker == null ? CircuitBreaker.disabled() : reviewerBreaker;
+        this.retries = settings.retries();
+        this.timeoutSeconds = settings.timeoutSeconds();
+        this.collectFewShot = settings.collectFewShot();
+        this.runIdentity = settings.runIdentity();
+        this.notifier = new RunNotifier(settings.listener());
+        this.budget = settings.budget();
+        this.retryPolicy = settings.retryPolicy();
+        this.adapterBreaker = settings.adapterBreaker();
+        this.reviewerBreaker = settings.reviewerBreaker();
     }
 
     public int requestedWorkers() {
@@ -175,11 +200,11 @@ public final class EvaluationEngine {
     }
 
     private NormalizedTrace readOneTrace(EvalCase evalCase, String runId, String source, int attempt) {
-        notifyStageStarted(runId, EvaluationListener.Stage.ADAPTER, evalCase);
+        notifier.stageStarted(runId, EvaluationListener.Stage.ADAPTER, evalCase);
         long started = System.nanoTime();
         try {
             NormalizedTrace trace = readOneTraceUnchecked(evalCase, runId, source, attempt);
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.ADAPTER,
                     evalCase,
@@ -188,7 +213,7 @@ public final class EvaluationEngine {
                     Map.of("attempt", attempt));
             return trace;
         } catch (RuntimeException error) {
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.ADAPTER,
                     evalCase,
@@ -272,7 +297,7 @@ public final class EvaluationEngine {
         if (delay.isZero()) {
             return;
         }
-        notifyRetry(runId, evalCase, attempt, delay.toMillis());
+        notifier.retry(runId, evalCase, attempt, delay.toMillis());
         try {
             Thread.sleep(delay.toMillis());
         } catch (InterruptedException interrupted) {
@@ -295,7 +320,7 @@ public final class EvaluationEngine {
 
     private List<CheckResult> evaluateRules(
             String runId, EvalCase evalCase, List<NormalizedTrace> traces, NormalizedTrace trace) {
-        notifyStageStarted(runId, EvaluationListener.Stage.RULES, evalCase);
+        notifier.stageStarted(runId, EvaluationListener.Stage.RULES, evalCase);
         long started = System.nanoTime();
         try {
             List<CheckResult> checks =
@@ -305,7 +330,7 @@ public final class EvaluationEngine {
             allRules.addAll(adapter.softQuality());
             checks.addAll(Rules.consistencyChecks(traces, allRules));
             checks.addAll(Rules.feedbackChecks(trace));
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.RULES,
                     evalCase,
@@ -314,7 +339,7 @@ public final class EvaluationEngine {
                     Map.of("checks", checks.size(), "trace_count", traces.size()));
             return checks;
         } catch (RuntimeException error) {
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.RULES,
                     evalCase,
@@ -330,7 +355,7 @@ public final class EvaluationEngine {
     }
 
     CaseResult evaluateCase(EvalCase evalCase, String runId, String source, BudgetLedger ledger) {
-        notifyCaseStarted(runId, evalCase);
+        notifier.caseStarted(runId, evalCase);
         try {
             List<NormalizedTrace> traces = collectTraces(evalCase, runId, source, ledger);
             NormalizedTrace trace = traces.get(0);
@@ -347,7 +372,7 @@ public final class EvaluationEngine {
                 }
             }
             if (reviewer != null && shouldReview) {
-                notifyStageStarted(runId, EvaluationListener.Stage.LLM, evalCase);
+                notifier.stageStarted(runId, EvaluationListener.Stage.LLM, evalCase);
                 long llmStarted = System.nanoTime();
                 try {
                     reviewerBreaker.beforeCall();
@@ -358,7 +383,7 @@ public final class EvaluationEngine {
                                     checks,
                                     collectFewShot && result.hardPass() && result.softWarningCount() == 0));
                     reviewerBreaker.recordSuccess();
-                    notifyStageFinished(
+                    notifier.stageFinished(
                             runId,
                             EvaluationListener.Stage.LLM,
                             evalCase,
@@ -369,7 +394,7 @@ public final class EvaluationEngine {
                     if (!(error instanceof CircuitOpenException)) {
                         reviewerBreaker.recordFailure();
                     }
-                    notifyStageFinished(
+                    notifier.stageFinished(
                             runId,
                             EvaluationListener.Stage.LLM,
                             evalCase,
@@ -390,10 +415,10 @@ public final class EvaluationEngine {
             if (collectFewShot && result.hardPass() && result.softWarningCount() == 0) {
                 result.setFewShotCandidate(fewShotCandidate(evalCase, trace, result.llmReview()));
             }
-            notifyCaseFinished(result);
+            notifier.caseFinished(result);
             return result;
         } catch (BudgetExhaustedException exhausted) {
-            notifyCaseSkipped(runId, evalCase, exhausted.getMessage());
+            notifier.caseSkipped(runId, evalCase, exhausted.getMessage());
             return null;
         } catch (RuntimeException error) {
             String message = messageOf(error);
@@ -413,89 +438,27 @@ public final class EvaluationEngine {
                                     "successful execution and readable trace",
                                     "framework or adapter execution failed")),
                     message);
-            notifyCaseFinished(failed);
+            notifier.caseFinished(failed);
             return failed;
         }
     }
 
-    private void notifyRunStarted(String runId, String suite, String source, int caseCount) {
-        try {
-            listener.onRunStarted(runId, suite, source, caseCount);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyCaseStarted(String runId, EvalCase evalCase) {
-        try {
-            listener.onCaseStarted(runId, evalCase);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyCaseFinished(CaseResult result) {
-        try {
-            listener.onCaseFinished(result);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyCaseSkipped(String runId, EvalCase evalCase, String reason) {
-        try {
-            listener.onCaseSkipped(runId, evalCase, reason == null ? "run budget exhausted" : reason);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyRetry(String runId, EvalCase evalCase, int attempt, long delayMillis) {
-        try {
-            listener.onRetry(runId, evalCase, attempt, delayMillis);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyStageStarted(String runId, EvaluationListener.Stage stage, EvalCase evalCase) {
-        try {
-            listener.onStageStarted(runId, stage, evalCase);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyStageFinished(
-            String runId,
-            EvaluationListener.Stage stage,
-            EvalCase evalCase,
-            long durationNanos,
-            RuntimeException error,
-            Map<String, Object> attributes) {
-        try {
-            listener.onStageFinished(runId, stage, evalCase, durationNanos, error, attributes);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
     private void saveBatch(String runId, List<CaseResult> batch) {
-        notifyStageStarted(runId, EvaluationListener.Stage.STORE, null);
+        notifier.stageStarted(runId, EvaluationListener.Stage.STORE, null);
         long started = System.nanoTime();
         try {
             store.saveCases(batch);
             long duration = System.nanoTime() - started;
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.STORE,
                     null,
                     duration,
                     null,
                     Map.of("count", batch.size()));
-            notifyBatchSaved(runId, batch.size(), duration);
+            notifier.batchSaved(runId, batch.size(), duration);
         } catch (RuntimeException error) {
-            notifyStageFinished(
+            notifier.stageFinished(
                     runId,
                     EvaluationListener.Stage.STORE,
                     null,
@@ -503,30 +466,6 @@ public final class EvaluationEngine {
                     error,
                     Map.of("count", batch.size()));
             throw error;
-        }
-    }
-
-    private void notifyBatchSaved(String runId, int count, long durationNanos) {
-        try {
-            listener.onBatchSaved(runId, count, durationNanos);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyRunFinished(Map<String, Object> summary, long durationNanos) {
-        try {
-            listener.onRunFinished(summary, durationNanos);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
-        }
-    }
-
-    private void notifyRunFailed(String runId, RuntimeException error, long durationNanos) {
-        try {
-            listener.onRunFailed(runId, error, durationNanos);
-        } catch (RuntimeException ignored) {
-            // Observers never change evaluation truth.
         }
     }
 
@@ -574,7 +513,7 @@ public final class EvaluationEngine {
             return runSuiteLocked(cases, suite, source, effectiveRunId, resume, caseManifest, state);
         } catch (RuntimeException error) {
             if (state.started) {
-                notifyRunFailed(effectiveRunId, error, System.nanoTime() - state.startedAtNanos);
+                notifier.runFailed(effectiveRunId, error, System.nanoTime() - state.startedAtNanos);
             }
             throw error;
         }
@@ -588,20 +527,13 @@ public final class EvaluationEngine {
             boolean resume,
             Map<String, String> caseManifest,
             RunState state) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("case_count", cases.size());
-        metadata.put("workers", workers);
-        metadata.put("requested_workers", requestedWorkers);
-        metadata.put("max_in_flight", maxInFlight);
-        metadata.put("retries", retries);
-        metadata.put("timeout_seconds", timeoutSeconds);
-        metadata.put("collect_few_shot", collectFewShot);
-        metadata.put("run_identity", runIdentity);
+        Map<String, Object> metadata = RunSummary.metadata(
+                cases.size(), workers, requestedWorkers, maxInFlight, retries, timeoutSeconds, collectFewShot, runIdentity);
         store.startRun(runId, adapter.name(), suite, source, metadata, resume, caseManifest);
         long runStarted = System.nanoTime();
         state.started = true;
         state.startedAtNanos = runStarted;
-        notifyRunStarted(runId, suite, source, cases.size());
+        notifier.runStarted(runId, suite, source, cases.size());
 
         BudgetLedger ledger = new BudgetLedger(budget);
         if (resume && ledger.enabled()) {
@@ -721,34 +653,23 @@ public final class EvaluationEngine {
         String status = hardFailures > 0 ? "failed" : budgetExhausted ? "budget_exhausted" : "passed";
         store.finishRun(runId, status);
 
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("run_id", runId);
-        summary.put("suite", suite);
-        summary.put("source", source);
-        summary.put("status", status);
-        summary.put("case_count", results.size());
-        summary.put("requested_case_count", cases.size());
-        summary.put("skipped_case_count", skippedCases);
-        summary.put("hard_failures", hardFailures);
-        summary.put("soft_warnings", softWarnings);
-        if (budget.enabled()) {
-            summary.put("budget", ledger.snapshot());
-        }
-        if (retryPolicy.enabled()) {
-            Map<String, Object> retry = new LinkedHashMap<>();
-            retry.put("base_delay_ms", retryPolicy.baseDelay().toMillis());
-            retry.put("max_delay_ms", retryPolicy.maxDelay().toMillis());
-            retry.put("jitter", retryPolicy.jitter());
-            summary.put("retry_policy", retry);
-        }
-        if (adapterBreaker.enabled() || reviewerBreaker.enabled()) {
-            Map<String, Object> breaker = new LinkedHashMap<>();
-            breaker.put("adapter", adapterBreaker.snapshot());
-            breaker.put("reviewer", reviewerBreaker.snapshot());
-            summary.put("circuit_breaker", breaker);
-        }
-        summary.put("results", results);
-        notifyRunFinished(summary, System.nanoTime() - runStarted);
+        Map<String, Object> summary = RunSummary.summary(
+                runId,
+                suite,
+                source,
+                status,
+                results.size(),
+                cases.size(),
+                skippedCases,
+                hardFailures,
+                softWarnings,
+                budget,
+                ledger,
+                retryPolicy,
+                adapterBreaker,
+                reviewerBreaker,
+                results);
+        notifier.runFinished(summary, System.nanoTime() - runStarted);
         return summary;
     }
 
