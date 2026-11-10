@@ -33,6 +33,7 @@
     <module>assay-runtime</module>
     <module>assay-examples</module>
     <module>assay-cli</module>
+    <module>assay-server</module>
     <module>app</module>
     <module>extensions/assay-spring-boot-starter</module>
     <module>extensions/assay-metrics-micrometer</module>
@@ -86,6 +87,10 @@
       <dependency>
         <groupId>io.assay</groupId>
         <artifactId>assay-cli</artifactId>
+        <version>${project.version}</version>
+      </dependency>      <dependency>
+        <groupId>io.assay</groupId>
+        <artifactId>assay-server</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

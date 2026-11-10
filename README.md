@@ -117,13 +117,14 @@ assay-dashboard/                       # 只读 Dashboard 与静态资源
 assay-runtime/                         # 审计、diff、trace、process、workspace 等运行服务
 assay-examples/                        # 示例适配器（不参与评测核心）
 assay-cli/                             # 命令行接口与命令分发
+assay-server/                          # Spring Boot HTTP 服务（骨架，后续接入运行提交与报告读取）
 app/                                   # 分发模块：shade 成 assay.jar
 extensions/assay-spring-boot-starter/  # 可选 Spring Boot 自动配置
 extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建十一个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建十二个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
