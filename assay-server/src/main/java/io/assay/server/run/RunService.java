@@ -8,6 +8,7 @@ import io.assay.execution.RunOptions;
 import io.assay.execution.RunSpec;
 import io.assay.execution.SuiteRunner;
 import io.assay.runner.Job;
+import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
 import io.assay.runner.RetryPolicy;
 import io.assay.server.config.AssayServerProperties;
@@ -133,7 +134,11 @@ public class RunService {
         try {
             for (Job job : queue.jobs(LIST_LIMIT)) {
                 String runId = RunJobs.runId(job.payload());
-                if (runId != null && !merged.containsKey(runId)) {
+                if (runId == null) {
+                    continue;
+                }
+                Map<String, Object> existing = merged.get(runId);
+                if (existing == null || finalizing(existing, job)) {
                     merged.put(runId, jobRow(job, runId));
                 }
             }
@@ -150,17 +155,33 @@ public class RunService {
     /** A persisted run, or the queue record of a run that has not started yet. */
     public Optional<Map<String, Object>> get(String runId) {
         String safe = Names.safeName(runId, "run_id");
+        Map<String, Object> persisted = null;
         try (Results store = openStore(storePath)) {
-            Map<String, Object> persisted = store.getRun(safe);
-            if (persisted != null) {
-                return Optional.of(decorate(persisted));
-            }
+            persisted = store.getRun(safe);
         } catch (UnsupportedOperationException ignored) {
             // Fall through to the queue record.
         } catch (RuntimeException ignored) {
             // Fall through to the queue record.
         }
-        return queue.findJobByRunId(safe).map(job -> jobRow(job, safe));
+        Job job = queue.findJobByRunId(safe).orElse(null);
+        if (persisted != null) {
+            if (job != null && finalizing(persisted, job)) {
+                // The engine finished but the worker has not written run-summary.json yet.
+                return Optional.of(jobRow(job, safe));
+            }
+            return Optional.of(decorate(persisted));
+        }
+        return job == null ? Optional.empty() : Optional.of(jobRow(job, safe));
+    }
+
+    /** True while a run record is terminal but its queue worker is still finalizing the summary. */
+    private static boolean finalizing(Map<String, Object> run, Job job) {
+        if (job.status() != JobStatus.RUNNING) {
+            return false;
+        }
+        Object status = run.get("status");
+        return status != null && (status.equals("passed") || status.equals("failed")
+                || status.equals("budget_exhausted") || status.equals("cancelled"));
     }
 
     /** The persisted per-case facts of a run; empty while the run has not started writing cases. */
