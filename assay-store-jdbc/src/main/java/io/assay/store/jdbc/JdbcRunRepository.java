@@ -19,9 +19,9 @@ import java.util.TreeMap;
 /** Run lifecycle and run-record queries for {@link JdbcResultStore}. */
 final class JdbcRunRepository {
 
-    private final JdbcResultStore.ConnectionFactory connections;
+    private final JdbcConnectionFactory connections;
 
-    JdbcRunRepository(JdbcResultStore.ConnectionFactory connections) {
+    JdbcRunRepository(JdbcConnectionFactory connections) {
         this.connections = connections;
     }
 

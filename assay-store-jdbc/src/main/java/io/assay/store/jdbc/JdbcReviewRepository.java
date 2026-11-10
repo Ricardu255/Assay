@@ -18,10 +18,10 @@ import java.util.UUID;
 /** Human review persistence for {@link JdbcResultStore}. */
 final class JdbcReviewRepository {
 
-    private final JdbcResultStore.ConnectionFactory connections;
+    private final JdbcConnectionFactory connections;
     private final JdbcCaseRepository cases;
 
-    JdbcReviewRepository(JdbcResultStore.ConnectionFactory connections, JdbcCaseRepository cases) {
+    JdbcReviewRepository(JdbcConnectionFactory connections, JdbcCaseRepository cases) {
         this.connections = connections;
         this.cases = cases;
     }

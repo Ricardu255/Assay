@@ -53,12 +53,13 @@ public final class JdbcResultStore implements Results {
 
     public JdbcResultStore(ConnectionFactory connections) {
         this.connections = Objects.requireNonNull(connections, "connections");
-        JdbcSchema.create(this.connections);
-        this.runs = new JdbcRunRepository(this.connections);
-        this.cases = new JdbcCaseRepository(this.connections);
-        this.reviews = new JdbcReviewRepository(this.connections, this.cases);
-        this.evolutions = new JdbcEvolutionRepository(this.connections);
-        this.retention = new JdbcRetention(this.connections);
+        JdbcConnectionFactory factory = this.connections::open;
+        JdbcSchema.create(factory);
+        this.runs = new JdbcRunRepository(factory);
+        this.cases = new JdbcCaseRepository(factory);
+        this.reviews = new JdbcReviewRepository(factory, this.cases);
+        this.evolutions = new JdbcEvolutionRepository(factory);
+        this.retention = new JdbcRetention(factory);
     }
 
     /** Opens a store from a JDBC URL, reading optional credentials from the environment. */

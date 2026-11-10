@@ -27,12 +27,7 @@ import javax.sql.DataSource;
 /** JDBC-backed durable job queue with leases, cancellation, and bounded retries. */
 public final class JdbcJobStore implements JobStore {
 
-    @FunctionalInterface
-    private interface Connections {
-        Connection open() throws SQLException;
-    }
-
-    private final Connections connections;
+    private final JdbcConnectionFactory connections;
     private final RetryPolicy retryPolicy;
 
     public JdbcJobStore(DataSource dataSource) {
@@ -43,7 +38,7 @@ public final class JdbcJobStore implements JobStore {
         this(dataSource::getConnection, retryPolicy);
     }
 
-    private JdbcJobStore(Connections connections, RetryPolicy retryPolicy) {
+    private JdbcJobStore(JdbcConnectionFactory connections, RetryPolicy retryPolicy) {
         this.connections = connections;
         this.retryPolicy = retryPolicy == null ? RetryPolicy.defaults() : retryPolicy;
         ensureSchema();
@@ -215,7 +210,7 @@ public final class JdbcJobStore implements JobStore {
                     }
                 }
             } catch (SQLException | RuntimeException error) {
-                rollback(connection);
+                JdbcSupport.rollbackQuietly(connection);
                 throw error;
             }
         } catch (SQLException error) {
@@ -298,7 +293,7 @@ public final class JdbcJobStore implements JobStore {
                 connection.commit();
                 return updated > 0;
             } catch (SQLException error) {
-                rollback(connection);
+                JdbcSupport.rollbackQuietly(connection);
                 throw error;
             }
         } catch (SQLException error) {
@@ -396,7 +391,7 @@ public final class JdbcJobStore implements JobStore {
                 }
                 connection.commit();
             } catch (SQLException failure) {
-                rollback(connection);
+                JdbcSupport.rollbackQuietly(connection);
                 throw failure;
             }
         } catch (SQLException failure) {
@@ -439,19 +434,15 @@ public final class JdbcJobStore implements JobStore {
                 rows.getInt("attempts"),
                 rows.getInt("max_attempts"),
                 rows.getString("lease_owner"),
-                instant(rows.getTimestamp("lease_expires_at")),
+                JdbcSupport.instant(rows.getTimestamp("lease_expires_at")),
                 rows.getBoolean("cancel_requested"),
-                instant(rows.getTimestamp("created_at")),
-                instant(rows.getTimestamp("started_at")),
-                instant(rows.getTimestamp("finished_at")),
+                JdbcSupport.instant(rows.getTimestamp("created_at")),
+                JdbcSupport.instant(rows.getTimestamp("started_at")),
+                JdbcSupport.instant(rows.getTimestamp("finished_at")),
                 rows.getString("error"),
                 rows.getString("idempotency_key"),
                 rows.getInt("replay_count"),
-                instant(rows.getTimestamp("next_attempt_at")));
-    }
-
-    private static Instant instant(Timestamp value) {
-        return value == null ? null : value.toInstant();
+                JdbcSupport.instant(rows.getTimestamp("next_attempt_at")));
     }
 
     private static String text(String value, String field) {
@@ -464,14 +455,6 @@ public final class JdbcJobStore implements JobStore {
     private static void requireSamePayload(String key, Job existing, Map<String, Object> payload) {
         if (!Json.canonical(existing.payload()).equals(Json.canonical(payload))) {
             throw new IdempotencyConflictException(key, existing.id());
-        }
-    }
-
-    private static void rollback(Connection connection) {
-        try {
-            connection.rollback();
-        } catch (SQLException ignored) {
-            // The original failure is more useful.
         }
     }
 
@@ -515,7 +498,7 @@ public final class JdbcJobStore implements JobStore {
                 connection.commit();
                 return find(jobId);
             } catch (SQLException | RuntimeException error) {
-                rollback(connection);
+                JdbcSupport.rollbackQuietly(connection);
                 throw error;
             }
         } catch (SQLException error) {
@@ -541,7 +524,7 @@ public final class JdbcJobStore implements JobStore {
                         """)) {
             try (ResultSet result = select.executeQuery()) {
                 while (result.next()) {
-                    rows.add(new JobRow(result.getString("job_id"), instant(result.getTimestamp("ended_at"))));
+                    rows.add(new JobRow(result.getString("job_id"), JdbcSupport.instant(result.getTimestamp("ended_at"))));
                 }
             }
         } catch (SQLException error) {
@@ -569,7 +552,7 @@ public final class JdbcJobStore implements JobStore {
                 connection.commit();
                 return deleted;
             } catch (SQLException error) {
-                rollback(connection);
+                JdbcSupport.rollbackQuietly(connection);
                 throw new IllegalStateException("cannot prune jobs", error);
             }
         } catch (SQLException error) {

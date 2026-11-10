@@ -71,21 +71,45 @@ class JdbcResultStoreTest {
     }
 
     @Test
-    void prunesOldFinishedRunsAndTheirCases() {
+    void prunesOldFinishedRunsAndTheirCases() throws InterruptedException {
         for (int index = 1; index <= 3; index++) {
             String runId = "prune-" + index;
             store.startRun(runId, "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash"));
             store.saveCases(List.of(caseResult(runId, "C1", true)));
             store.finishRun(runId, "passed");
+            Thread.sleep(5);
         }
         Instant cutoff = Instant.now().plusSeconds(60);
 
         assertEquals(2, store.pruneRuns(cutoff, 1, true).size());
-        assertEquals(2, store.pruneRuns(cutoff, 1, false).size());
+        assertEquals(3, store.listRuns().size(), "a dry run must not delete anything");
+        assertEquals(List.of("prune-2", "prune-1"), store.pruneRuns(cutoff, 1, false));
         int remaining = store.listResults("prune-1").size()
                 + store.listResults("prune-2").size()
                 + store.listResults("prune-3").size();
         assertEquals(1, remaining);
+        assertEquals(1, store.listRuns().size());
+        assertEquals("prune-3", store.listRuns().get(0).get("run_id"));
+    }
+
+    @Test
+    void pruneSkipsRunningRunsAndKeepsTheNewestFinishedRuns() throws InterruptedException {
+        store.startRun("running-1", "adapter", "suite", "online", Map.of());
+
+        store.startRun("finished-old", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash"));
+        store.saveCases(List.of(caseResult("finished-old", "C1", true)));
+        store.finishRun("finished-old", "passed");
+        Thread.sleep(5);
+
+        store.startRun("finished-new", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash"));
+        store.saveCases(List.of(caseResult("finished-new", "C1", true)));
+        store.finishRun("finished-new", "passed");
+
+        Instant cutoff = Instant.now().plusSeconds(60);
+        assertEquals(List.of("finished-old"), store.pruneRuns(cutoff, 1, false));
+        assertEquals(2, store.listRuns().size());
+        assertTrue(runIds().contains("finished-new"));
+        assertTrue(runIds().contains("running-1"), "running runs are never pruned");
     }
 
     @Test
@@ -108,7 +132,8 @@ class JdbcResultStoreTest {
     @Test
     void lockRejectsASecondHolderAndReleasesOnClose() {
         try (Results.RunLock ignored = store.lockRun("run-3")) {
-            assertThrows(IllegalStateException.class, () -> store.lockRun("run-3"));
+            IllegalStateException busy = assertThrows(IllegalStateException.class, () -> store.lockRun("run-3"));
+            assertEquals("already running: evaluation run run-3", busy.getMessage());
         }
         try (Results.RunLock ignored = store.lockRun("run-3")) {
             assertTrue(true);
@@ -130,7 +155,21 @@ class JdbcResultStoreTest {
     }
 
     @Test
-    void addCaseCheckUpdatesTheStoredVerdict() {
+    void onlyTheLatestReviewPerCaseIsListed() throws InterruptedException {
+        store.startRun("run-7", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash-1"));
+        store.saveCases(List.of(caseResult("run-7", "C1", true)));
+        store.saveReview("run-7", "C1", "accepted", "first");
+        Thread.sleep(5);
+        store.saveReview("run-7", "C1", "rejected", "second");
+
+        assertTrue(store.listReviewedResults("accepted").isEmpty());
+        List<Map<String, Object>> rejected = store.listReviewedResults("rejected");
+        assertEquals(1, rejected.size());
+        assertEquals("second", rejected.get(0).get("human_final_conclusion"));
+    }
+
+    @Test
+    void addCaseCheckIsIdempotentAndUpdatesTheStoredVerdict() {
         store.startRun("run-5", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash-1"));
         store.saveCases(List.of(caseResult("run-5", "C1", true)));
 
@@ -138,10 +177,27 @@ class JdbcResultStoreTest {
                 "run-5",
                 "C1",
                 new CheckResult("structure", "hard", "route", false, "GENERAL", "SUPPORT", "route mismatch"));
+        store.addCaseCheck(
+                "run-5",
+                "C1",
+                new CheckResult("structure", "hard", "route", false, "GENERAL", "SUPPORT", "route mismatch"));
 
         Map<String, Object> result = store.listResults("run-5").get(0);
         assertEquals(false, result.get("hard_pass"));
-        assertEquals(1, ((List<?>) result.get("checks")).size());
+        assertEquals(1, ((List<?>) result.get("checks")).size(), "duplicate checks must not be appended");
+    }
+
+    @Test
+    void addCaseCheckCountsDistinctSoftWarnings() {
+        store.startRun("run-8", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash-1"));
+        store.saveCases(List.of(caseResult("run-8", "C1", true)));
+
+        store.addCaseCheck("run-8", "C1", new CheckResult("behavior", "soft", "latency", false));
+        store.addCaseCheck("run-8", "C1", new CheckResult("behavior", "soft", "latency", false));
+        assertEquals(1, ((Number) store.listResults("run-8").get(0).get("soft_warning_count")).intValue());
+
+        store.addCaseCheck("run-8", "C1", new CheckResult("behavior", "soft", "steps", false));
+        assertEquals(2, ((Number) store.listResults("run-8").get(0).get("soft_warning_count")).intValue());
     }
 
     @Test
@@ -164,6 +220,10 @@ class JdbcResultStoreTest {
         } finally {
             second.close();
         }
+    }
+
+    private List<String> runIds() {
+        return store.listRuns().stream().map(run -> String.valueOf(run.get("run_id"))).toList();
     }
 
     private static CaseResult caseResult(String runId, String caseId, boolean pass) {

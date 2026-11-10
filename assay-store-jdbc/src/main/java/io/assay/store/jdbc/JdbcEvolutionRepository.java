@@ -13,9 +13,9 @@ import java.util.Map;
 /** Evolution result persistence for {@link JdbcResultStore}. */
 final class JdbcEvolutionRepository {
 
-    private final JdbcResultStore.ConnectionFactory connections;
+    private final JdbcConnectionFactory connections;
 
-    JdbcEvolutionRepository(JdbcResultStore.ConnectionFactory connections) {
+    JdbcEvolutionRepository(JdbcConnectionFactory connections) {
         this.connections = connections;
     }
 

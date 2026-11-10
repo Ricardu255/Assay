@@ -19,9 +19,9 @@ import java.util.Objects;
 /** Case result persistence for {@link JdbcResultStore}. */
 final class JdbcCaseRepository {
 
-    private final JdbcResultStore.ConnectionFactory connections;
+    private final JdbcConnectionFactory connections;
 
-    JdbcCaseRepository(JdbcResultStore.ConnectionFactory connections) {
+    JdbcCaseRepository(JdbcConnectionFactory connections) {
         this.connections = connections;
     }
 

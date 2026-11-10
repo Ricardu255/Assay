@@ -10,7 +10,7 @@ final class JdbcSchema {
     private JdbcSchema() {
     }
 
-    static void create(JdbcResultStore.ConnectionFactory connections) {
+    static void create(JdbcConnectionFactory connections) {
         try (Connection connection = connections.open(); Statement statement = connection.createStatement()) {
             statement.execute("""
                     create table if not exists assay_run (

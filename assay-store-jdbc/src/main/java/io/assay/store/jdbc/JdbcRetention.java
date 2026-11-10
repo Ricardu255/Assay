@@ -11,9 +11,9 @@ import java.util.List;
 /** Run retention pruning for {@link JdbcResultStore}. */
 final class JdbcRetention {
 
-    private final JdbcResultStore.ConnectionFactory connections;
+    private final JdbcConnectionFactory connections;
 
-    JdbcRetention(JdbcResultStore.ConnectionFactory connections) {
+    JdbcRetention(JdbcConnectionFactory connections) {
         this.connections = connections;
     }
 
