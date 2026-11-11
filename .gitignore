@@ -3,3 +3,5 @@ target/
 dist/
 __pycache__/
 *.pyc
+.workbuddy/
+.work/

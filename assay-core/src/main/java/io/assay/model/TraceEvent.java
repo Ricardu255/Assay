@@ -1,9 +1,9 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** One step recorded in a normalized trace. */
 public record TraceEvent(

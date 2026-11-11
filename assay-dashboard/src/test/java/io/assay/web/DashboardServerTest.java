@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.assay.json.Json;
 import io.assay.runner.JobStatus;
 import io.assay.store.file.FileJobStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -17,13 +19,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.HexFormat;
-import java.security.MessageDigest;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class DashboardServerTest {
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
@@ -50,6 +50,7 @@ class DashboardServerTest {
             assertEquals(200, get(base.resolve("theme.js")).statusCode());
             assertEquals(200, get(base.resolve("theme.css")).statusCode());
             assertEquals(200, get(base.resolve("style.css")).statusCode());
+            assertEquals(200, get(base.resolve("paper.css")).statusCode());
 
             Map<String, Object> catalog = Json.parseObject(get(base.resolve("api/catalog")).body());
             List<?> items = (List<?>) catalog.get("items");

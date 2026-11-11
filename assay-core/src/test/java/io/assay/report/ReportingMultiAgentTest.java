@@ -3,13 +3,13 @@ package io.assay.report;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.json.Json;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class ReportingMultiAgentTest {
 

@@ -6,11 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.model.EvaluationBudget;
 import io.assay.runner.RetryPolicy;
+import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /** The summary builder is the contract of the report pipeline, so its key order and sections are fixed. */
 class RunSummaryTest {

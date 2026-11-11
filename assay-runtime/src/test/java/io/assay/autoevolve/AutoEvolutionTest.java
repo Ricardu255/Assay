@@ -21,6 +21,8 @@ import io.assay.store.file.ResultStore;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.Fixtures;
 import io.assay.workspace.TextArtifactWorkspace;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -31,8 +33,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** The automatic loop: budgets, retries, accept/rollback, and resume from a checkpoint. */
 class AutoEvolutionTest {

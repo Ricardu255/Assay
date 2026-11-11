@@ -34,7 +34,9 @@ final class JdbcRetention {
                         """)) {
             try (ResultSet result = select.executeQuery()) {
                 while (result.next()) {
-                    rows.add(new RunRow(result.getString("run_id"), JdbcSupport.instant(result.getTimestamp("ended_at"))));
+                    rows.add(new RunRow(
+                            result.getString("run_id"),
+                            JdbcSupport.instant(result.getTimestamp("ended_at"))));
                 }
             }
         } catch (SQLException error) {

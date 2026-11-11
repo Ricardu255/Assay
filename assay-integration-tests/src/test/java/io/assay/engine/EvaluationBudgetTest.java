@@ -9,12 +9,12 @@ import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.store.file.ResultStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Budget enforcement stops new cases without turning them into hard failures. */
 class EvaluationBudgetTest {

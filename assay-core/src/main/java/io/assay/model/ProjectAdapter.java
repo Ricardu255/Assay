@@ -1,7 +1,7 @@
 package io.assay.model;
 
-import java.util.List;
 import io.assay.support.Immutable;
+import java.util.List;
 
 /**
  * The four capabilities a domain project supplies.

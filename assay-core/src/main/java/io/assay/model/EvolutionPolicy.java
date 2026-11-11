@@ -3,9 +3,11 @@ package io.assay.model;
 import io.assay.json.Jsonable;
 import io.assay.support.Immutable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Gate configuration shared by {@code evolve} and {@code evolve-auto}. */
 public record EvolutionPolicy(
@@ -27,7 +29,7 @@ public record EvolutionPolicy(
         objectives = objectives == null ? List.of() : Immutable.list(objectives);
         scenarioGates = scenarioGates == null ? List.of() : Immutable.list(scenarioGates);
         qualityGates = qualityGates == null ? List.of() : Immutable.list(qualityGates);
-        java.util.Set<String> names = new java.util.HashSet<>();
+        Set<String> names = new HashSet<>();
         for (MetricObjective objective : objectives) {
             if (!names.add(objective.name())) {
                 throw new IllegalArgumentException("duplicate objective name: " + objective.name());

@@ -11,12 +11,18 @@ import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
 import io.assay.runner.RetryPolicy;
+import org.junit.jupiter.api.Test;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import org.junit.jupiter.api.Test;
 
 class JdbcJobStoreTest {
 
@@ -141,6 +147,79 @@ class JdbcJobStoreTest {
             assertEquals("checkout-42", error.idempotencyKey());
             assertEquals(first.id(), error.existingJobId());
             assertEquals(1, store.list(10).size());
+        }
+    }
+
+    @Test
+    void findsJobByRunIdWithAnIndexedLookup() {
+        try (JdbcJobStore store = store()) {
+            Job job = store.submit(Map.of("run_id", "run-123", "suite", "smoke"), 1);
+            store.submit(Map.of("run_id", "run-999", "suite", "smoke"), 1);
+
+            assertEquals(job.id(), store.findByRunId("run-123").orElseThrow().id());
+            assertTrue(store.findByRunId("missing").isEmpty());
+        }
+    }
+
+    @Test
+    void upgradesALegacyJobTableWithoutResettingIt() throws Exception {
+        String url = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        try (Connection connection = DriverManager.getConnection(url);
+                Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    create table assay_job (
+                      job_id varchar(64) primary key,
+                      status varchar(32) not null,
+                      payload_json text not null,
+                      attempts int not null,
+                      max_attempts int not null,
+                      lease_owner varchar(128),
+                      lease_expires_at timestamp,
+                      cancel_requested boolean not null,
+                      created_at timestamp not null,
+                      started_at timestamp,
+                      finished_at timestamp,
+                      error text
+                    )
+                    """);
+        }
+        try (JdbcJobStore store = JdbcJobStore.fromUrl(url, RetryPolicy.none())) {
+            Job job = store.submit(Map.of("run_id", "legacy-run", "suite", "smoke"), 1);
+
+            assertEquals(job.id(), store.findByRunId("legacy-run").orElseThrow().id());
+            assertEquals(JobStatus.QUEUED, store.find(job.id()).orElseThrow().status());
+        }
+    }
+
+    @Test
+    void rebuildRunIdIndexBackfillsLegacyRows() throws Exception {
+        String url = "jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        try (JdbcJobStore store = JdbcJobStore.fromUrl(url, RetryPolicy.none())) {
+            try (Connection connection = DriverManager.getConnection(url);
+                    PreparedStatement insert = connection.prepareStatement(
+                            "insert into assay_job(job_id, status, payload_json, attempts, max_attempts,"
+                                    + " cancel_requested, created_at) values (?, ?, ?, ?, ?, ?, ?)")) {
+                insert.setString(1, "legacy-job");
+                insert.setString(2, "QUEUED");
+                insert.setString(3, "{\"run_id\":\"legacy-run\",\"suite\":\"smoke\"}");
+                insert.setInt(4, 0);
+                insert.setInt(5, 1);
+                insert.setBoolean(6, false);
+                insert.setTimestamp(7, Timestamp.from(Instant.now()));
+                insert.executeUpdate();
+            }
+
+            assertEquals(1, store.rebuildRunIdIndex());
+
+            try (Connection connection = DriverManager.getConnection(url);
+                    PreparedStatement select = connection.prepareStatement(
+                            "select run_id from assay_job where job_id = ?")) {
+                select.setString(1, "legacy-job");
+                try (ResultSet rows = select.executeQuery()) {
+                    assertTrue(rows.next());
+                    assertEquals("legacy-run", rows.getString(1));
+                }
+            }
         }
     }
 

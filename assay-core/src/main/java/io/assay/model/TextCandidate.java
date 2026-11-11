@@ -1,11 +1,11 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** A proposed replacement for a text artifact, either whole-file or a set of operations. */
 public record TextCandidate(

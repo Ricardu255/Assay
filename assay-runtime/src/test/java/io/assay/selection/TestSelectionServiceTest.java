@@ -11,13 +11,13 @@ import io.assay.diff.DiffSnapshot;
 import io.assay.model.TestImpactAssessment;
 import io.assay.model.TestSelection;
 import io.assay.support.AtomicFiles;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * How much testing a change needs.

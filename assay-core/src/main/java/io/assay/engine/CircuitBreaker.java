@@ -3,6 +3,7 @@ package io.assay.engine;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.LongSupplier;
 
 /**
  * A small, process-local circuit breaker for calls to an external Agent or model.
@@ -12,6 +13,7 @@ import java.util.Map;
  */
 public final class CircuitBreaker {
 
+    /** Breaker state exposed for tests and listeners. */
     public enum State {
         CLOSED,
         OPEN,
@@ -21,7 +23,7 @@ public final class CircuitBreaker {
     private final boolean enabled;
     private final int failureThreshold;
     private final long openDurationNanos;
-    private final java.util.function.LongSupplier clock;
+    private final LongSupplier clock;
 
     private State state = State.CLOSED;
     private int consecutiveFailures;
@@ -32,7 +34,7 @@ public final class CircuitBreaker {
         this(failureThreshold, openDuration, System::nanoTime);
     }
 
-    CircuitBreaker(int failureThreshold, Duration openDuration, java.util.function.LongSupplier clock) {
+    CircuitBreaker(int failureThreshold, Duration openDuration, LongSupplier clock) {
         if (failureThreshold < 0) {
             throw new IllegalArgumentException("failure threshold must be non-negative");
         }

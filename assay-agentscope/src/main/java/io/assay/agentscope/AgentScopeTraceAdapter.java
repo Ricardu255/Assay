@@ -1,8 +1,5 @@
 package io.assay.agentscope;
 
-import io.assay.metrics.MultiAgentMetrics;
-import io.assay.model.NormalizedTrace;
-import io.assay.model.TraceEvent;
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
@@ -17,6 +14,9 @@ import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.ToolResultState;
+import io.assay.metrics.MultiAgentMetrics;
+import io.assay.model.NormalizedTrace;
+import io.assay.model.TraceEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

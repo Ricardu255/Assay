@@ -1,3 +1,5 @@
+# Builds the CLI distribution (`app/target/assay.jar`). The Spring Boot server is a separate
+# artifact and is intentionally not part of this image.
 # Build with Maven, run with a minimal JRE.
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /workspace
@@ -12,6 +14,8 @@ COPY assay-dashboard/pom.xml ./assay-dashboard/pom.xml
 COPY assay-dashboard/src ./assay-dashboard/src
 COPY assay-cli/pom.xml ./assay-cli/pom.xml
 COPY assay-cli/src ./assay-cli/src
+COPY assay-integration-tests/pom.xml ./assay-integration-tests/pom.xml
+# POM-only modules: copied so the reactor resolves; app does not depend on them.
 COPY extensions/assay-spring-boot-starter/pom.xml ./extensions/assay-spring-boot-starter/pom.xml
 COPY extensions/assay-metrics-micrometer/pom.xml ./extensions/assay-metrics-micrometer/pom.xml
 COPY extensions/assay-tracing-otel/pom.xml ./extensions/assay-tracing-otel/pom.xml

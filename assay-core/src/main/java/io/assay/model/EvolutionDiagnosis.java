@@ -1,10 +1,10 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** What the diagnoser concluded about a failing run. */
 public record EvolutionDiagnosis(

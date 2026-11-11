@@ -5,6 +5,7 @@ import io.assay.json.Json;
 import io.assay.model.CheckResult;
 import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
+import io.assay.model.Values;
 import io.assay.selection.TestSelectionService;
 import java.io.IOException;
 import java.net.URI;
@@ -76,7 +77,8 @@ public record OpenAiCompatibleReviewer(
                         + "Use only the supplied case, traces, and failed checks. "
                         + "Return JSON with keys: summary, suspected_modules, suggestions, consistency, "
                         + "few_shot_candidate. Suggestions are review candidates, never final decisions. "
-                        + "Set few_shot_candidate to null unless collect_few_shot is true and the run is clearly successful.\n\n"
+                        + "Set few_shot_candidate to null unless collect_few_shot is true and the run is "
+                        + "clearly successful.\n\n"
                         + Json.write(evidence);
         return requestJson(prompt);
     }
@@ -175,9 +177,8 @@ public record OpenAiCompatibleReviewer(
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
     /** Raised when the provider cannot be reached or answers with something unusable. */

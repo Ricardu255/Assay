@@ -1,11 +1,11 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** Per-scenario thresholds that stop a small but important regression hiding behind the overall rate. */
 public record ScenarioGate(
@@ -22,7 +22,8 @@ public record ScenarioGate(
             throw new IllegalArgumentException("scenario gate requires scenario");
         }
         roles = roles == null ? List.of("regression", "holdout") : Immutable.list(roles);
-        if (roles.isEmpty() || roles.stream().anyMatch(role -> !List.of("improvement", "regression", "holdout").contains(role))) {
+        if (roles.isEmpty()
+                || roles.stream().anyMatch(role -> !List.of("improvement", "regression", "holdout").contains(role))) {
             throw new IllegalArgumentException("scenario gate has unsupported roles: " + roles);
         }
         if (minimumCaseCount < 1) {

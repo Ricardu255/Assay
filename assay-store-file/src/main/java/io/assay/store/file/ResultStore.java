@@ -2,8 +2,10 @@ package io.assay.store.file;
 
 import io.assay.json.Json;
 import io.assay.json.JsonException;
+import io.assay.model.CaseChecks;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
+import io.assay.model.Values;
 import io.assay.store.Results;
 import io.assay.support.AtomicFiles;
 import io.assay.support.ExclusiveFileLock;
@@ -122,7 +124,8 @@ public final class ResultStore implements Results {
         synchronized (lock) {
             Path directory = runDir(runId);
             Path runFile = directory.resolve("run.json");
-            Map<String, Object> existing = Files.isRegularFile(runFile) ? Json.parseObject(AtomicFiles.readText(runFile)) : null;
+            Map<String, Object> existing =
+                    Files.isRegularFile(runFile) ? Json.parseObject(AtomicFiles.readText(runFile)) : null;
             if (existing != null) {
                 if (!resume) {
                     throw new IllegalArgumentException("run already exists; use resume to continue: " + runId);
@@ -130,7 +133,7 @@ public final class ResultStore implements Results {
                 if (!Objects.equals(existing.get("adapter"), adapter)
                         || !Objects.equals(existing.get("suite"), suite)
                         || !Objects.equals(existing.get("source"), source)
-                        || !Json.normalize(withoutCaseCount(asMap(existing.get("metadata_json"))))
+                        || !Json.normalize(withoutCaseCount(Values.asMap(existing.get("metadata_json"))))
                                 .equals(Json.normalize(withoutCaseCount(metadata)))) {
                     throw new IllegalArgumentException(
                             "resume run identity or execution configuration changed");
@@ -224,7 +227,8 @@ public final class ResultStore implements Results {
             for (Map<String, Object> value : cases.values()) {
                 lines.add(Json.write(value));
             }
-            AtomicFiles.writeText(directory.resolve("cases.jsonl"), lines.isEmpty() ? "" : String.join("\n", lines) + "\n");
+            String content = lines.isEmpty() ? "" : String.join("\n", lines) + "\n";
+            AtomicFiles.writeText(directory.resolve("cases.jsonl"), content);
             logTails.remove(runId);
             AtomicFiles.writeText(runFile, Json.write(record, 2));
         }
@@ -259,7 +263,7 @@ public final class ResultStore implements Results {
                 }
                 // Stored and cached in normalized form so an in-memory read and a re-read from disk are
                 // indistinguishable; callers read plain maps, never live model objects.
-                Map<String, Object> payload = asMap(Json.normalize(result.toJson()));
+                Map<String, Object> payload = Values.asMap(Json.normalize(result.toJson()));
                 payload.put("hard_pass", result.hardPass());
                 payload.put("soft_warning_count", result.softWarningCount());
                 committed.put(result.evalCase().caseId(), payload);
@@ -325,18 +329,14 @@ public final class ResultStore implements Results {
             }
             @SuppressWarnings("unchecked")
             List<Object> checks = new ArrayList<>((List<Object>) rawChecks);
-            Map<String, Object> payload = asMap(check.toJson());
+            Map<String, Object> payload = Values.asMap(check.toJson());
             if (checks.contains(payload)) {
                 return;
             }
             checks.add(payload);
             record = new LinkedHashMap<>(record);
             record.put("checks", checks);
-            if ("hard".equals(check.level()) && !check.passed()) {
-                record.put("hard_pass", false);
-            } else if (("soft".equals(check.level()) || "candidate".equals(check.level())) && !check.passed()) {
-                record.put("soft_warning_count", intValue(record.get("soft_warning_count")) + 1);
-            }
+            CaseChecks.apply(record, check);
             appendCases(runId, Json.write(record) + "\n");
             cases.put(caseId, record);
         }
@@ -354,7 +354,8 @@ public final class ResultStore implements Results {
             record.put("decision", decision);
             record.put("final_conclusion", finalConclusion);
             record.put("reviewed_at", now());
-            AtomicFiles.appendLine(reviewsRoot().resolve(Names.safeName(runId, "run_id") + ".jsonl"), Json.write(record));
+            Path reviewFile = reviewsRoot().resolve(Names.safeName(runId, "run_id") + ".jsonl");
+            AtomicFiles.appendLine(reviewFile, Json.write(record));
         }
     }
 
@@ -369,7 +370,7 @@ public final class ResultStore implements Results {
                     paths.filter(file -> file.getFileName().toString().endsWith(".jsonl")).forEach(reviewFiles::add);
                 }
             } catch (IOException error) {
-                throw new java.io.UncheckedIOException(error);
+                throw new UncheckedIOException(error);
             }
             for (Path path : reviewFiles) {
                 for (String line : AtomicFiles.readText(path).split("\n", -1)) {
@@ -429,7 +430,7 @@ public final class ResultStore implements Results {
             if (!Files.isRegularFile(path)) {
                 return null;
             }
-            return asMap(Json.parseObject(AtomicFiles.readText(path)).get("result_json"));
+            return Values.asMap(Json.parseObject(AtomicFiles.readText(path)).get("result_json"));
         }
     }
 
@@ -459,7 +460,7 @@ public final class ResultStore implements Results {
         try {
             content = Files.readAllBytes(path);
         } catch (IOException error) {
-            throw new java.io.UncheckedIOException(error);
+            throw new UncheckedIOException(error);
         }
         int lineNumber = 0;
         for (int start = 0; start < content.length; ) {
@@ -483,7 +484,7 @@ public final class ResultStore implements Results {
                 return;
             }
             if (record != null) {
-                Object caseId = asMap(record.get("case")).get("case_id");
+                Object caseId = Values.asMap(record.get("case")).get("case_id");
                 if (!(caseId instanceof String id) || id.isBlank()) {
                     throw new IllegalStateException("case log has no case_id at " + path + ":" + lineNumber);
                 }
@@ -513,7 +514,7 @@ public final class ResultStore implements Results {
             logTails.remove(runId);
         } catch (IOException error) {
             invalidateCases(runId);
-            throw new java.io.UncheckedIOException(error);
+            throw new UncheckedIOException(error);
         } catch (RuntimeException error) {
             // A failed append may have written a prefix. Never keep uncommitted cache entries.
             invalidateCases(runId);
@@ -530,15 +531,6 @@ public final class ResultStore implements Results {
         Map<String, Object> result = new LinkedHashMap<>(metadata);
         result.remove("case_count");
         return result;
-    }
-
-    private static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : new LinkedHashMap<>();
     }
 
     @Override

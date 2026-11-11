@@ -259,7 +259,7 @@ LLM 只做语义分析、疑似模块、修改建议和 few-shot 候选；硬门
 - 暂存：`.assay-staging` 完成复制/修改/哈希/manifest，再整体移动。
 - 进程：超时终止整棵进程树；单流默认 1 MiB，超限终止。
 - 容器：默认禁网、只读挂载、只读根文件系统、移除 capabilities、限制 CPU/内存/PID。
-- Dashboard：只读、路径包含校验、符号链接拒绝、补丁 SHA-256。
+- Dashboard：默认只读；`serve --worker` 才开放本机 job 提交/取消。路径包含校验、符号链接拒绝、补丁 SHA-256。界面说明见 [dashboard-guide.md](dashboard-guide.md)。
 
 ---
 
@@ -283,7 +283,7 @@ python scripts/benchmark.py --count 10000 --workers 20
 | 文件存储 | 简单、可读、易恢复 | 无分布式锁/水平扩展 |
 | LLM 不进硬门禁 | 可复现、抗注入 | 语义判断弱，需要人工 |
 | 诊断只做辅助 | 不误伤非确定性轨迹 | 不是因果根因 |
-| 只读 Dashboard | 安全、无构建 | 无在线编辑/协作 |
+| 默认只读 Dashboard | 安全、无构建 | 无在线编辑/协作；队列提交需显式 `--worker` |
 
 ---
 

@@ -48,6 +48,13 @@
       <groupId>io.assay</groupId>
       <artifactId>assay-dashboard</artifactId>
     </dependency>
+    <!-- Test-only dependency so the JaCoCo aggregate includes the cross-module
+         integration suite; it is not shaded into the distribution jar. -->
+    <dependency>
+      <groupId>io.assay</groupId>
+      <artifactId>assay-integration-tests</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

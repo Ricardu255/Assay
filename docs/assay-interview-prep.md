@@ -1,9 +1,11 @@
 # Assay 面试准备与简历写法
 
+> 当前版本：2026-11-11。以下内容按当前代码、Dashboard 和 CI 状态描述，不保留历史中间过程。
+>
 > 适用场景：Agent 应用 / AI 平台 / 评测质量 / Java 后端岗位。
-> 项目事实：Java 17、Maven Reactor、核心零运行时依赖；79 个主代码文件、约 1.3 万行主代码、32 个测试文件、约 5,000 行测试；242 项核心 Java 测试通过（1 项按环境跳过）+ 17 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；GitHub Actions Windows/Linux 双平台。
+> 项目事实：Java 17、Maven 3.9、14 个模块、核心零运行时依赖；143 个主代码文件、约 2.28 万行主代码、62 个测试文件、约 9,600 行测试；364 项 Java 测试（1 项按环境跳过）+ 17 项 Node 测试；聚合行覆盖 82.1%；GitHub Actions Windows/Linux 双平台。
 > 仓库：https://github.com/Ricardu255/Assay
-> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel / 评测资产闭环 / 简历逐条追问 / 技术栈四件套 / 异步评测队列 / 简历四条逐条追问），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
+> 阅读顺序：第一至四部分用于项目介绍；第五部分是 30 题速查；第八部分是 22 题深答，面试前建议按第八部分逐题演练；第六部分是简历写法；第十部分是代码级深挖（TraceDiff / 门禁 / 恢复 / JDBC / Spring Boot Starter / Micrometer / OTel / 评测资产闭环 / 简历逐条追问 / 技术栈四件套 / 异步评测队列 / 简历三条逐条追问），用于应对“再往下讲一点”的追问；第十一部分是可观测性专项追问（13 题），第十二部分是 Maven Reactor 与工程化追问（10 题），面试前可单独过一遍。
 
 ---
 
@@ -15,16 +17,16 @@ Assay 是一个与领域解耦的 Agent 自动评测、诊断、人工审核、�
 
 ### 1.2 30 秒口述版
 
-“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，242 项测试，Windows/Linux CI 都跑通。”
+“我做过一个叫 Assay 的 Agent 评测框架。它解决的不是 Agent 能不能跑，而是改完之后能不能安全发布、退化能不能定位。它通过适配器把不同 Agent 的 Trace 转成统一契约，跑结构、行为、一致性、反馈四层评测，再用 improvement、regression、holdout 三套数据比较基线和候选，给出 accept / reject / rollback；如果退化，会定位到第一处步骤差异。项目是 Java 17、核心零运行时依赖，文件/JDBC 双存储，364 项测试，Windows/Linux CI 都跑通。”
 
 ### 1.3 2 分钟口述版
 
-1. **背景**：Agent 迭代很快，demo 能跑不代表能发布；线上 Trace 很多，但“看 Trace”不等于“做发布决策”。现有观测平台擅长存储和展示，指标库擅长单次打分，缺的是版本对比、发布门禁和退化定位的闭环。
+1. **背景**：Agent 迭代很快，单次运行能跑通不代表能发布；线上 Trace 很多，但“看 Trace”不等于“做发布决策”。现有观测平台擅长存储和展示，指标库擅长单次打分，缺的是版本对比、发布门禁和退化定位的闭环。
 2. **做法**：Assay 用 `ProjectAdapter` 回答四个问题：怎么调用 Agent、怎么把原生 Trace 转成 `NormalizedTrace`、哪些规则是硬门禁、哪些是软质量。核心层只依赖标准 Trace 和规则，不依赖具体 Agent 框架。
 3. **评测**：结构层看 Trace 完整性和硬门禁；行为层看步数、重试、延迟、重复步骤和模块错误；一致性层对高价值节点做多次运行；反馈层把隐式负反馈变成人工复核候选。
 4. **演化**：baseline 和 candidate 在 improvement / regression / holdout 三个数据集上跑同一套用例，按策略输出 accept / reject / rollback。新增了场景门禁、绝对质量门禁、规则通过率、P95 和样本覆盖。
 5. **诊断**：对“基线通过、候选失败”的用例，`TraceDiff` 用 LCS 对齐 `module/action`，定位第一处步骤增删、替换、字段变化、报错或最终输出差异；直接复用已经评测过的 Trace，不重跑 Agent。
-6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；242 项核心 Java 测试 + 17 项 Node 测试 + 4 项 Spring Boot Starter 测试 + 2 项 Micrometer 测试 + 2 项 OTel 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
+6. **结果**：核心零运行时依赖，存储可替换为文件或 JDBC；364 项 Java 测试 + 17 项 Node 测试；CI 覆盖 Windows/Linux；示例可稳定复现 rollback 和首错定位；还支持零代码接入 normalized / OpenInference / OTLP 外部轨迹。
 
 ### 1.4 5 分钟 / 白板顺序
 
@@ -47,7 +49,7 @@ Case JSONL ──► EvaluationEngine ──► CaseResult / NormalizedTrace
                    │                        │
 Adapter ───────────┘                        ├─► ResultStore（JSONL + 锁 + 恢复）
 （HTTP / Java / 离线 / OTLP）               ├─► Reporting（results.json / report.md）
-                                            └─► Dashboard（只读）
+                                            └─► Dashboard（默认只读；--worker 可提交队列）
 
 Baseline run ─┐
               ├─► EvolutionEngine ──► comparisons ──► decision
@@ -76,11 +78,13 @@ Candidate run ┘        │                  │
 | `assay-core` | `model`、`engine`、`rules`、`evolve`、`release`、`compare`、`report`、`json`、`support`、`Results` 接口 |
 | `assay-store-file` | `ResultStore`、`FileJobStore`、JSONL 落盘、锁、恢复 |
 | `assay-store-jdbc` | `JdbcResultStore`、`JdbcJobStore`、事务、`SELECT FOR UPDATE`、JDBC 契约 |
-| `assay-dashboard` | 只读 Dashboard、静态资源、`/api/catalog`、`/api/rule-history` |
+| `assay-dashboard` | 默认只读 Dashboard；`--worker` 开放队列提交；总览/结论卡/多智能体页签/静态资源 |
 | `assay-runtime` | `autoevolve`、`audit`、`diff`、`http`、`opentrace`、`process`、`review`、`selection`、`trace`、`workspace`、`llm` 适配器 |
 | `assay-agentscope` | AgentScope Java 2.0 typed event → `NormalizedTrace` 适配与事件录制器；不进入 core |
 | `assay-examples` | 示例适配器，只用于演示与测试，不进入核心依赖 |
-| `assay-cli` | `AssayCli`、`CommandLine`、`AdapterLoader`、`Stores`；命令注册与分发 |
+| `assay-cli` | `AssayCli`、`CommandLine`、命令注册与分发 |
+| `assay-server` | Spring Boot HTTP API、Security、Actuator、Validation |
+| `assay-integration-tests` | 跨模块集成测试（80 项） |
 | `app` | 纯分发模块；shade 成 `app/target/assay.jar` |
 | `extensions/*` | Starter、Micrometer、OTel，均不反向污染 core |
 
@@ -99,31 +103,22 @@ Candidate run ┘        │                  │
 | `EvaluationListener` + Micrometer/OTel | 可观测、可扩展，默认 no-op | 指标基数/span 层级需要设计；adapter/rules/llm/store 子 span 已做 |
 | LLM 只做建议 | 可复现、可审计、抗 prompt injection | 语义判断能力有限，需要人工复核 |
 | 诊断只做“第一处可见差异” | 可解释、可测试、不重跑 Agent | 不是因果根因，非确定性轨迹可能误报 |
-| 只读 Dashboard | 安全、无需构建、报告不可被界面改写 | 没有在线编辑和多人协作 |
+| 默认只读 Dashboard | 安全、无需构建、报告不可被界面改写 | 队列提交需显式 `--worker`；没有在线编辑和多人协作 |
 | 硬/软门禁分离 | 发布判定必须确定，质量问题可人工看 | 规则设计需要领域参与 |
 
 ---
 
-## 四、本次迭代新增内容（可作为“最近做了什么”）
+## 四、当前版本能力清单
 
-- **0.6 诊断闭环**：`TraceDiff` 用例级首错、`case_transitions`、失败聚类、报告和 Dashboard 展示、故意退化夹具。
-- **0.7 门禁与统计**：`QualityGate` 绝对门禁（最低通过率、最大回归数、最大关键回归、最小样本）、`MetricObjective.maximum`、P50/P95/P99、规则通过率 `rule_stats` / `rule_deltas`。
-- **0.8 外部轨迹**：`trace_file` 适配器，支持 normalized、OpenInference、OTLP attribute array、Phoenix `traces` / `resourceSpans`；按 `case_id` 校验覆盖，缺失用例硬失败。
-- **Dashboard**：诊断文案中文化、回归用例统计卡、规则表默认只显示变化、类别 badge 分色、关键用例标记。
-- **Dashboard 趋势**：总览新增最近 7 天硬门禁通过率趋势、每日数据表和按测试集健康表；纯前端聚合，不新增依赖。
-- **运行规则统计**：`RuleStats` 把每次 run 的 checks 聚合为 `rule_stats`，写进 `results.json` 和 `report.md`；运行页新增规则统计 tab。
-- **规则历史趋势**：`/api/rule-history` 按 suite 返回最近 N 次运行的规则通过率；运行页可点「查看趋势」，用折线、评测数和缺失样本判断退化、抖动或覆盖率变化。
-- **工具链序列规则**：新增 `sequence_contains` / `sequence_eq`，按 `events` 的 `module/action` 断言工具调用顺序；支持 `args` 参数匹配和嵌套连续块，失败时指出缺失步骤、参数差异或首个顺序不匹配，运行页用步骤 chips 展示。
-- **0.9 模块化**：拆成 core、store-file、store-jdbc、dashboard、runtime、agentscope、examples、cli、server 和 app 分发十个代码模块，加三个扩展；`assay-cli` 只留命令入口，运行服务集中到 `assay-runtime`；测试随包迁移，`app/target/assay.jar` 仍可直接运行。
-- **易用性**：新增 `QUICKSTART.md`、`assay quickstart`（三个问题→生成配置→跑评测→开报告）和免 Maven 的 `scripts/package-dist.ps1` 发行包脚本。
-- **存储**：`Results.RunLock` 抽象、`JdbcResultStore`、`Stores.open`；CLI 支持 `--store jdbc:...`，并新增 H2 file 重连测试。H2 file URL 自动补 `DB_CLOSE_DELAY=-1`，避免重连后 read-only。
-- **异步队列**：新增 `JobStore`（文件/JDBC）、submit/worker/jobs/cancel、worker 租约与心跳、过期回收、协作式取消和最大重试；Dashboard 任务队列页支持单击提交/查看/取消，`serve --worker` 内置 worker；at-least-once 投递，通过 run id + resume 保底。
-- **Dashboard 性能**：catalog 与 rule-history 共用按文件 mtime/size 失效的摘要缓存，不再每次刷新解析完整 `results.json`；最多缓存 512 个报告摘要。
-- **集成**：`extensions/assay-spring-boot-starter`，文件/JDBC 自动配置、`EvaluationEngine` 装配；3 项上下文测试。
-- **交付**：`Dockerfile`、CI starter/metrics 测试/镜像构建；10,000 条合成用例的文件/JDBC 与多步参考 Agent 基准（文件约 2,500～3,700 cases/s；外部真实 Agent 未跑，非生产容量承诺）。
-- **可观测**：零依赖 `EvaluationListener` SPI（run/case/batch 生命周期，默认 no-op，listener 异常不影响评测）；`extensions/assay-metrics-micrometer` 输出指标（标签不含 run_id/case_id），`extensions/assay-tracing-otel` 输出 run/case/batch span，失败 run 通过 `onRunFailed` 关闭 span。
-
----
+- **评测与准出**：`NormalizedTrace` + 结构/行为/一致性/反馈四层评测；improvement/regression/holdout 三数据集对比；accept/reject/rollback 决策；门禁违规、指标变化、首错证据可审计。
+- **首错定位**：`TraceDiff` 用 LCS 对齐 `module/action`，定位首个步骤增删、替换、字段变化、报错或最终输出差异；复用已评测 Trace，不重跑 Agent；支持 `case_transitions` 和失败聚类。
+- **工具调用量化**：`sequence_contains` / `sequence_eq` 有序序列断言；`args` 参数子集匹配；嵌套连续块；规则通过率、跨 run 趋势和样本覆盖。
+- **外部轨迹**：normalized、OpenInference、OTLP attribute array、Phoenix `traces` / `resourceSpans`；按 `case_id` 校验覆盖，缺失用例硬失败。
+- **存储与恢复**：文件 JSONL / JDBC 双实现；有界批次落盘、断点恢复、跨进程文件锁、内容哈希与身份清单；JDBC 使用 `DatabaseMetaData` 迁移，`run_id` 索引与 `reindex-jobs` 回填。
+- **异步队列**：`JobStore` 文件/JDBC 双实现；submit/worker/jobs/cancel/replay/prune；worker 租约、心跳续租、超时回收、幂等提交、重试/退避。
+- **Dashboard**：纸雕档案视觉；总览趋势与测试集健康；运行详情结论卡、场景/规则进度条、多智能体页签；版本对比/演化/自动演化/范围审计/发布验证。
+- **集成**：Spring Boot Starter、Micrometer 指标、OpenTelemetry Span、AgentScope 2.0 typed event 适配。
+- **工程**：14 模块 Maven reactor、核心零运行时依赖；Checkstyle/SpotBugs/JaCoCo 门禁；Windows/Linux CI；Docker 多阶段构建。
 
 ## 五、面试题库（30 题）
 
@@ -293,7 +288,7 @@ Candidate run ┘        │                  │
 - 展开：原生 HTML/CSS/JS + 主题变量；`dashboard-core.js` 放校验、diff 解析、诊断文案等纯函数，`node --test` 覆盖；Java 端 `DashboardServerTest` 覆盖路由和产物读取；支持深浅色、键盘导航、URL 状态恢复。
 - 追问：组件复用怎么办？答：当前页面规模不需要组件框架；如果继续扩展，可以再引入构建链。
 
-**G2. 242 项测试怎么组织？最有价值的是哪些？**
+**G2. 364 项测试怎么组织？最有价值的是哪些？**
 
 - 一句话：重点测失败模式，不是只测 happy path。
 - 展开：评测闭环、四层规则、运行完整性/恢复、并发（真实第二 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储、监听器/失败回调、Dashboard。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界。
@@ -345,18 +340,15 @@ Candidate run ┘        │                  │
 ### 6.1 通用版（推荐直接放简历）
 
 ```text
-Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
-技术栈：Java 17、Maven、JDBC、Spring Boot、Micrometer、OpenTelemetry、Docker
+Assay — Agent 评测与发布准出平台                  2026.10 - 至今
+技术栈：Java 17、Maven、Spring Boot、JDBC、Micrometer、OpenTelemetry、AgentScope、Docker
 
-项目简介：针对 Agent 版本迭代中“改完能不能发、退化在哪一步”的问题，构建覆盖轨迹归一化、版本评测、首错诊断与发布门禁的质量平台，支持 CLI 与本地异步任务队列。
+项目简介：Assay 是一个与领域解耦的 Agent 评测与发布准出平台，解决 Agent 版本迭代中“改完能不能发、退化在哪一步”的问题。它把不同 Agent 的 Trace 归一化为统一契约，执行结构/行为/一致性/反馈四层评测，并在 improvement/regression/holdout 三套数据集上对比基线与候选，输出可审计的 accept/reject/rollback 与首个错误步骤；配套文件/JDBC 双存储、带租约的异步队列、CLI/HTTP API 和本地 Dashboard。工程上为 Java 17、14 模块 Maven 工程，核心零运行时依赖，Windows/Linux CI 全绿。
 
 核心内容：
-- 针对 Agent 版本缺少统一发布标准的问题，构建 Trace 归一化、四层评测和 improvement/regression/holdout 对比，输出可审计的 accept/reject/rollback 与首错证据。
-- 针对工具调用质量难量化的问题，提供有序序列、参数子集和嵌套步骤断言，结合规则通过率与跨 run 趋势，识别漏调、乱序、参数偏差和长期退化。
-- 针对失败根因难定位的问题，基于 LCS 对齐基线与候选 Trace，定位首个可见错误步骤、用例状态变化和失败聚类，不需要重跑 Agent。
-- 针对评测结果难沉淀、批量执行难管理的问题，提供异步任务队列与 worker 租约（提交、续租、超时回收、取消、重试）、Dashboard 一键提交，并将人工复核确认的样本沉淀为 improvement/regression/holdout 数据集。
-
-项目成果：核心零运行时依赖；示例可复现 rollback 与首错；外部真实 Agent 通过适配器接入。
+- 发布准出与根因定位：设计 Trace 归一化 + 结构/行为/一致性/反馈四层评测，基于 improvement/regression/holdout 三套数据集对比基线与候选，输出可审计的 accept/reject/rollback 结论及门禁违规证据；基于 LCS 对齐两次 Trace，无需重跑 Agent 即可定位首个错误步骤、状态变化和失败聚类。
+- 多源 Agent 接入与统一观测：设计统一接入层，支持 Java 适配器（类/JAR）、HTTP 接口、离线 Trace、OpenInference/OTLP/Phoenix 观测格式及 AgentScope 事件；将多源执行数据归一化为统一 Trace，采集模型/工具调用、多 Agent 交接、权限拒绝和重复步骤等指标，并通过 Dashboard、Micrometer 与 OpenTelemetry 展示与上报；接入层独立，核心保持零依赖。
+- 异步调度与资产闭环：设计带租约续租、超时回收、重试退避和幂等提交的异步任务队列，支持文件/JDBC 双存储；打通 Dashboard 一键提交，并将人工复核结论按 improvement/regression/holdout 角色归档为可复用数据集样本，形成评测资产闭环。
 ```
 
 ### 6.2 按岗位调整顺序
@@ -372,7 +364,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 ### 6.3 一行版
 
-“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、工具链序列规则、规则历史趋势、首错定位、文件/JDBC 存储、异步任务队列和 Micrometer/OTel 可观测性；10k 合成用例基准。”
+“Java 17 实现的零依赖 Agent 评测与版本演化框架，支持 Trace 归一化、四层评测、三数据集演化、工具链序列规则、规则历史趋势、首错定位、文件/JDBC 存储、异步任务队列和 Micrometer/OTel 可观测性。”
 
 ### 6.4 注意事项
 
@@ -382,10 +374,6 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 - 每条 bullet 尽量是“问题 → 动作 → 证据”，不要只列模块名。
 
 ### 6.5 可替换 bullet 库
-
-规模 / 性能：
-
-- 10k 合成用例的文件/JDBC 基准：文件约 2,500～3,700 cases/s，H2 JDBC 约 1,750～2,500 cases/s；明确区分参考 Agent 与真实外部 Agent。
 
 能力型：
 
@@ -402,7 +390,7 @@ Assay — Agent 评测、诊断与版本演化框架        2026.10 - 至今
 
 - Dashboard 在大量历史报告下保持快速加载，规则通过率可按 suite 查看跨 run 趋势。
 - 异步任务队列支持 worker 租约、心跳、超时回收、协作取消和最大重试；`serve --worker` 后可在 Dashboard 单击提交/取消。
-- `assay quickstart` 和免 Maven 发行包让非 Java 用户三步内跑通 HTTP Agent。
+- 纸雕 Dashboard 提供结论卡、进度条、多智能体页签和任务队列一键提交；HTTP Agent 可通过页面向导或 `quickstart` 接入。
 
 ### 6.6 不要写什么
 
@@ -671,13 +659,13 @@ Dashboard 是只读的：artifact id 是受限路径的 base64，服务端校验
 
 **可追问**：为什么不用 React？答：零构建、零依赖、Java 直接托管；纯函数用 Node 测试，页面规模不需要组件框架。
 
-### 20. 242 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
+### 20. 364 项测试怎么组织？最有价值的是哪些？评测集质量怎么保证？
 
 **考察点**：测试是否只覆盖 happy path。
 
 **回答**：
 
-测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、多实例 job 队列（租约/幂等/取消）、API token 鉴权、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 346 项分布：core 79、store-file 56、store-jdbc 21、dashboard 9、runtime 111（1 skipped）、agentscope 2、cli 46、server 14；Starter 另有 4 项，Micrometer 2 项（成功/失败 run），OTel 2 项（父子 span/失败关闭）。
+测试按失败模式组织：评测闭环、四层规则、工具链序列（参数、嵌套连续块、缺失/乱序）、运行完整性/恢复、并发（真的启动第二个 JVM 抢锁）、演化决策、自动演化预算/检查点、进程树/容器安全参数、测试集选择、范围审计、OpenAI Trace、外部轨迹、JDBC 存储（H2 file 重连、job lease/cancel/retry）、多实例 job 队列（租约/幂等/取消）、API token 鉴权、监听器/失败回调、Dashboard（摘要缓存失效）。最有价值的是恢复、并发、进程树、路径安全、JDBC 契约和诊断边界，不是“跑通一个 case”。当前 364 项分布：core 83、store-file 20、store-jdbc 24、dashboard 9、runtime 88（1 skipped）、agentscope 2、cli 32、server 18、integration-tests 80；Starter 4、Micrometer 2、OTel 2。
 
 评测集质量靠：领域 review、预期值明确、ID 唯一、场景覆盖、关键用例标记、数据集版本/内容哈希、线上 badcase 回流。`review` 保存人工结论，`export` 导出 regression/few-shot 候选，`promote-review` 晋级到 improvement/regression/holdout，形成闭环。
 
@@ -1367,7 +1355,7 @@ java -jar app/target/assay.jar promote-review \
 | 失败根因 | LCS、复杂度、非确定性、误报、300 步、无可见差异 | Q14–Q16、10.1 | 标注集上的 precision/recall 还没有 |
 | 评测资产闭环 | 谁批准、怎么晋级、版本化、holdout、人工分歧 | 10.9 | 多 reviewer 投票、dataset version 表 |
 
-技术栈里写了但四条 bullet 没展开的：
+技术栈里写了但三条 bullet 没展开的：
 
 - JDBC → 10.4；OTel → 10.7；Starter → 10.5；Micrometer → 10.6。
 - 被问到“你技术栈写 OTel，项目里怎么用”时，先讲 run/case/batch 和 stage span，不要只报工具名。
@@ -1530,14 +1518,13 @@ assay cancel --store .assay/store --job-id <id>
 
 ---
 
-### 10.13 简历四条逐条追问与标注
+### 10.13 简历三条逐条追问与标注
 
 #### 重点标注版
 
-- **发布准出标准化**：Trace 归一化 + **四层评测** + **improvement/regression/holdout** 对比 → **accept/reject/rollback** + 首错证据。
-- **工具调用量化**：**sequence_contains/sequence_eq** + **args 子集** + **嵌套连续块**；规则通过率要看 **evaluated/missing**，不能只看平均。
-- **根因免重跑定位**：**LCS** 对齐；说“**首个可见错误步骤**”，不要说“精准根因”；诊断不重跑 Agent。
-- **任务调度与资产闭环**：**at-least-once** + **lease/heartbeat** + **run id/resume/run lock**；人工复核后走 **review/export/promote**，不是 LLM 自动晋级。
+- **发布准出与根因定位**：Trace 归一化 + **四层评测** + **improvement/regression/holdout** 对比 → **accept/reject/rollback** + 首错证据；**LCS** 对齐后说“**首个可见错误步骤**”，不要说“精准根因”；诊断不重跑 Agent。
+- **多源 Agent 接入与统一观测**：统一接入层支持 Java 适配器（类/JAR）/HTTP/离线/OpenInference/OTLP/Phoenix/AgentScope；多源数据归一化为统一 Trace；Dashboard 展示 + Micrometer/OTel 上报；核心零依赖。
+- **异步调度与资产闭环**：**at-least-once** + **lease/heartbeat** + **run id/resume/run lock**；人工复核后走 **review/export/promote**，不是 LLM 自动晋级；文件/JDBC 双存储，Dashboard 一键提交。
 
 #### 1. 发布准出标准化
 
@@ -1852,7 +1839,7 @@ histogram_quantile(0.95, rate(assay_store_append_seconds_bucket[5m]))
 
 ### 6. 为什么 Phase 1 不直接拆 core/cli/store？
 
-- 要移动约 1.3 万行主代码、32 个测试文件。
+- 要移动约 2.28 万行主代码、62 个测试文件。
 - 一些测试访问 package-private 成员，跨模块拆分要重新设计测试边界。
 - 先建 reactor，保证“一条命令构建全部模块、测试数不变”，风险最低。
 - Phase 2A 拆出 core + file/jdbc store；Phase 2B 已拆出 dashboard/cli，app 只保留分发。
@@ -1890,4 +1877,117 @@ Phase 2B（已完成）：
 4. `assay-cli`：`AssayCli`、adapters、sandbox、audit、selection、review。
 5. `app`：只保留 shade 分发；测试随包迁移。
 
-原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 242 + 4 + 2 + 2 全绿。
+原则：先移依赖少的，再移 CLI/Dashboard；每移一步跑全量测试，保持 364 项全绿。
+
+---
+
+## 十三、当前版本问答（按现状回答）
+
+### 1. 用一句话介绍 Assay？
+
+Assay 是一个与领域解耦的 Agent 评测与发布准出平台：把候选 Agent 的 Trace 归一化，执行四层评测，基于 improvement/regression/holdout 对比给出 accept/reject/rollback，并定位首个错误步骤；最终收货权始终在人手里。
+
+### 2. 四层评测分别是什么？
+
+- **结构层**：Trace、最终输出、硬门禁与软质量字段是否完整。
+- **行为层**：步数、重试、延迟、重复步骤、模块错误和工具调用序列。
+- **一致性层**：对高价值节点做多次运行，差异只进入人工复核候选。
+- **反馈层**：隐式反馈只生成候选，不自动判定 badcase。
+
+### 3. 为什么要 improvement / regression / holdout 三套数据？
+
+- improvement：证明候选确实解决了目标问题。
+- regression：保证老功能没有被弄坏。
+- holdout：不参与调参，降低“只对特定样本有效”的过拟合风险。
+
+三套数据共同决定 accept/reject/rollback，而不是只看单次总分。
+
+### 4. accept / reject / rollback 怎么定？
+
+- **accept**：改善成立，regression/holdout 没有超出策略允许的退化。
+- **reject**：没有达到最低改善，或存在策略不允许的质量问题。
+- **rollback**：出现关键回归、目标身份不匹配、运行不完整或硬门禁失败。
+
+所有结论都带证据：指标变化、规则通过率、场景切片、首错步骤和 run lineage。
+
+### 5. 首错定位为什么不需要重跑 Agent？
+
+诊断只读已经评测过的 Trace。`TraceDiff` 用 LCS 对齐基线与候选的 `module/action`，把差异归为步骤新增、删除、替换、字段变化、报错或最终输出变化；因此能定位“第一个可见分歧”，而不需要再次调用模型或工具。
+
+### 6. 工具调用质量怎么量化？
+
+- `sequence_eq`：严格顺序一致。
+- `sequence_contains`：有序子序列，允许中间插入其他步骤。
+- `args`：只匹配期望参数，允许实际参数有额外字段（参数子集）。
+- 嵌套连续块：支持 subagent/多阶段工具链。
+- 失败时指出缺失步骤、参数差异或首个乱序位置。
+
+### 7. 为什么核心零依赖？14 个模块怎么分？
+
+核心只用 JDK，方便离线、可移植和审计；JDBC、Spring Boot、Micrometer、OTel、AgentScope 都放在外围模块。Maven Enforcer 禁止 `app/core` 引入 Spring/Micrometer/OTel，保证边界不被破坏。
+
+模块大致分四层：
+
+1. 核心：`assay-core`。
+2. 存储与运行时：`assay-store-file`、`assay-store-jdbc`、`assay-runtime`、`assay-agentscope`。
+3. 接入与分发：`assay-cli`、`assay-server`、`assay-dashboard`、`app`。
+4. 集成与示例：`extensions/*`、`assay-examples`、`assay-integration-tests`。
+
+### 8. 文件存储和 JDBC 怎么选？
+
+- 单机、离线、易排障：文件 JSONL。
+- 多实例、共享队列、需要事务：JDBC。
+- 两者统一 `Results` / `JobStore` 接口，CLI 用 `--store jdbc:...` 切换。
+- JDBC 迁移用 `DatabaseMetaData` 检测列/索引；升级后可用 `reindex-jobs` 回填 `run_id`。
+
+### 9. 异步队列怎么保证可靠？
+
+- `JobStore` 持久化 job，worker 通过 lease 竞争执行。
+- 心跳续租；lease 过期后其他实例可以回收。
+- 幂等 key 防止重复提交；失败按最大次数和退避重试。
+- 支持 cancel、replay、prune；at-least-once 投递，通过 run id + resume 保证结果不混。
+
+### 10. Dashboard 现在能做什么？
+
+- 总览：运行数、通过率、失败/复核信号、7 天趋势、测试集健康。
+- 运行详情：顶部结论卡、用例与 Trace、场景分布、规则统计、多智能体页签、原始数据。
+- 版本对比：PASS/WARNING/BLOCK、指标对比、场景切片、退化用例、首错、规则变化。
+- 版本演化/自动演化：accept/reject/rollback、候选轮次、检查点与 run lineage。
+- 范围审计/发布验证：越界发现与 diff、regression→smoke→full 阶段。
+
+### 11. AgentScope 适配做了什么？
+
+把 AgentScope Java 2.0 的 typed event 映射成 `NormalizedTrace`：
+
+- 模型调用、工具调用、subagent 暴露、权限拒绝、超迭代 → 普通 trace 事件。
+- 生成 `steps / model_calls / tool_calls / handoffs / denied_tools / max_repeated_step / agents` 指标。
+- 适配层独立成 `assay-agentscope`，不进入核心和默认发行包。
+- Dashboard 在报告包含 `multi_agent` 时展示「多智能体」页签。
+
+### 12. Micrometer / OpenTelemetry 怎么接？
+
+- 核心通过 `EvaluationListener` 暴露 run/case/batch 生命周期，默认 no-op。
+- `extensions/assay-metrics-micrometer` 把事件写成 Micrometer 指标，标签刻意不带 run_id/case_id，避免基数爆炸。
+- `extensions/assay-tracing-otel` 使用 OpenTelemetry API 生成 run/case/batch span，失败 run 通过 `onRunFailed` 关闭 span。
+- 两者都不污染核心。
+
+### 13. 测试和质量门禁现在是什么状态？
+
+- 364 项 Java 测试（1 项按环境跳过）+ 17 项 Node 测试。
+- 聚合行覆盖 82.1%；CI 下限 70%。
+- Checkstyle、SpotBugs（Max effort / Medium threshold）、JaCoCo、Maven Enforcer 均接入 `mvn verify`。
+- CI 在 Windows 和 Linux 双平台运行，并构建 Docker 镜像。
+
+### 14. 这个项目最大的边界是什么？
+
+- 定位是发布准出与诊断闭环，不是 Agent 运行时或观测平台。
+- 默认单机/本地 Dashboard；多实例队列需要共享 JDBC 或共享文件目录。
+- LLM 只做建议，不进入硬门禁；诊断是“第一处可见差异”，不是因果根因。
+- 不承诺生产级多租户、权限和百万级并发。
+
+### 15. 如果继续线上化，下一步做什么？
+
+- JDBC 多数据库 CI 冒烟（MySQL/PostgreSQL）和迁移工具。
+- 更细的租约/队列观测与死信处理。
+- 评估器校准、统计显著性和历史运行查询。
+- Dashboard 的在线协作与权限体系。

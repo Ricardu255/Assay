@@ -11,15 +11,63 @@ import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
 import io.assay.runner.RetryPolicy;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import java.util.stream.Stream;
 
 class FileJobStoreTest {
+
+    @Test
+    void findsJobByRunIdWithAnIndexedLookup(@TempDir Path root) {
+        try (FileJobStore store = new FileJobStore(root)) {
+            Job job = store.submit(Map.of("run_id", "run-123", "suite", "smoke"), 1);
+            store.submit(Map.of("run_id", "run-999", "suite", "smoke"), 1);
+
+            assertEquals(job.id(), store.findByRunId("run-123").orElseThrow().id());
+            assertTrue(store.findByRunId("missing").isEmpty());
+        }
+    }
+
+    @Test
+    void rebuildsRunIndexAfterIndexFilesAreRemoved(@TempDir Path root) throws Exception {
+        try (FileJobStore store = new FileJobStore(root)) {
+            store.submit(Map.of("run_id", "run-123", "suite", "smoke"), 1);
+            Path index = root.resolve("run-index");
+            try (Stream<Path> pointers = Files.list(index)) {
+                for (Path pointer : pointers.toList()) {
+                    Files.deleteIfExists(pointer);
+                }
+            }
+
+            assertEquals(1, store.rebuildRunIdIndex());
+            assertTrue(store.findByRunId("run-123").isPresent());
+        }
+    }
+
+    @Test
+    void rebuildIndexPrefersTheNewestJobForDuplicateRunIds(@TempDir Path root) throws Exception {
+        try (FileJobStore store = new FileJobStore(root)) {
+            store.submit("key-1", Map.of("run_id", "dup-run", "suite", "smoke"), 1);
+            Thread.sleep(5);
+            Job second = store.submit("key-2", Map.of("run_id", "dup-run", "suite", "smoke"), 1);
+            Path index = root.resolve("run-index");
+            try (Stream<Path> pointers = Files.list(index)) {
+                for (Path pointer : pointers.toList()) {
+                    Files.deleteIfExists(pointer);
+                }
+            }
+
+            store.rebuildRunIdIndex();
+
+            assertEquals(second.id(), store.findByRunId("dup-run").orElseThrow().id());
+        }
+    }
 
     @Test
     void claimAndHeartbeatAreScopedToTheLeaseOwner(@TempDir Path root) {

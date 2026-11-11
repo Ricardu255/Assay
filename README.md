@@ -15,7 +15,15 @@
 
 **不懂 Java：先看 [QUICKSTART.md](QUICKSTART.md)。** 安装 Java 17 后，Windows 双击 `assay.cmd`，或在项目根目录运行 `assay.cmd quickstart`，按三个问题填入 Agent 地址、答案字段和期望关键字，会自动生成配置、跑评测并打开报告。
 
-**Windows 首次体验：直接双击项目根目录的 `assay.cmd`。** 它会构建项目、运行一条无需 API Key 的示例，再自动打开报告界面。保持启动窗口运行，按 `Ctrl+C` 停止。macOS / Linux 可运行 `sh ./assay demo`。源码版需要 JDK 17+ 与 Maven 在 PATH 中；使用包含根目录 `assay.jar` 的分发目录时可省去 Maven。
+**Windows 首次体验：直接双击项目根目录的 `assay.cmd`。** 它会构建项目、运行一条无需 API Key 的示例，再自动打开报告界面。保持启动窗口运行，按 `Ctrl+C` 停止。macOS / Linux 可运行 `sh ./assay`。源码版需要 JDK 17+ 与 Maven 在 PATH 中；使用包含根目录 `assay.jar` 的分发目录时可省去 Maven。
+
+**任意平台一条命令体验：** 先 `mvn -q -DskipTests package`，再运行：
+
+```bash
+java -jar app/target/assay.jar demo
+```
+
+它会用内置 EchoAdapter 跑一条示例评测，启动带任务队列的 Dashboard 并打开浏览器。`demo --no-open` 不自动开浏览器，`demo --no-serve` 只跑示例、不启动界面。
 
 启动器也可简写其他命令，例如 `assay.cmd serve --open-browser`。显式请求自动打开浏览器时，如果 8080 端口已被占用，会选择空闲端口并打开实际地址。
 
@@ -125,7 +133,7 @@ extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建十三个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建十四个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
@@ -162,7 +170,7 @@ curl -s -X POST http://127.0.0.1:8080/api/runs \
 - 幂等：`Idempotency-Key` 相同的提交返回同一个 `job_id`；payload 不同则明确报冲突。
 - 执行参数：`workers`、`retries`、`timeout-seconds`、`collect-few-shot`；存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置。
 - 结果合并：队列 worker 会把本次 summary 写入 `<output>/<run_id>/run-summary.json`，GET 详情时与持久化的 run 记录合并，返回 `hard_failures`、`case_count`、`budget`、`retry_policy`、`circuit_breaker` 等字段。
-- 鉴权：配置 `assay.server.auth-tokens`（列表）后，除 `GET /api/ping`、`GET /actuator/health`、`GET /actuator/info` 外的接口都要求 `X-API-Key: <token>` 或 `Authorization: Bearer <token>`，token 使用常量时间比较；列表为空时保持本地开放模式。未授权请求返回 401 ProblemDetail。
+- 鉴权：配置 `assay.server.auth-tokens`（列表）后，除 `GET /api/ping`、`GET /actuator/health`、`GET /actuator/info` 外的接口都要求 `X-API-Key: <token>` 或 `Authorization: Bearer <token>`，token 使用常量时间比较；列表为空时保持本地开放模式。未授权请求返回 401 ProblemDetail。设置 `assay.server.fail-on-insecure-binding=true` 后，非 loopback 绑定且 token 为空会直接拒绝启动。
 - `resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。
 
 ## 接入 AgentScope 事件（M3）
@@ -370,6 +378,7 @@ java -jar app/target/assay.jar run \
 
 | 命令 | 用途 |
 |---|---|
+| `demo` | 跑内置 EchoAdapter 示例、启动带队列的 Dashboard 并打开浏览器（最快上手） |
 | `run` | 评测一个外部提供的测试集 |
 | `release` | 依次执行 regression、smoke、可选 full，任一阶段硬门禁失败即停止 |
 | `select-tests` | 根据当前 Git Diff 推荐该跑哪套测试 |
@@ -380,6 +389,7 @@ java -jar app/target/assay.jar run \
 | `export` | 导出已确认的 regression 或 few-shot 候选 |
 | `promote-review` | 把一条审核样本晋级到 improvement / regression / holdout |
 | `prune` | 按保留策略清理已完成运行、报告目录和终态 job |
+| `reindex-jobs` | 重建 job 的 `run_id` 索引（文件指针重建，或 JDBC 旧行回填） |
 
 退出码是一份契约：`0` 正常，`1` 硬门禁失败、预算用尽或决策为负，`2` 用法错误或结果需要人工复核。需要人看的运行不会看起来像通过。
 
@@ -535,7 +545,9 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 
 跨进程互斥用文件锁实现：同一条运行或同一个演化循环在同一时刻只能有一个持有者，第二个持有者会立即失败而不是排队。`evolve-auto` 的检查点（`.assay/workspaces/<loop-id>/checkpoint.json`）原子写入，异常、时间预算或调用预算中止后，可以提高预算或修复外部故障再用同样的参数续跑。
 
-存储层只有 `store.Results` 一个接口，引擎只依赖它。默认实现是文件存储；需要数据库时可以用 `JdbcResultStore`，`--store` 传入 `jdbc:` URL 即可切换：
+存储层只有 `store.Results` 一个接口，引擎只依赖它。默认实现是文件存储；需要数据库时可以用 `JdbcResultStore`，`--store` 传入 `jdbc:` URL 即可切换。JDBC 实现按 H2/MySQL/PostgreSQL 的通用语法编写，其他数据库需要自行验证方言与驱动。CI 目前只用 H2 跑 JDBC 契约测试；MySQL/PostgreSQL 的建表与迁移语句已避免 `IF NOT EXISTS` 等不兼容写法，但生产前仍建议先在目标库做一次冒烟。
+
+从旧版本升级文件或 JDBC job store 后，可运行 `reindex-jobs --store <path-or-url>` 回填 `run_id` 索引；否则旧的排队 run 在队列积压超过 500 条时可能查不到。
 
 ```bash
 # 以 H2 为例；驱动不在框架 jar 内，需要自己放到 classpath
@@ -577,6 +589,10 @@ java -jar app/target/assay.jar serve --output .assay/runs --store .assay/store -
 ```
 
 打开 `http://127.0.0.1:8080/#section=queue`，填适配器/测试集/用例路径，点「提交任务」；「运行示例」会直接提交内置 EchoAdapter。运行页每 3 秒刷新，支持取消 QUEUED/RUNNING 任务。
+
+界面采用「纸雕档案」视觉：奶白纸面、银蓝线框、模切卡片、右侧书签导航与纸页入场。纹理与花角由 CSS/SVG 生成，不依赖外部字体或图片；系统缺少展示字体时自动回退到本地衬线字体。
+
+首次进入「总览」会看到可折叠的「三步开始」卡片；没有任何报告时默认展开，直接给出 `java -jar app/target/assay.jar demo` 命令和「开始评测」入口。运行详情顶部有结论卡，场景/规则通过率带进度条；报告包含 `multi_agent` 时会多出「多智能体」页签。各页面的白话说明见 [docs/dashboard-guide.md](docs/dashboard-guide.md)。
 
 语义：
 
@@ -779,10 +795,12 @@ export ASSAY_API_KEY=...
 mvn -q test
 ```
 
+跨模块集成测试集中在 `assay-integration-tests` 模块（需要 file-store fixture 与 `io.assay.testing` 共享工具）。该模块不在 `app` 的依赖链上，因此其覆盖率不计入 `app/target/site/jacoco-aggregate`；CI 以全仓 `mvn verify` 为准，新增此类测试请放到该模块。
+
 质量门禁：
 
 - `mvn -q verify` 还会执行 JaCoCo 报告、SpotBugs（`Max` effort / `Medium` threshold）和 Checkstyle；任一违规都会让构建失败。规则与抑制范围分别记录在 `config/spotbugs/exclude.xml` 和 `config/checkstyle/checkstyle.xml`。
-- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.3% 行 / 66.0% 分支**（`assay-core` 约 86.4% 行）。`assay-agentscope` 不进入该聚合——它的 AgentScope/OpenTelemetry 传递依赖与 `app` 的 framework-free 边界冲突——因此由模块级 JaCoCo 单独门禁：当前约 **77.3% 行**，CI 同样以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
+- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.1% 行 / 66.0% 分支**（`assay-core` 约 86.4% 行）。`assay-agentscope` 不进入该聚合——它的 AgentScope/OpenTelemetry 传递依赖与 `app` 的 framework-free 边界冲突——因此由模块级 JaCoCo 单独门禁：当前约 **77.3% 行**，CI 同样以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
 
 覆盖范围：
 

@@ -1,9 +1,9 @@
 package io.assay.model;
 
+import io.assay.support.Immutable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import io.assay.support.Immutable;
 
 /**
  * One declarative gate or quality rule.

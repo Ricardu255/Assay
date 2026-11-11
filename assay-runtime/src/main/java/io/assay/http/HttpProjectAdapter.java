@@ -15,16 +15,20 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
@@ -47,9 +51,13 @@ public final class HttpProjectAdapter {
 
     private HttpProjectAdapter(Map<String, Object> config, Function<String, String> environment) {
         for (String key : config.keySet()) {
-            if (!OPTIONS.contains(key)) throw new IllegalArgumentException("unknown HTTP configuration option: " + key);
+            if (!OPTIONS.contains(key)) {
+                throw new IllegalArgumentException("unknown HTTP configuration option: " + key);
+            }
         }
-        if (!"http".equals(config.get("type"))) throw new IllegalArgumentException("HTTP configuration requires type: http");
+        if (!"http".equals(config.get("type"))) {
+            throw new IllegalArgumentException("HTTP configuration requires type: http");
+        }
         try {
             endpoint = URI.create(text(config, "endpoint", null));
             if (!("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))
@@ -71,14 +79,16 @@ public final class HttpProjectAdapter {
         }
         if (config.containsKey("bearer_token_env")) {
             if (headers.keySet().stream().anyMatch("Authorization"::equalsIgnoreCase)) {
-                throw new IllegalArgumentException("configure Authorization using either bearer_token_env or headers_env");
+                throw new IllegalArgumentException(
+                        "configure Authorization using either bearer_token_env or headers_env");
             }
             headers.put("Authorization", "Bearer " + secret(text(config, "bearer_token_env", null), environment));
         }
         try {
             HttpRequest.Builder check = HttpRequest.newBuilder(endpoint);
             headers.forEach(check::header);
-            if (headers.keySet().stream().anyMatch(key -> Set.of("content-type", "accept").contains(key.toLowerCase(java.util.Locale.ROOT)))) {
+            if (headers.keySet().stream()
+                    .anyMatch(key -> Set.of("content-type", "accept").contains(key.toLowerCase(Locale.ROOT)))) {
                 throw new IllegalArgumentException();
             }
         } catch (IllegalArgumentException error) {
@@ -100,7 +110,9 @@ public final class HttpProjectAdapter {
         }
         // Validate rules before constructing a client or attempting a network request.
         List<Rule> hard = RuleConfig.parse(config.get("hard_gates"), "hard_gates");
-        if (hard.isEmpty()) throw new IllegalArgumentException("HTTP configuration requires at least one hard_gates rule");
+        if (hard.isEmpty()) {
+            throw new IllegalArgumentException("HTTP configuration requires at least one hard_gates rule");
+        }
         List<Rule> soft = RuleConfig.parse(config.get("soft_quality"), "soft_quality");
         String name = text(config, "name", "http-agent");
         HttpProjectAdapter adapter = new HttpProjectAdapter(config, environment);
@@ -108,7 +120,8 @@ public final class HttpProjectAdapter {
     }
 
     private Object call(EvalCase evalCase, RunContext context) {
-        Duration timeout = Duration.ofNanos((long) Math.max(1, Math.min(Long.MAX_VALUE, context.timeoutSeconds() * 1_000_000_000d)));
+        Duration timeout = Duration.ofNanos(
+                (long) Math.max(1, Math.min(Long.MAX_VALUE, context.timeoutSeconds() * 1_000_000_000d)));
         HttpRequest.Builder request = HttpRequest.newBuilder(endpoint).timeout(timeout)
                 .header("Content-Type", "application/json").header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(Json.write(evalCase.payload()), StandardCharsets.UTF_8));
@@ -118,16 +131,20 @@ public final class HttpProjectAdapter {
         try {
             HttpResponse<byte[]> response = pending.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("Agent HTTP status " + response.statusCode() + "; check endpoint and authentication");
+                throw new IllegalStateException(
+                        "Agent HTTP status " + response.statusCode() + "; check endpoint and authentication");
             }
             Map<String, Object> data;
             try {
                 data = Json.parseObject(new String(response.body(), StandardCharsets.UTF_8));
             } catch (RuntimeException invalid) {
-                throw new IllegalStateException("Agent response must be a JSON object (streaming/SSE is not supported)");
+                throw new IllegalStateException(
+                        "Agent response must be a JSON object (streaming/SSE is not supported)");
             }
-            return new Response(data, context.runId() + ":" + evalCase.caseId() + ":" + context.attempt() + ":" + java.util.UUID.randomUUID(),
-                    (System.nanoTime() - started) / 1_000_000d, response.statusCode());
+            String localId = context.runId() + ":" + evalCase.caseId() + ":" + context.attempt() + ":"
+                    + UUID.randomUUID();
+            return new Response(
+                    data, localId, (System.nanoTime() - started) / 1_000_000d, response.statusCode());
         } catch (InterruptedException interrupted) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
@@ -136,7 +153,7 @@ public final class HttpProjectAdapter {
             pending.cancel(true);
             throw new IllegalStateException("Agent HTTP request timed out");
         } catch (ExecutionException networkError) {
-            if (networkError.getCause() instanceof java.net.http.HttpTimeoutException) {
+            if (networkError.getCause() instanceof HttpTimeoutException) {
                 throw new IllegalStateException("Agent HTTP request timed out");
             }
             // Avoid putting credentials, request headers, or server error bodies into reports.
@@ -146,20 +163,27 @@ public final class HttpProjectAdapter {
 
     private NormalizedTrace read(Object handle, EvalCase evalCase) {
         if (!(handle instanceof Response response)) {
-            throw new IllegalArgumentException("HTTP configuration requires --source online; use a Java adapter for offline traces");
+            throw new IllegalArgumentException(
+                    "HTTP configuration requires --source online; use a Java adapter for offline traces");
         }
         Object output = ValueOps.readPath(response.data(), outputPath);
-        if (output == ValueOps.MISSING) throw new IllegalArgumentException("HTTP response is missing output_path: " + outputPath);
+        if (output == ValueOps.MISSING) {
+            throw new IllegalArgumentException("HTTP response is missing output_path: " + outputPath);
+        }
         Object traceId = ValueOps.readPath(response.data(), traceIdPath);
         String id = traceId == ValueOps.MISSING || traceId == null || String.valueOf(traceId).isBlank()
                 ? response.localId() : String.valueOf(traceId);
         List<TraceEvent> events = new ArrayList<>();
         // This measures the HTTP boundary; internal steps are included only when actually supplied.
         if (eventsPath == null) {
-            events.add(new TraceEvent("HTTP", "POST", "ok", response.durationMs(), null, Map.of("status_code", response.status())));
+            events.add(new TraceEvent(
+                    "HTTP", "POST", "ok", response.durationMs(), null,
+                    Map.of("status_code", response.status())));
         } else {
             Object supplied = ValueOps.readPath(response.data(), eventsPath);
-            if (!(supplied instanceof List<?> rows)) throw new IllegalArgumentException("events_path must resolve to an array");
+            if (!(supplied instanceof List<?> rows)) {
+                throw new IllegalArgumentException("events_path must resolve to an array");
+            }
             for (Object row : rows) events.add(TraceEvent.fromDict(object(row, "HTTP trace event")));
         }
         return new NormalizedTrace(id, output, events, response.data(), Map.of(), "agent", "http-agent", "unknown",
@@ -171,22 +195,27 @@ public final class HttpProjectAdapter {
 
     private static String text(Map<String, Object> map, String key, String fallback) {
         Object value = map.getOrDefault(key, fallback);
-        if (!(value instanceof String text) || text.isBlank()) throw new IllegalArgumentException(key + " must be a non-empty string");
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException(key + " must be a non-empty string");
+        }
         return text;
     }
 
     private static String path(Map<String, Object> map, String key, String fallback) {
         String value = text(map, key, fallback);
         if (value.length() > 512 || value.chars().anyMatch(Character::isISOControl)
-                || java.util.Arrays.stream(value.split("\\.", -1)).anyMatch(part -> part.isEmpty()
+                || Arrays.stream(value.split("\\.", -1)).anyMatch(part -> part.isEmpty()
                     || (part.matches("[0-9]+") && (part.length() > 9)))) {
-            throw new IllegalArgumentException(key + " must be a dot-separated path, such as data.answer or choices.0.text");
+            throw new IllegalArgumentException(
+                    key + " must be a dot-separated path, such as data.answer or choices.0.text");
         }
         return value;
     }
 
     private static String secret(String variable, Function<String, String> environment) {
-        if (!variable.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("invalid authentication environment variable name");
+        if (!variable.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new IllegalArgumentException("invalid authentication environment variable name");
+        }
         String value = environment.apply(variable);
         if (value == null || value.isBlank() || value.chars().anyMatch(Character::isISOControl)) {
             throw new IllegalArgumentException("set a non-empty authentication environment variable: " + variable);
@@ -207,7 +236,10 @@ public final class HttpProjectAdapter {
         private long received;
         private boolean ended;
         public CompletionStage<byte[]> getBody() { return delegate.getBody(); }
-        public void onSubscribe(Flow.Subscription subscription) { this.subscription = subscription; delegate.onSubscribe(subscription); }
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subscription = subscription;
+            delegate.onSubscribe(subscription);
+        }
         public void onNext(List<ByteBuffer> buffers) {
             if (ended) return;
             for (ByteBuffer buffer : buffers) received += buffer.remaining();

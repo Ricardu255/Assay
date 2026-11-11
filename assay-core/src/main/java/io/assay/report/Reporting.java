@@ -1,6 +1,7 @@
 package io.assay.report;
 
 import io.assay.json.Json;
+import io.assay.model.Values;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -64,60 +65,91 @@ public final class Reporting {
         }
         AtomicFiles.writeText(outputDir.resolve("results.json"), Json.write(summary, 2) + "\n");
 
-        Map<String, Integer> moduleCounts = new LinkedHashMap<>();
-        Map<String, Map<String, Integer>> scenarioStats = new LinkedHashMap<>();
-        Map<String, Map<String, Integer>> targetScenarioStats = new LinkedHashMap<>();
-        List<Map<String, Object>> reviewRows = new ArrayList<>();
-        List<Map<String, Object>> fewShotRows = new ArrayList<>();
-        List<String> failures = new ArrayList<>();
+        RunDetails details = collectRunDetails(summary);
+        List<String> report = renderRunReport(summary, ruleStats, multiAgent, details);
+        AtomicFiles.writeText(outputDir.resolve("report.md"), Fmt.join(report));
+        AtomicFiles.writeText(
+                outputDir.resolve("scenario_stats.json"),
+                Json.write(details.scenarioOutput, 2) + "\n");
+        writeJsonl(outputDir.resolve("review_queue.jsonl"), details.reviewRows);
+        writeJsonl(outputDir.resolve("few_shot_candidates.jsonl"), details.fewShotRows);
+    }
 
+    private static RunDetails collectRunDetails(Map<String, Object> summary) {
+        RunDetails details = new RunDetails();
+        details.runId = summary.get("run_id");
         for (Object rawResult : asList(summary.get("results"))) {
-            Map<String, Object> result = asMap(rawResult);
-            Map<String, Object> evalCase = asMap(result.get("case"));
-            String scenario = String.valueOf(evalCase.get("scenario"));
-            Map<String, Object> trace = result.get("trace") instanceof Map ? asMap(result.get("trace")) : Map.of();
-            String target = trace.getOrDefault("target_type", "unknown") + ":" + trace.getOrDefault("target_id", "unknown");
-            for (Map<String, Integer> stats :
-                    List.of(
-                            scenarioStats.computeIfAbsent(scenario, key -> newStats()),
-                            targetScenarioStats.computeIfAbsent(target + "|" + scenario, key -> newStats()))) {
-                stats.merge("cases", 1, Integer::sum);
-                stats.merge("hard_passes", Boolean.TRUE.equals(result.get("hard_pass")) ? 1 : 0, Integer::sum);
-                stats.merge("soft_warnings", intValue(result.get("soft_warning_count")), Integer::sum);
-            }
-            List<Map<String, Object>> failed = failedChecks(result);
-            if (!failed.isEmpty()) {
-                for (Map<String, Object> check : failed) {
-                    Object modules = check.get("suspected_modules");
-                    if (modules instanceof List<?> items) {
-                        for (Object module : items) {
-                            moduleCounts.merge(String.valueOf(module), 1, Integer::sum);
-                        }
-                    }
-                }
-                List<String> names = new ArrayList<>();
-                for (Map<String, Object> check : failed) {
-                    names.add(check.get("layer") + "/" + check.get("name"));
-                }
-                failures.add(
-                        "- `" + evalCase.get("case_id") + "` (" + evalCase.get("scenario") + "): "
-                                + String.join("; ", names));
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("run_id", summary.get("run_id"));
-                row.put("case_id", evalCase.get("case_id"));
-                row.put("auto_result", Boolean.TRUE.equals(result.get("hard_pass")) ? "review_candidate" : "hard_failure");
-                row.put("failed_checks", failed);
-                row.put("llm_review", result.getOrDefault("llm_review", Map.of()));
-                row.put("human_decision", "");
-                row.put("human_final_conclusion", "");
-                reviewRows.add(row);
-            }
-            Map<String, Object> candidate = asMap(result.get("few_shot_candidate"));
-            if (!candidate.isEmpty()) {
-                fewShotRows.add(candidate);
-            }
+            collectResult(asMap(rawResult), details);
+        }
+        return details;
+    }
+
+    private static void collectResult(Map<String, Object> result, RunDetails details) {
+        Map<String, Object> evalCase = asMap(result.get("case"));
+        String scenario = String.valueOf(evalCase.get("scenario"));
+        Map<String, Object> trace =
+                result.get("trace") instanceof Map ? asMap(result.get("trace")) : Map.of();
+        String target = trace.getOrDefault("target_type", "unknown") + ":"
+                + trace.getOrDefault("target_id", "unknown");
+        for (Map<String, Integer> stats : List.of(
+                details.scenarioStats.computeIfAbsent(scenario, key -> newStats()),
+                details.targetScenarioStats.computeIfAbsent(
+                        target + "|" + scenario, key -> newStats()))) {
+            stats.merge("cases", 1, Integer::sum);
+            stats.merge(
+                    "hard_passes", Boolean.TRUE.equals(result.get("hard_pass")) ? 1 : 0, Integer::sum);
+            stats.merge("soft_warnings", intValue(result.get("soft_warning_count")), Integer::sum);
         }
 
+        List<Map<String, Object>> failed = failedChecks(result);
+        if (!failed.isEmpty()) {
+            collectFailedCase(result, evalCase, failed, details);
+        }
+        Map<String, Object> candidate = asMap(result.get("few_shot_candidate"));
+        if (!candidate.isEmpty()) {
+            details.fewShotRows.add(candidate);
+        }
+    }
+
+    private static void collectFailedCase(
+            Map<String, Object> result,
+            Map<String, Object> evalCase,
+            List<Map<String, Object>> failed,
+            RunDetails details) {
+        for (Map<String, Object> check : failed) {
+            Object modules = check.get("suspected_modules");
+            if (modules instanceof List<?> items) {
+                for (Object module : items) {
+                    details.moduleCounts.merge(String.valueOf(module), 1, Integer::sum);
+                }
+            }
+        }
+        List<String> names = new ArrayList<>();
+        for (Map<String, Object> check : failed) {
+            names.add(check.get("layer") + "/" + check.get("name"));
+        }
+        details.failures.add(
+                "- `" + evalCase.get("case_id") + "` (" + evalCase.get("scenario") + "): "
+                        + String.join("; ", names));
+        Map<String, Object> row = new LinkedHashMap<>();
+        Object resultRunId = result.get("run_id");
+        row.put("run_id", resultRunId != null ? resultRunId : details.runId);
+        row.put("case_id", evalCase.get("case_id"));
+        row.put(
+                "auto_result",
+                Boolean.TRUE.equals(result.get("hard_pass")) ? "review_candidate" : "hard_failure");
+        row.put("failed_checks", failed);
+        row.put("llm_review", result.getOrDefault("llm_review", Map.of()));
+        row.put("human_decision", "");
+        row.put("human_final_conclusion", "");
+        details.reviewRows.add(row);
+    }
+
+    private static List<String> renderRunReport(
+            Map<String, Object> summary,
+            Map<String, Object> ruleStats,
+            Map<String, Object> multiAgent,
+            RunDetails details) {
         List<String> report = new ArrayList<>();
         report.add("# Agent Evaluation Report " + BOX_DRAWING_DASH + " " + summary.get("run_id"));
         report.add("");
@@ -127,33 +159,52 @@ public final class Reporting {
         report.add("- Cases: " + summary.get("case_count"));
         report.add("- Hard failures: " + summary.get("hard_failures"));
         report.add("- Soft/review warnings: " + summary.get("soft_warnings"));
-        Map<String, Object> budget = asMap(summary.get("budget"));
-        if (Boolean.TRUE.equals(budget.get("enabled"))) {
-            if (budget.get("max_total_tokens") != null) {
-                report.add("- Budget tokens: " + budget.get("spent_tokens") + " / "
-                        + budget.get("max_total_tokens"));
-            }
-            if (budget.get("max_cost_usd") != null) {
-                report.add("- Budget cost: " + budget.get("spent_cost_usd") + " / "
-                        + budget.get("max_cost_usd") + " USD");
-            }
-            if (intValue(summary.get("skipped_case_count")) > 0) {
-                report.add("- Cases skipped by budget: " + summary.get("skipped_case_count"));
-            }
-        }
+        appendBudget(report, summary);
+
         report.add("");
         report.add("## Suspected modules");
         report.add("");
-        report.addAll(mostCommon(moduleCounts));
+        report.addAll(mostCommon(details.moduleCounts));
 
-        Map<String, Object> scenarioOutput = new LinkedHashMap<>();
-        scenarioOutput.put("scenarios", new LinkedHashMap<String, Object>());
-        scenarioOutput.put("target_scenarios", new LinkedHashMap<String, Object>());
+        appendScenarioStats(report, details);
+        appendMultiAgent(report, details, multiAgent);
+        appendRuleStats(report, ruleStats);
+
+        report.add("");
+        report.add("## Failed or review-candidate cases");
+        report.add("");
+        report.addAll(details.failures.isEmpty() ? List.of("- None") : details.failures);
+        report.add("");
+        report.add("> LLM analysis and module suggestions are non-authoritative candidates. "
+                + "Human final conclusions must be stored separately.");
+        report.add("");
+        return report;
+    }
+
+    private static void appendBudget(List<String> report, Map<String, Object> summary) {
+        Map<String, Object> budget = asMap(summary.get("budget"));
+        if (!Boolean.TRUE.equals(budget.get("enabled"))) {
+            return;
+        }
+        if (budget.get("max_total_tokens") != null) {
+            report.add("- Budget tokens: " + budget.get("spent_tokens") + " / "
+                    + budget.get("max_total_tokens"));
+        }
+        if (budget.get("max_cost_usd") != null) {
+            report.add("- Budget cost: " + budget.get("spent_cost_usd") + " / "
+                    + budget.get("max_cost_usd") + " USD");
+        }
+        if (intValue(summary.get("skipped_case_count")) > 0) {
+            report.add("- Cases skipped by budget: " + summary.get("skipped_case_count"));
+        }
+    }
+
+    private static void appendScenarioStats(List<String> report, RunDetails details) {
         report.add("");
         report.add("## Scenario statistics");
         report.add("");
-        Map<String, Object> scenarios = asMap(scenarioOutput.get("scenarios"));
-        for (Map.Entry<String, Map<String, Integer>> entry : sorted(scenarioStats).entrySet()) {
+        Map<String, Object> scenarios = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Integer>> entry : sorted(details.scenarioStats).entrySet()) {
             Map<String, Integer> stats = entry.getValue();
             double[] interval = wilson(stats.get("hard_passes"), stats.get("cases"));
             double rate = (double) stats.get("hard_passes") / stats.get("cases");
@@ -163,11 +214,15 @@ public final class Reporting {
             scenarios.put(entry.getKey(), row);
             report.add(
                     "- `" + entry.getKey() + "`: " + stats.get("hard_passes") + "/" + stats.get("cases")
-                            + " (" + Fmt.percent1(rate) + ", 95% CI " + Fmt.percent1(interval[0]) + "–"
-                            + Fmt.percent1(interval[1]) + "), soft warnings " + stats.get("soft_warnings"));
+                            + " (" + Fmt.percent1(rate) + ", 95% CI " + Fmt.percent1(interval[0])
+                            + "–" + Fmt.percent1(interval[1]) + "), soft warnings "
+                            + stats.get("soft_warnings"));
         }
-        Map<String, Object> targetScenarios = asMap(scenarioOutput.get("target_scenarios"));
-        for (Map.Entry<String, Map<String, Integer>> entry : sorted(targetScenarioStats).entrySet()) {
+        details.scenarioOutput.put("scenarios", scenarios);
+
+        Map<String, Object> targetScenarios = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Integer>> entry
+                : sorted(details.targetScenarioStats).entrySet()) {
             Map<String, Integer> stats = entry.getValue();
             double[] interval = wilson(stats.get("hard_passes"), stats.get("cases"));
             Map<String, Object> row = new LinkedHashMap<>(stats);
@@ -175,47 +230,55 @@ public final class Reporting {
             row.put("confidence_95", List.of(interval[0], interval[1]));
             targetScenarios.put(entry.getKey(), row);
         }
-        if (!multiAgent.isEmpty()) {
-            scenarioOutput.put("multi_agent", multiAgent);
-            report.add("");
-            report.add("## Multi-agent metrics");
-            report.add("");
-            report.add("- Cases with trace metrics: " + multiAgent.get("cases"));
-            report.add("- Steps: " + multiAgent.get("steps") + ", model calls: " + multiAgent.get("model_calls")
-                    + ", tool calls: " + multiAgent.get("tool_calls") + ", handoffs: " + multiAgent.get("handoffs")
-                    + ", denied tools: " + multiAgent.get("denied_tools"));
-            report.add("- Longest repeated step: " + multiAgent.get("max_repeated_step"));
-            report.add("- Agents: " + multiAgent.get("agents"));
-        }
+        details.scenarioOutput.put("target_scenarios", targetScenarios);
+    }
 
-        if (!ruleStats.isEmpty()) {
-            report.add("");
-            report.add("## Rule pass rates");
-            report.add("");
-            report.add("| Rule | Level | Evaluated | Passed | Rate | Missing |");
-            report.add("|---|---|---:|---:|---:|---:|");
-            for (Map.Entry<String, Object> entry : ruleStats.entrySet()) {
-                Map<String, Object> row = asMap(entry.getValue());
-                Object rate = row.get("pass_rate");
-                report.add("| `" + entry.getKey() + "` | " + row.get("level") + " | "
-                        + intValue(row.get("evaluated")) + " | " + intValue(row.get("passed")) + " | "
-                        + (rate instanceof Number number ? Fmt.percent1(number.doubleValue()) : "—") + " | "
-                        + intValue(row.get("missing")) + " |");
-            }
+    private static void appendMultiAgent(
+            List<String> report, RunDetails details, Map<String, Object> multiAgent) {
+        if (multiAgent.isEmpty()) {
+            return;
         }
+        details.scenarioOutput.put("multi_agent", multiAgent);
+        report.add("");
+        report.add("## Multi-agent metrics");
+        report.add("");
+        report.add("- Cases with trace metrics: " + multiAgent.get("cases"));
+        report.add("- Steps: " + multiAgent.get("steps") + ", model calls: "
+                + multiAgent.get("model_calls") + ", tool calls: " + multiAgent.get("tool_calls")
+                + ", handoffs: " + multiAgent.get("handoffs") + ", denied tools: "
+                + multiAgent.get("denied_tools"));
+        report.add("- Longest repeated step: " + multiAgent.get("max_repeated_step"));
+        report.add("- Agents: " + multiAgent.get("agents"));
+    }
 
+    private static void appendRuleStats(List<String> report, Map<String, Object> ruleStats) {
+        if (ruleStats.isEmpty()) {
+            return;
+        }
         report.add("");
-        report.add("## Failed or review-candidate cases");
+        report.add("## Rule pass rates");
         report.add("");
-        report.addAll(failures.isEmpty() ? List.of("- None") : failures);
-        report.add("");
-        report.add("> LLM analysis and module suggestions are non-authoritative candidates. "
-                + "Human final conclusions must be stored separately.");
-        report.add("");
-        AtomicFiles.writeText(outputDir.resolve("report.md"), Fmt.join(report));
-        AtomicFiles.writeText(outputDir.resolve("scenario_stats.json"), Json.write(scenarioOutput, 2) + "\n");
-        writeJsonl(outputDir.resolve("review_queue.jsonl"), reviewRows);
-        writeJsonl(outputDir.resolve("few_shot_candidates.jsonl"), fewShotRows);
+        report.add("| Rule | Level | Evaluated | Passed | Rate | Missing |");
+        report.add("|---|---|---:|---:|---:|---:|");
+        for (Map.Entry<String, Object> entry : ruleStats.entrySet()) {
+            Map<String, Object> row = asMap(entry.getValue());
+            Object rate = row.get("pass_rate");
+            report.add("| `" + entry.getKey() + "` | " + row.get("level") + " | "
+                    + intValue(row.get("evaluated")) + " | " + intValue(row.get("passed")) + " | "
+                    + (rate instanceof Number number ? Fmt.percent1(number.doubleValue()) : "—")
+                    + " | " + intValue(row.get("missing")) + " |");
+        }
+    }
+
+    private static final class RunDetails {
+        private final Map<String, Integer> moduleCounts = new LinkedHashMap<>();
+        private final Map<String, Map<String, Integer>> scenarioStats = new LinkedHashMap<>();
+        private final Map<String, Map<String, Integer>> targetScenarioStats = new LinkedHashMap<>();
+        private final List<Map<String, Object>> reviewRows = new ArrayList<>();
+        private final List<Map<String, Object>> fewShotRows = new ArrayList<>();
+        private final List<String> failures = new ArrayList<>();
+        private final Map<String, Object> scenarioOutput = new LinkedHashMap<>();
+        private Object runId;
     }
 
     /** Writes {@code evolution.json} and {@code evolution_report.md}. */
@@ -225,19 +288,40 @@ public final class Reporting {
 
         Map<String, Object> candidate = asMap(result.get("candidate"));
         List<String> report = new ArrayList<>();
+        appendEvolutionHeader(report, result, candidate);
+        Map<String, Object> comparisons = asMap(result.get("comparisons"));
+        appendComparisonTable(report, comparisons);
+        appendCaseTransitions(report, result);
+
+        Map<String, Object> policy = asMap(result.get("policy"));
+        appendObjectives(report, comparisons, asList(policy.get("objectives")));
+        appendScenarioGates(report, comparisons, asList(policy.get("scenario_gates")));
+        appendQualityGates(report, asList(policy.get("quality_gates")));
+        appendRuleDeltas(report, comparisons);
+        appendDecisionAndLineage(report, result);
+        AtomicFiles.writeText(outputDir.resolve("evolution_report.md"), Fmt.join(report));
+    }
+
+    private static void appendEvolutionHeader(
+            List<String> report, Map<String, Object> result, Map<String, Object> candidate) {
         report.add("# Evolution Report " + BOX_DRAWING_DASH + " " + result.get("experiment_id"));
         report.add("");
         report.add("- Decision: **" + result.get("decision") + "**");
         report.add("- Candidate: `" + candidate.get("candidate_id") + "`");
         report.add("- Target: `" + candidate.get("target_type") + ":" + candidate.get("target_id") + "`");
-        report.add("- Version: `" + candidate.get("baseline_version") + "` → `" + candidate.get("candidate_version") + "`");
+        report.add("- Version: `" + candidate.get("baseline_version") + "` → `"
+                + candidate.get("candidate_version") + "`");
         report.add("- Change type: `" + candidate.get("change_type") + "`");
+    }
+
+    private static void appendComparisonTable(
+            List<String> report, Map<String, Object> comparisons) {
         report.add("");
         report.add("## Version comparison");
         report.add("");
-        report.add("| Dataset | Baseline hard pass | Candidate hard pass | Delta | Soft warning delta | Mean latency delta | P95 latency delta |");
+        report.add("| Dataset | Baseline hard pass | Candidate hard pass | Delta | Soft warning delta "
+                + "| Mean latency delta | P95 latency delta |");
         report.add("|---|---:|---:|---:|---:|---:|---:|");
-        Map<String, Object> comparisons = asMap(result.get("comparisons"));
         for (String role : List.of("improvement", "regression", "holdout")) {
             Map<String, Object> comparison = asMap(comparisons.get(role));
             report.add(
@@ -257,85 +341,100 @@ public final class Reporting {
             report.add("- `" + role + "`: " + latencySamples(asMap(comparison.get("baseline")))
                     + " → " + latencySamples(asMap(comparison.get("candidate"))));
         }
-        appendCaseTransitions(report, result);
+    }
 
-        Map<String, Object> policy = asMap(result.get("policy"));
-        List<Object> objectives = asList(policy.get("objectives"));
-        if (!objectives.isEmpty()) {
-            report.add("");
-            report.add("## Configured objectives");
-            report.add("");
-            report.add("| Dataset | Objective | Baseline | Candidate | Ceiling | Baseline samples | Candidate samples |");
-            report.add("|---|---|---:|---:|---:|---:|---:|");
-            for (String role : List.of("improvement", "regression", "holdout")) {
-                Map<String, Object> comparison = asMap(comparisons.get(role));
-                Map<String, Object> baselineObjectives =
-                        asMap(asMap(comparison.get("baseline")).get("objectives"));
-                Map<String, Object> candidateObjectives =
-                        asMap(asMap(comparison.get("candidate")).get("objectives"));
-                for (Object rawObjective : objectives) {
-                    Map<String, Object> objective = asMap(rawObjective);
-                    String name = String.valueOf(objective.get("name"));
-                    report.add(
-                            "| " + role + " | " + name + " | " + render(baselineObjectives.get(name)) + " | "
-                                    + render(candidateObjectives.get(name)) + " | "
-                                    + renderOptional(objective.get("maximum")) + " | "
-                                    + sampleCoverage(asMap(comparison.get("baseline")), name) + " | "
-                                    + sampleCoverage(asMap(comparison.get("candidate")), name) + " |");
-                }
+    private static void appendObjectives(
+            List<String> report, Map<String, Object> comparisons, List<Object> objectives) {
+        if (objectives.isEmpty()) {
+            return;
+        }
+        report.add("");
+        report.add("## Configured objectives");
+        report.add("");
+        report.add("| Dataset | Objective | Baseline | Candidate | Ceiling "
+                + "| Baseline samples | Candidate samples |");
+        report.add("|---|---|---:|---:|---:|---:|---:|");
+        for (String role : List.of("improvement", "regression", "holdout")) {
+            Map<String, Object> comparison = asMap(comparisons.get(role));
+            Map<String, Object> baselineObjectives =
+                    asMap(asMap(comparison.get("baseline")).get("objectives"));
+            Map<String, Object> candidateObjectives =
+                    asMap(asMap(comparison.get("candidate")).get("objectives"));
+            for (Object rawObjective : objectives) {
+                Map<String, Object> objective = asMap(rawObjective);
+                String name = String.valueOf(objective.get("name"));
+                report.add(
+                        "| " + role + " | " + name + " | " + render(baselineObjectives.get(name)) + " | "
+                                + render(candidateObjectives.get(name)) + " | "
+                                + renderOptional(objective.get("maximum")) + " | "
+                                + sampleCoverage(asMap(comparison.get("baseline")), name) + " | "
+                                + sampleCoverage(asMap(comparison.get("candidate")), name) + " |");
             }
         }
+    }
 
-        List<Object> scenarioGates = asList(policy.get("scenario_gates"));
-        if (!scenarioGates.isEmpty()) {
-            report.add("");
-            report.add("## Configured scenario gates");
-            report.add("");
-            report.add("| Dataset | Scenario | Cases | Baseline hard pass | Candidate hard pass | Delta | Soft warning delta |");
-            report.add("|---|---|---:|---:|---:|---:|---:|");
-            for (Object rawGate : scenarioGates) {
-                Map<String, Object> gate = asMap(rawGate);
-                String scenarioName = String.valueOf(gate.get("scenario"));
-                for (Object rawRole : asList(gate.get("roles"))) {
-                    String role = String.valueOf(rawRole);
-                    Map<String, Object> scenarios = asMap(asMap(comparisons.get(role)).get("scenarios"));
-                    Map<String, Object> scenario = scenarios.get(scenarioName) instanceof Map
-                            ? asMap(scenarios.get(scenarioName))
-                            : null;
-                    if (scenario == null || scenario.get("candidate") == null) {
-                        report.add("| " + role + " | " + scenarioName + " | missing | - | - | - | - |");
-                        continue;
-                    }
-                    Map<String, Object> baseline = asMap(scenario.get("baseline"));
-                    Map<String, Object> candidateValue = asMap(scenario.get("candidate"));
-                    report.add(
-                            "| " + role + " | " + scenarioName + " | " + candidateValue.get("case_count") + " | "
-                                    + Fmt.percent1(rate(baseline)) + " | "
-                                    + Fmt.percent1(rate(candidateValue)) + " | "
-                                    + Fmt.signedPercent1(doubleValue(scenario.get("hard_pass_rate_delta"))) + " | "
-                                    + Fmt.signedInt(intValue(scenario.get("soft_warning_delta"))) + " |");
+    private static void appendScenarioGates(
+            List<String> report, Map<String, Object> comparisons, List<Object> scenarioGates) {
+        if (scenarioGates.isEmpty()) {
+            return;
+        }
+        report.add("");
+        report.add("## Configured scenario gates");
+        report.add("");
+        report.add("| Dataset | Scenario | Cases | Baseline hard pass | Candidate hard pass "
+                + "| Delta | Soft warning delta |");
+        report.add("|---|---|---:|---:|---:|---:|---:|");
+        for (Object rawGate : scenarioGates) {
+            Map<String, Object> gate = asMap(rawGate);
+            String scenarioName = String.valueOf(gate.get("scenario"));
+            for (Object rawRole : asList(gate.get("roles"))) {
+                String role = String.valueOf(rawRole);
+                Map<String, Object> scenarios =
+                        asMap(asMap(comparisons.get(role)).get("scenarios"));
+                Map<String, Object> scenario = scenarios.get(scenarioName) instanceof Map
+                        ? asMap(scenarios.get(scenarioName))
+                        : null;
+                if (scenario == null || scenario.get("candidate") == null) {
+                    report.add("| " + role + " | " + scenarioName + " | missing | - | - | - | - |");
+                    continue;
                 }
+                Map<String, Object> baseline = asMap(scenario.get("baseline"));
+                Map<String, Object> candidateValue = asMap(scenario.get("candidate"));
+                report.add(
+                        "| " + role + " | " + scenarioName + " | " + candidateValue.get("case_count")
+                                + " | " + Fmt.percent1(rate(baseline)) + " | "
+                                + Fmt.percent1(rate(candidateValue)) + " | "
+                                + Fmt.signedPercent1(
+                                        doubleValue(scenario.get("hard_pass_rate_delta"))) + " | "
+                                + Fmt.signedInt(intValue(scenario.get("soft_warning_delta"))) + " |");
             }
         }
+    }
 
-        List<Object> qualityGates = asList(policy.get("quality_gates"));
-        if (!qualityGates.isEmpty()) {
-            report.add("");
-            report.add("## Configured quality gates");
-            report.add("");
-            report.add("| Dataset | Min hard pass | Max regressions | Max critical regressions | Min samples |");
-            report.add("|---|---:|---:|---:|---:|");
-            for (Object rawGate : qualityGates) {
-                Map<String, Object> gate = asMap(rawGate);
-                for (Object rawRole : asList(gate.get("roles"))) {
-                    report.add("| " + cell(rawRole) + " | " + renderPercent(gate.get("minimum_hard_pass_rate"))
-                            + " | " + renderOptional(gate.get("maximum_task_regressions"))
-                            + " | " + renderOptional(gate.get("maximum_critical_task_regressions"))
-                            + " | " + renderOptional(gate.get("minimum_samples")) + " |");
-                }
+    private static void appendQualityGates(
+            List<String> report, List<Object> qualityGates) {
+        if (qualityGates.isEmpty()) {
+            return;
+        }
+        report.add("");
+        report.add("## Configured quality gates");
+        report.add("");
+        report.add("| Dataset | Min hard pass | Max regressions | Max critical regressions | Min samples |");
+        report.add("|---|---:|---:|---:|---:|");
+        for (Object rawGate : qualityGates) {
+            Map<String, Object> gate = asMap(rawGate);
+            for (Object rawRole : asList(gate.get("roles"))) {
+                report.add("| " + cell(rawRole) + " | "
+                        + renderPercent(gate.get("minimum_hard_pass_rate")) + " | "
+                        + renderOptional(gate.get("maximum_task_regressions")) + " | "
+                        + renderOptional(gate.get("maximum_critical_task_regressions")) + " | "
+                        + renderOptional(gate.get("minimum_samples")) + " |");
             }
         }
+    }
 
+    private static void appendRuleDeltas(
+            List<String> report, Map<String, Object> comparisons) {
         report.add("");
         report.add("## Rule pass rates");
         report.add("");
@@ -348,26 +447,35 @@ public final class Reporting {
         }
         if (!anyRule) {
             report.add("- None");
-        } else {
-            report.add("| Dataset | Rule | Level | Baseline | Candidate | Delta | Baseline samples | Candidate samples |");
-            report.add("|---|---|---|---:|---:|---:|---:|---:|");
-            for (String role : List.of("improvement", "regression", "holdout")) {
-                Map<String, Object> deltas = asMap(asMap(comparisons.get(role)).get("rule_deltas"));
-                for (Map.Entry<String, Object> entry : deltas.entrySet()) {
-                    Map<String, Object> row = asMap(entry.getValue());
-                    Map<String, Object> baselineStats = asMap(row.get("baseline"));
-                    Map<String, Object> candidateStats = asMap(row.get("candidate"));
-                    Map<String, Object> stats = candidateStats.isEmpty() ? baselineStats : candidateStats;
-                    report.add("| " + role + " | `" + cell(entry.getKey()) + "` | "
-                            + cell(stats.getOrDefault("level", "unknown")) + " | "
-                            + passRate(baselineStats) + " | " + passRate(candidateStats) + " | "
-                            + (row.get("pass_rate_delta") instanceof Number delta
-                                    ? Fmt.signedPercent1(delta.doubleValue()) : "missing") + " | "
-                            + samples(baselineStats) + " | " + samples(candidateStats) + " |");
-                }
+            return;
+        }
+        report.add("| Dataset | Rule | Level | Baseline | Candidate | Delta "
+                + "| Baseline samples | Candidate samples |");
+        report.add("|---|---|---|---:|---:|---:|---:|---:|");
+        for (String role : List.of("improvement", "regression", "holdout")) {
+            Map<String, Object> deltas = asMap(asMap(comparisons.get(role)).get("rule_deltas"));
+            for (Map.Entry<String, Object> entry : deltas.entrySet()) {
+                appendRuleDelta(report, role, entry);
             }
         }
+    }
 
+    private static void appendRuleDelta(
+            List<String> report, String role, Map.Entry<String, Object> entry) {
+        Map<String, Object> row = asMap(entry.getValue());
+        Map<String, Object> baselineStats = asMap(row.get("baseline"));
+        Map<String, Object> candidateStats = asMap(row.get("candidate"));
+        Map<String, Object> stats = candidateStats.isEmpty() ? baselineStats : candidateStats;
+        report.add("| " + role + " | `" + cell(entry.getKey()) + "` | "
+                + cell(stats.getOrDefault("level", "unknown")) + " | "
+                + passRate(baselineStats) + " | " + passRate(candidateStats) + " | "
+                + (row.get("pass_rate_delta") instanceof Number delta
+                        ? Fmt.signedPercent1(delta.doubleValue()) : "missing") + " | "
+                + samples(baselineStats) + " | " + samples(candidateStats) + " |");
+    }
+
+    private static void appendDecisionAndLineage(
+            List<String> report, Map<String, Object> result) {
         report.add("");
         report.add("## Decision evidence");
         report.add("");
@@ -384,7 +492,6 @@ public final class Reporting {
                     "- `" + role + "`: `" + asMap(baselineRuns.get(role)).get("run_id") + "` → `"
                             + asMap(candidateRuns.get(role)).get("run_id") + "`");
         }
-        AtomicFiles.writeText(outputDir.resolve("evolution_report.md"), Fmt.join(report));
     }
 
     /** Adds the per-case transition counts, every regression's first divergence, and failure clusters. */
@@ -688,19 +795,18 @@ public final class Reporting {
     }
 
     private static double doubleValue(Object value) {
-        return value instanceof Number number ? number.doubleValue() : 0;
+        return Values.numberAsDouble(value);
     }
 
     private static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
+        return Values.numberAsInt(value);
     }
 
     private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

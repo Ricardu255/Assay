@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
-import org.junit.jupiter.api.Test;
 
 /** The breaker opens after consecutive failures and allows one probe after the cooldown. */
 class CircuitBreakerTest {

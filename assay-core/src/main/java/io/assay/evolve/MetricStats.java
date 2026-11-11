@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** Per-run metric aggregation and scenario/rule deltas shared by evolution and release comparison. */
 public final class MetricStats {
@@ -122,7 +124,7 @@ public final class MetricStats {
         Map<String, Map<String, Object>> baselineScenarios = summarizeScenarios(baseline);
         Map<String, Map<String, Object>> candidateScenarios = summarizeScenarios(candidate);
         Map<String, Object> comparisons = new LinkedHashMap<>();
-        java.util.Set<String> names = new java.util.TreeSet<>(baselineScenarios.keySet());
+        Set<String> names = new TreeSet<>(baselineScenarios.keySet());
         names.addAll(candidateScenarios.keySet());
         for (String scenario : names) {
             Map<String, Object> baselineMetrics = baselineScenarios.get(scenario);
@@ -147,7 +149,7 @@ public final class MetricStats {
 
     static Map<String, Object> compareRuleStats(
             Map<String, Object> baseline, Map<String, Object> candidate) {
-        java.util.Set<String> names = new java.util.TreeSet<>(baseline.keySet());
+        Set<String> names = new TreeSet<>(baseline.keySet());
         names.addAll(candidate.keySet());
         Map<String, Object> result = new LinkedHashMap<>();
         for (String name : names) {

@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,10 +38,12 @@ public final class ScopeAudit {
      */
     private static final List<Pattern> PUBLIC_DECLARATIONS = List.of(
             Pattern.compile(
-                    "^(?:public|protected)\\s+(?:abstract\\s+|final\\s+|static\\s+|sealed\\s+|non-sealed\\s+|strictfp\\s+)*"
+                    "^(?:public|protected)\\s+(?:abstract\\s+|final\\s+|static\\s+|sealed\\s+"
+                            + "|non-sealed\\s+|strictfp\\s+)*"
                             + "(?:class|interface|enum|record|@interface)\\s+([A-Za-z_$][\\w$]*)"),
             Pattern.compile(
-                    "^(?:public|protected)\\s+(?:static\\s+|final\\s+|abstract\\s+|synchronized\\s+|native\\s+|default\\s+)*"
+                    "^(?:public|protected)\\s+(?:static\\s+|final\\s+|abstract\\s+"
+                            + "|synchronized\\s+|native\\s+|default\\s+)*"
                             + "[\\w$<>\\[\\],.?\\s]+\\s+([A-Za-z_$][\\w$]*)\\s*\\("),
             Pattern.compile("^(?:data\\s+)?(?:class|object|interface)\\s+([A-Za-z_$][\\w$]*)"),
             Pattern.compile("^fun\\s+([A-Za-z_$][\\w$]*)\\s*\\("),
@@ -86,10 +89,12 @@ public final class ScopeAudit {
                     + "\"risk\":low/medium/high,\"reason\":...}]}. Explain causal evidence and permit "
                     + "necessary cross-module changes. Check unrelated edits, unrequested features, unnecessary "
                     + "refactoring, interface/config/dependency/default changes, and cross-module regression risk. "
-                    + "Use insufficient_evidence when uncertain. Include line_side (base for deletions, target for additions). "
-                    + "Do not claim tests prove scope compliance.\n\n";
+                    + "Use insufficient_evidence when uncertain. Include line_side (base for deletions, "
+                    + "target for additions). Do not claim tests prove scope compliance.\n\n";
 
     /** Audits {@code snapshot} against {@code specification}, delegating semantic review to {@code reviewer}. */
+    // Orchestrates validation, rule findings, semantic review and assembly; split incrementally.
+    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity"})
     public static Map<String, Object> auditScope(
             DiffSnapshot snapshot, Map<String, Object> specification, JsonReviewer reviewer) {
         Object requirementValue = specification.containsKey("requirement") ? specification.get("requirement") : "";
@@ -115,7 +120,8 @@ public final class ScopeAudit {
             }
         }
 
-        Object allowedValue = specification.containsKey("allowed_paths") ? specification.get("allowed_paths") : List.of();
+        Object allowedValue = specification.containsKey("allowed_paths")
+                ? specification.get("allowed_paths") : List.of();
         Object forbiddenValue = specification.containsKey("forbidden_paths")
                 ? specification.get("forbidden_paths") : List.of();
         if (!isStringList(allowedValue) || !isStringList(forbiddenValue)) {
@@ -310,7 +316,9 @@ public final class ScopeAudit {
                     }
                 }
             } catch (RuntimeException error) {
-                warnings.add("Semantic review unavailable: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+                warnings.add(
+                        "Semantic review unavailable: " + error.getClass().getSimpleName() + ": "
+                                + error.getMessage());
             }
         }
 
@@ -566,7 +574,7 @@ public final class ScopeAudit {
     private static String sha256Hex(String text) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(digest);
+            return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-256 unavailable", error);
         }

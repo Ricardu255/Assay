@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.testing.AgentProcessFixtureMain;
 import io.assay.testing.ChildProcess;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Deadline and output-budget enforcement, including cleanup of the whole process tree. */
 class AgentProcessTest {

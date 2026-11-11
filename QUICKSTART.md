@@ -1,6 +1,6 @@
 # Assay 快速开始
 
-不需要懂 Java。你只需要一个能返回 JSON 的 Agent HTTP 地址。
+不需要懂 Java。先跑内置示例看界面；接自己的 Agent 时，只需要一个能返回 JSON 的 HTTP 地址。
 
 ## 1. 安装 Java 17
 
@@ -25,6 +25,14 @@ sh ./assay
 
 第一次会打开一个本地页面，并跑一条内置示例，不需要 API Key。
 
+任意平台也可以直接运行：
+
+```bash
+java -jar app/target/assay.jar demo
+```
+
+它会跑内置 EchoAdapter 示例、启动带任务队列的 Dashboard 并打开浏览器。各页面怎么看，见 [docs/dashboard-guide.md](docs/dashboard-guide.md)。
+
 ## 3. 评测自己的 Agent
 
 在页面点击 **开始评测**：
@@ -43,9 +51,9 @@ http-cases.jsonl
 
 按页面提示复制运行命令即可。运行完成后点顶部「刷新」看报告。
 
-## 更省事：一条命令
+## 更省事：三问生成 HTTP 配置（quickstart）
 
-如果不想下载文件，在项目根目录运行：
+上面的 `demo` 是看内置示例；`quickstart` 是把你自己的 HTTP Agent 接进来。它会问三个问题，然后自动生成配置、跑评测并打开报告。在项目根目录运行：
 
 ```bash
 # Windows
@@ -63,7 +71,7 @@ JSON field containing the answer:
 Expected keyword in the answer:
 ```
 
-然后自动生成配置和用例、运行评测、打开报告。
+然后自动生成配置和用例、运行评测、打开报告。想先看每个页面是做什么的，读 [docs/dashboard-guide.md](docs/dashboard-guide.md)。
 
 ## 想让报告看到工具步骤
 

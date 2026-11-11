@@ -12,6 +12,7 @@ import java.sql.SQLIntegrityConstraintViolationException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
@@ -25,9 +26,10 @@ import javax.sql.DataSource;
  * semantics are preserved: case results are upserts, the case manifest is hashed, resume validates
  * the manifest, and a run lock rejects a second holder.
  *
- * <p>This is deliberately a <em>portable</em> implementation, not a migration framework. It uses
- * {@code create table if not exists}, {@code text}, {@code boolean}, and {@code timestamp}; a
- * production deployment should own schema migrations and column sizing for its database.
+ * <p>This implementation targets H2, MySQL and PostgreSQL-compatible SQL (for example {@code text},
+ * {@code boolean}, {@code timestamp} and {@code limit}); other databases need their dialect verified.
+ * It is not a migration framework: a production deployment should own schema migrations and column
+ * sizing for its database.
  *
  * <p>Run, case, review, evolution and retention responsibilities are implemented by package-private
  * repository classes; this class owns the connection factory, schema bootstrap and delegation.
@@ -80,7 +82,7 @@ public final class JdbcResultStore implements Results {
      * process so the per-operation connection model of this store stays usable.
      */
     private static String normalizeUrl(String url) {
-        String lower = url.toLowerCase(java.util.Locale.ROOT);
+        String lower = url.toLowerCase(Locale.ROOT);
         if (!lower.startsWith("jdbc:h2:file:") || lower.contains("db_close_delay")) {
             return url;
         }

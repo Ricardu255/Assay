@@ -1,25 +1,26 @@
 package io.assay.server.run;
 
 import io.assay.execution.JobRunQueue;
-import io.assay.json.Json;
 import io.assay.execution.RunIds;
 import io.assay.execution.RunJobs;
 import io.assay.execution.RunOptions;
 import io.assay.execution.RunSpec;
+import io.assay.execution.Stores;
 import io.assay.execution.SuiteRunner;
+import io.assay.json.Json;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
 import io.assay.runner.RetryPolicy;
 import io.assay.server.config.AssayServerProperties;
 import io.assay.store.Results;
-import io.assay.store.file.FileJobStore;
-import io.assay.store.file.ResultStore;
-import io.assay.store.jdbc.JdbcJobStore;
-import io.assay.store.jdbc.JdbcResultStore;
 import io.assay.support.Names;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -30,7 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.springframework.stereotype.Service;
 
 /**
  * Submits evaluation runs to the durable queue and serves their status.
@@ -42,7 +42,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class RunService {
 
-    private static final int LIST_LIMIT = 200;
+    private static final Logger LOGGER = LoggerFactory.getLogger(RunService.class);
+
     private static final List<String> SUMMARY_KEYS = List.of(
             "status",
             "case_count",
@@ -62,7 +63,7 @@ public class RunService {
     public RunService(AssayServerProperties properties) {
         this.storePath = text(properties.getStore(), ".assay/store");
         this.outputDir = text(properties.getOutput(), ".assay/runs");
-        this.jobs = openJobs(storePath);
+        this.jobs = Stores.openJobs(storePath, RetryPolicy.defaults());
         RunOptions options = new RunOptions(
                 properties.getWorkers(),
                 properties.getRetries(),
@@ -70,7 +71,7 @@ public class RunService {
                 properties.isCollectFewShot());
         this.queue = new JobRunQueue(
                 jobs,
-                () -> openStore(storePath),
+                () -> Stores.open(storePath),
                 new SuiteRunner(),
                 options,
                 Path.of(outputDir),
@@ -121,18 +122,20 @@ public class RunService {
     /** Persisted runs plus still-queued or running jobs, newest first. */
     public List<Map<String, Object>> list() {
         Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
-        try (Results store = openStore(storePath)) {
+        try (Results store = Stores.open(storePath)) {
             for (Map<String, Object> run : store.listRuns()) {
                 String runId = String.valueOf(run.get("run_id"));
                 merged.put(runId, decorate(run));
             }
-        } catch (UnsupportedOperationException ignored) {
+        } catch (UnsupportedOperationException unsupported) {
             // Backends without run listing still expose live queue jobs below.
-        } catch (RuntimeException ignored) {
+            LOGGER.debug("run store does not support listing; using queue jobs only", unsupported);
+        } catch (RuntimeException failure) {
             // Listing must stay available even when the store is temporarily unavailable.
+            LOGGER.warn("cannot list persisted runs; using queue jobs only", failure);
         }
         try {
-            for (Job job : queue.jobs(LIST_LIMIT)) {
+            for (Job job : queue.jobs(JobStore.DEFAULT_LIST_LIMIT)) {
                 String runId = RunJobs.runId(job.payload());
                 if (runId == null) {
                     continue;
@@ -142,8 +145,9 @@ public class RunService {
                     merged.put(runId, jobRow(job, runId));
                 }
             }
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
             // The queue may be unavailable while the store is reachable; persisted runs still list.
+            LOGGER.warn("cannot list queued jobs; returning persisted runs only", failure);
         }
         List<Map<String, Object>> result = new ArrayList<>(merged.values());
         result.sort(Comparator.comparing((Map<String, Object> run) -> String.valueOf(
@@ -156,14 +160,26 @@ public class RunService {
     public Optional<Map<String, Object>> get(String runId) {
         String safe = Names.safeName(runId, "run_id");
         Map<String, Object> persisted = null;
-        try (Results store = openStore(storePath)) {
+        try (Results store = Stores.open(storePath)) {
             persisted = store.getRun(safe);
-        } catch (UnsupportedOperationException ignored) {
+        } catch (UnsupportedOperationException unsupported) {
             // Fall through to the queue record.
-        } catch (RuntimeException ignored) {
+            LOGGER.debug("run store does not support get; using the queue record", unsupported);
+        } catch (RuntimeException failure) {
             // Fall through to the queue record.
+            LOGGER.warn("cannot read persisted run {}; using the queue record", safe, failure);
         }
-        Job job = queue.findJobByRunId(safe).orElse(null);
+        Job job;
+        try {
+            job = queue.findJobByRunId(safe).orElse(null);
+        } catch (RuntimeException failure) {
+            if (persisted == null) {
+                throw failure;
+            }
+            // A stored run remains readable even when the job store is temporarily unavailable.
+            LOGGER.warn("cannot read queued job for run {}; using the persisted record", safe, failure);
+            job = null;
+        }
         if (persisted != null) {
             if (job != null && finalizing(persisted, job)) {
                 // The engine finished but the worker has not written run-summary.json yet.
@@ -187,9 +203,10 @@ public class RunService {
     /** The persisted per-case facts of a run; empty while the run has not started writing cases. */
     public List<Map<String, Object>> cases(String runId) {
         String safe = Names.safeName(runId, "run_id");
-        try (Results store = openStore(storePath)) {
+        try (Results store = Stores.open(storePath)) {
             return store.listResults(safe);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
+            LOGGER.warn("cannot list cases for run {}", safe, failure);
             return List.of();
         }
     }
@@ -220,8 +237,9 @@ public class RunService {
                     row.put(key, summary.get(key));
                 }
             }
-        } catch (RuntimeException | java.io.IOException ignored) {
+        } catch (IOException | RuntimeException failure) {
             // The summary file is optional; the persisted run record remains authoritative.
+            LOGGER.debug("cannot read run summary {}", summaryFile, failure);
         }
     }
 
@@ -245,20 +263,6 @@ public class RunService {
             row.put("finished_at", job.finishedAt().toString());
         }
         return Collections.unmodifiableMap(row);
-    }
-
-    private static JobStore openJobs(String reference) {
-        if (reference != null && reference.startsWith("jdbc:")) {
-            return JdbcJobStore.fromUrl(reference, RetryPolicy.defaults());
-        }
-        return new FileJobStore(Path.of(reference == null || reference.isBlank() ? ".assay/store" : reference));
-    }
-
-    private static Results openStore(String reference) {
-        if (reference != null && reference.startsWith("jdbc:")) {
-            return JdbcResultStore.fromUrl(reference);
-        }
-        return new ResultStore(Path.of(reference == null || reference.isBlank() ? ".assay/store" : reference));
     }
 
     /** Stops this instance's workers and releases the job store on application shutdown. */

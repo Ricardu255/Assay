@@ -1,10 +1,10 @@
 package io.assay.store.jdbc;
 
+import io.assay.model.Values;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Small JDBC helpers shared by the repository classes behind {@link JdbcResultStore}. */
@@ -36,15 +36,14 @@ final class JdbcSupport {
     }
 
     static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
+        return Values.numberAsInt(value);
     }
 
     static Instant instant(Timestamp value) {
         return value == null ? null : value.toInstant();
     }
 
-    @SuppressWarnings("unchecked")
     static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : new LinkedHashMap<>();
+        return Values.asMap(value);
     }
 }

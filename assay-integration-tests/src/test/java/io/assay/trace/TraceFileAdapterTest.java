@@ -14,13 +14,13 @@ import io.assay.model.RunContext;
 import io.assay.store.file.ResultStore;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.Fixtures;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Zero-code trace ingestion: normalized exports, OpenInference, OTLP, and case coverage. */
 class TraceFileAdapterTest {

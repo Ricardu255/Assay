@@ -8,6 +8,7 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.model.RunContext;
 import io.assay.model.TraceEvent;
+import io.assay.model.Values;
 import io.assay.opentrace.OpenAiTrace;
 import io.assay.rules.RuleConfig;
 import io.assay.support.AtomicFiles;
@@ -624,17 +625,7 @@ public final class TraceFileAdapter {
     }
 
     private static int intValue(Object value) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Integer.parseInt(text.trim());
-            } catch (NumberFormatException ignored) {
-                return 0;
-            }
-        }
-        return 0;
+        return Values.toInt(value, 0);
     }
 
     private static Map<String, Object> readObject(Path path, String label) {
@@ -651,7 +642,8 @@ public final class TraceFileAdapter {
             }
             return asMap(parsed);
         } catch (JsonException error) {
-            throw new IllegalArgumentException("invalid JSON in " + label + " " + path + ": " + error.getMessage(), error);
+            throw new IllegalArgumentException(
+                    "invalid JSON in " + label + " " + path + ": " + error.getMessage(), error);
         } catch (IOException error) {
             throw new UncheckedIOException("cannot read " + label + ": " + path, error);
         }
@@ -687,11 +679,10 @@ public final class TraceFileAdapter {
     }
 
     private static List<?> asList(Object value) {
-        return value instanceof List<?> list ? list : List.of();
+        return Values.asList(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map<?, ?> ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

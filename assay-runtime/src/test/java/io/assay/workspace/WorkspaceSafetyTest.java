@@ -5,16 +5,16 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.assay.model.SafePath;
 import io.assay.model.TextFileOperation;
 import io.assay.support.AtomicFiles;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 class WorkspaceSafetyTest {
 

@@ -9,9 +9,9 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.Rule;
 import io.assay.model.TraceEvent;
+import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 class SequenceRulesTest {
 

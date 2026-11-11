@@ -7,17 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.assay.engine.EvaluationEngine;
 import io.assay.model.ProjectAdapter;
 import io.assay.store.file.ResultStore;
+import io.assay.support.ExclusiveFileLock;
 import io.assay.testing.ChildProcess;
 import io.assay.workspace.TextArtifactWorkspace;
-import io.assay.support.ExclusiveFileLock;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Locks and store writes under contention.

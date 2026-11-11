@@ -29,16 +29,7 @@ public final class ValueOps {
             return left == null && right == null;
         }
         if (left instanceof Boolean || right instanceof Boolean) {
-            if (left instanceof Boolean a && right instanceof Boolean b) {
-                return a.equals(b);
-            }
-            // A boolean carries a numeric value, so true == 1 holds.
-            Object number = left instanceof Boolean ? right : left;
-            Object flag = left instanceof Boolean ? left : right;
-            if (number instanceof Number value) {
-                return value.doubleValue() == (Boolean.TRUE.equals(flag) ? 1d : 0d);
-            }
-            return false;
+            return equalBoolean(left, right);
         }
         if (left instanceof Number a && right instanceof Number b) {
             return a.doubleValue() == b.doubleValue();
@@ -47,28 +38,49 @@ public final class ValueOps {
             return a.equals(b);
         }
         if (left instanceof Map<?, ?> a && right instanceof Map<?, ?> b) {
-            if (!a.keySet().equals(b.keySet())) {
-                return false;
-            }
-            for (Map.Entry<?, ?> entry : a.entrySet()) {
-                if (!equal(entry.getValue(), b.get(entry.getKey()))) {
-                    return false;
-                }
-            }
-            return true;
+            return equalMaps(a, b);
         }
         if (left instanceof List<?> a && right instanceof List<?> b) {
-            if (a.size() != b.size()) {
-                return false;
-            }
-            for (int index = 0; index < a.size(); index++) {
-                if (!equal(a.get(index), b.get(index))) {
-                    return false;
-                }
-            }
-            return true;
+            return equalLists(a, b);
         }
         return left.equals(right);
+    }
+
+    private static boolean equalBoolean(Object left, Object right) {
+        if (left instanceof Boolean a && right instanceof Boolean b) {
+            return a.equals(b);
+        }
+        // A boolean carries a numeric value, so true == 1 holds.
+        Object number = left instanceof Boolean ? right : left;
+        Object flag = left instanceof Boolean ? left : right;
+        if (number instanceof Number value) {
+            return value.doubleValue() == (Boolean.TRUE.equals(flag) ? 1d : 0d);
+        }
+        return false;
+    }
+
+    private static boolean equalMaps(Map<?, ?> left, Map<?, ?> right) {
+        if (!left.keySet().equals(right.keySet())) {
+            return false;
+        }
+        for (Map.Entry<?, ?> entry : left.entrySet()) {
+            if (!equal(entry.getValue(), right.get(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean equalLists(List<?> left, List<?> right) {
+        if (left.size() != right.size()) {
+            return false;
+        }
+        for (int index = 0; index < left.size(); index++) {
+            if (!equal(left.get(index), right.get(index))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

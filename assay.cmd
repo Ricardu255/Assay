@@ -26,22 +26,14 @@ if not exist "%ASSAY_JAR%" (
   )
   set "ASSAY_JAR=app\target\assay.jar"
 )
-if "%~1"=="" goto demo
-if /i "%~1"=="demo" goto demo
-java -jar "%ASSAY_JAR%" %*
+if not "%~1"=="" goto run
+java -jar "%ASSAY_JAR%" demo
 set "ASSAY_EXIT=%errorlevel%"
 popd
 exit /b %ASSAY_EXIT%
-:demo
-echo Running the bundled example. No API key is needed.
-java -jar "%ASSAY_JAR%" run --adapter io.assay.examples.EchoAdapter --suite smoke --cases examples/cases.example.jsonl
-if errorlevel 1 (
-  pause
-  popd
-  exit /b 1
-)
-echo Opening the dashboard. Keep this window open; press Ctrl+C to stop.
-java -jar "%ASSAY_JAR%" serve --open-browser
+
+:run
+java -jar "%ASSAY_JAR%" %*
 set "ASSAY_EXIT=%errorlevel%"
 popd
 exit /b %ASSAY_EXIT%

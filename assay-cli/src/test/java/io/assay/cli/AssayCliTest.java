@@ -6,16 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.assay.json.Json;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
+import io.assay.runner.JobStore;
 import io.assay.store.jdbc.JdbcJobStore;
 import io.assay.support.AtomicFiles;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import java.util.stream.Stream;
 
 /**
  * Exit codes are the part of the CLI other tools depend on, so each one is asserted directly rather
@@ -92,6 +95,60 @@ class AssayCliTest {
             assertTrue(Files.isRegularFile(root.resolve("runs").resolve(finished.payload().get("run_id").toString())
                     .resolve("results.json")));
         }
+    }
+
+    @Test
+    void demoRunsTheBundledExampleWithoutServing(@TempDir Path root) throws Exception {
+        int code = AssayCli.run(new String[] {
+            "demo",
+            "--no-serve",
+            "--output", root.resolve("runs").toString(),
+            "--store", root.resolve("store").toString()
+        });
+
+        assertEquals(0, code);
+        try (Stream<Path> files = Files.walk(root.resolve("runs"))) {
+            assertTrue(files.anyMatch(path -> path.getFileName().toString().equals("report.md")));
+        }
+    }
+
+    @Test
+    void reindexJobsRebuildsTheFileRunIndex(@TempDir Path root) throws Exception {
+        Path storeRoot = root.resolve("store");
+        assertEquals(0, AssayCli.run(new String[] {
+            "submit",
+            "--store", storeRoot.toString(),
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "smoke",
+            "--cases", "cases.jsonl",
+            "--run-id", "run-reindex"
+        }));
+        Path index = storeRoot.resolve("run-index");
+        try (Stream<Path> pointers = Files.list(index)) {
+            for (Path pointer : pointers.toList()) {
+                Files.deleteIfExists(pointer);
+            }
+        }
+
+        assertEquals(0, AssayCli.run(new String[] {
+            "reindex-jobs",
+            "--store", storeRoot.toString()
+        }));
+        try (Stream<Path> pointers = Files.list(index)) {
+            assertTrue(pointers.findAny().isPresent());
+        }
+    }
+
+    @Test
+    void workerSurvivesAStoreFailureWhileClaiming() {
+        JobStore failing = (JobStore) Proxy.newProxyInstance(
+                JobStore.class.getClassLoader(),
+                new Class<?>[] {JobStore.class},
+                (proxy, method, arguments) -> {
+                    throw new IllegalStateException("store unavailable");
+                });
+
+        assertEquals(1, QueueCommands.runWorker(failing, "worker", 1, 1, true));
     }
 
     @Test

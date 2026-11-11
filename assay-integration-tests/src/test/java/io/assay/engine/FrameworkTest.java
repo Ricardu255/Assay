@@ -12,12 +12,12 @@ import io.assay.model.TraceEvent;
 import io.assay.report.Reporting;
 import io.assay.store.file.ResultStore;
 import io.assay.support.AtomicFiles;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** End-to-end coverage of one run: gates, human review, few-shot collection, and release staging. */
 class FrameworkTest {

@@ -20,6 +20,7 @@ public final class CommandLine {
     private CommandLine() {
     }
 
+    /** Option value types. */
     public enum Kind {
         STRING,
         INTEGER,

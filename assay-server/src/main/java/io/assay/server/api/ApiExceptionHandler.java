@@ -1,10 +1,10 @@
 package io.assay.server.api;
 
-import java.util.concurrent.RejectedExecutionException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import java.util.concurrent.RejectedExecutionException;
 
 /** Maps request validation failures to problem details instead of stack traces. */
 @RestControllerAdvice

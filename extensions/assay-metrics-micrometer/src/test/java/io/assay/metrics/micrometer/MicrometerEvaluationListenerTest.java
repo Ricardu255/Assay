@@ -11,11 +11,11 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.TraceEvent;
 import io.assay.store.file.ResultStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** The Micrometer adapter observes a real engine run without changing its result. */
 class MicrometerEvaluationListenerTest {

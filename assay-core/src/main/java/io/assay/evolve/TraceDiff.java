@@ -1,5 +1,6 @@
 package io.assay.evolve;
 
+import io.assay.model.Values;
 import io.assay.rules.ValueOps;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -475,12 +476,11 @@ public final class TraceDiff {
     }
 
     private static List<?> asList(Object value) {
-        return value instanceof List<?> list ? list : List.of();
+        return Values.asList(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map<?, ?> ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
     /** Mutable accumulator for one field comparison. */

@@ -2,6 +2,7 @@ package io.assay.rules;
 
 import io.assay.model.Rule;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,57 +34,79 @@ public final class RuleConfig {
         List<Rule> rules = new ArrayList<>();
         Set<String> names = new HashSet<>();
         for (Object row : rows) {
-            Map<String, Object> rule = object(row, key + " rule");
-            for (String option : rule.keySet()) {
-                if (!OPTIONS.contains(option)) {
-                    throw new IllegalArgumentException("unknown rule option: " + option);
-                }
-            }
-            String name = text(rule, "name", null);
-            String actual = path(rule, "actual", null);
-            if (!names.add(name)) {
-                throw new IllegalArgumentException("duplicate rule name in " + key + ": " + name);
-            }
-            String operator = text(rule, "operator", "eq");
-            if (!OPERATORS.contains(operator)) {
-                throw new IllegalArgumentException("unsupported rule operator: " + operator);
-            }
-            if (!"exists".equals(operator) && rule.containsKey("expected") == rule.containsKey("value")) {
-                throw new IllegalArgumentException("rule requires exactly one of expected or value: " + name);
-            }
-            if ("exists".equals(operator) && (rule.containsKey("expected") || rule.containsKey("value"))) {
-                throw new IllegalArgumentException("exists rule does not use expected or value: " + name);
-            }
-            if (operator.startsWith("sequence_") && rule.containsKey("value")) {
-                if (!(rule.get("value") instanceof List<?> sequence) || sequence.isEmpty()) {
-                    throw new IllegalArgumentException("sequence value must be a non-empty array: " + name);
-                }
-                validateSequence(sequence, name);
-            }
-            List<String> modules = new ArrayList<>();
-            Object suspects = rule.getOrDefault("suspected_modules", List.of());
-            if (!(suspects instanceof List<?> list)) {
-                throw new IllegalArgumentException("suspected_modules must be an array");
-            }
-            for (Object module : list) {
-                if (!(module instanceof String moduleText) || moduleText.isBlank()) {
-                    throw new IllegalArgumentException("suspected_modules entries must be non-empty strings");
-                }
-                modules.add(moduleText);
-            }
-            if (rule.containsKey("message") && !(rule.get("message") instanceof String)) {
-                throw new IllegalArgumentException("message must be a string");
-            }
-            rules.add(new Rule(
-                    name,
-                    actual,
-                    operator,
-                    rule.containsKey("expected") ? path(rule, "expected", null) : null,
-                    rule.get("value"),
-                    (String) rule.get("message"),
-                    modules));
+            rules.add(parseRule(object(row, key + " rule"), key, names));
         }
         return List.copyOf(rules);
+    }
+
+    private static Rule parseRule(
+            Map<String, Object> rule, String key, Set<String> names) {
+        validateOptions(rule);
+        String name = text(rule, "name", null);
+        String actual = path(rule, "actual", null);
+        if (!names.add(name)) {
+            throw new IllegalArgumentException("duplicate rule name in " + key + ": " + name);
+        }
+        String operator = text(rule, "operator", "eq");
+        validateOperator(rule, name, operator);
+        List<String> modules = parseModules(rule);
+        validateMessage(rule);
+        return new Rule(
+                name,
+                actual,
+                operator,
+                rule.containsKey("expected") ? path(rule, "expected", null) : null,
+                rule.get("value"),
+                (String) rule.get("message"),
+                modules);
+    }
+
+    private static void validateOptions(Map<String, Object> rule) {
+        for (String option : rule.keySet()) {
+            if (!OPTIONS.contains(option)) {
+                throw new IllegalArgumentException("unknown rule option: " + option);
+            }
+        }
+    }
+
+    private static void validateOperator(
+            Map<String, Object> rule, String name, String operator) {
+        if (!OPERATORS.contains(operator)) {
+            throw new IllegalArgumentException("unsupported rule operator: " + operator);
+        }
+        if (!"exists".equals(operator) && rule.containsKey("expected") == rule.containsKey("value")) {
+            throw new IllegalArgumentException("rule requires exactly one of expected or value: " + name);
+        }
+        if ("exists".equals(operator) && (rule.containsKey("expected") || rule.containsKey("value"))) {
+            throw new IllegalArgumentException("exists rule does not use expected or value: " + name);
+        }
+        if (operator.startsWith("sequence_") && rule.containsKey("value")) {
+            if (!(rule.get("value") instanceof List<?> sequence) || sequence.isEmpty()) {
+                throw new IllegalArgumentException("sequence value must be a non-empty array: " + name);
+            }
+            validateSequence(sequence, name);
+        }
+    }
+
+    private static List<String> parseModules(Map<String, Object> rule) {
+        List<String> modules = new ArrayList<>();
+        Object suspects = rule.getOrDefault("suspected_modules", List.of());
+        if (!(suspects instanceof List<?> list)) {
+            throw new IllegalArgumentException("suspected_modules must be an array");
+        }
+        for (Object module : list) {
+            if (!(module instanceof String moduleText) || moduleText.isBlank()) {
+                throw new IllegalArgumentException("suspected_modules entries must be non-empty strings");
+            }
+            modules.add(moduleText);
+        }
+        return modules;
+    }
+
+    private static void validateMessage(Map<String, Object> rule) {
+        if (rule.containsKey("message") && !(rule.get("message") instanceof String)) {
+            throw new IllegalArgumentException("message must be a string");
+        }
     }
 
     private static void validateSequence(List<?> steps, String name) {
@@ -124,7 +147,7 @@ public final class RuleConfig {
         String value = text(map, key, fallback);
         if (value.length() > 512
                 || value.chars().anyMatch(Character::isISOControl)
-                || java.util.Arrays.stream(value.split("\\.", -1))
+                || Arrays.stream(value.split("\\.", -1))
                         .anyMatch(part -> part.isEmpty()
                                 || (part.matches("[0-9]+") && part.length() > 9))) {
             throw new IllegalArgumentException(

@@ -1,6 +1,7 @@
 package io.assay.audit;
 
 import io.assay.json.Json;
+import io.assay.model.Values;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -134,13 +135,11 @@ public final class ScopeAuditReport {
         return String.join(", ", items);
     }
 
-    @SuppressWarnings("unchecked")
     private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

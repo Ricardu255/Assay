@@ -18,15 +18,40 @@
   </module>
 
   <module name="LineLength">
-    <property name="max" value="200"/>
+    <property name="max" value="120"/>
     <property name="ignorePattern" value="^(package|import) .*$"/>
   </module>
 
   <module name="NewlineAtEndOfFile"/>
 
+  <module name="SuppressWarningsFilter"/>
+
   <module name="TreeWalker">
+    <module name="SuppressWarningsHolder"/>
     <module name="RedundantImport"/>
     <module name="UnusedImports"/>
     <module name="AvoidStarImport"/>
+    <module name="CustomImportOrder">
+      <property name="customImportOrderRules"
+                value="STATIC###THIRD_PARTY_PACKAGE###STANDARD_JAVA_PACKAGE"/>
+      <property name="sortImportsInGroupAlphabetically" value="true"/>
+      <property name="separateLineBetweenGroups" value="false"/>
+    </module>
+    <module name="PackageName"/>
+    <module name="TypeName"/>
+    <module name="MemberName"/>
+    <module name="MethodName"/>
+    <module name="ParameterName"/>
+    <module name="LocalVariableName"/>
+    <module name="ConstantName"/>
+    <module name="MissingJavadocType">
+      <property name="scope" value="public"/>
+    </module>
+    <module name="NPathComplexity">
+      <property name="max" value="1000000"/>
+    </module>
+    <module name="CyclomaticComplexity">
+      <property name="max" value="30"/>
+    </module>
   </module>
 </module>

@@ -12,15 +12,15 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
 import io.assay.store.Results;
+import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.h2.jdbcx.JdbcDataSource;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** The JDBC store must preserve the file store's resume, lock, review, and evolution semantics. */
 class JdbcResultStoreTest {

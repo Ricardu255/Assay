@@ -6,6 +6,8 @@ import io.assay.json.Json;
 import io.assay.model.CaseResult;
 import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,8 +16,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class StoreRecoveryTest {
 

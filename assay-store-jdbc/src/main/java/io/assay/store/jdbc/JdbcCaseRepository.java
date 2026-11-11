@@ -1,6 +1,7 @@
 package io.assay.store.jdbc;
 
 import io.assay.json.Json;
+import io.assay.model.CaseChecks;
 import io.assay.model.CaseResult;
 import io.assay.model.CheckResult;
 import io.assay.support.Names;
@@ -51,11 +52,11 @@ final class JdbcCaseRepository {
         try (Connection connection = connections.open()) {
             connection.setAutoCommit(false);
             try (PreparedStatement update = connection.prepareStatement(
-                            "update assay_case set payload_json = ?, hard_pass = ?, soft_warning_count = ?, updated_at = ? "
-                                    + "where run_id = ? and case_id = ?");
+                            "update assay_case set payload_json = ?, hard_pass = ?, soft_warning_count = ?, "
+                                    + "updated_at = ? where run_id = ? and case_id = ?");
                     PreparedStatement insert = connection.prepareStatement(
-                            "insert into assay_case(run_id, case_id, payload_json, hard_pass, soft_warning_count, updated_at) "
-                                    + "values (?, ?, ?, ?, ?, ?)")) {
+                            "insert into assay_case(run_id, case_id, payload_json, hard_pass, soft_warning_count, "
+                                    + "updated_at) values (?, ?, ?, ?, ?, ?)")) {
                 for (CaseResult result : results) {
                     if (!Objects.equals(result.runId(), runId)) {
                         throw new IllegalArgumentException("a result batch must belong to one run");
@@ -120,7 +121,8 @@ final class JdbcCaseRepository {
                     select.setString(2, caseId);
                     try (ResultSet rows = select.executeQuery()) {
                         if (!rows.next()) {
-                            throw new IllegalArgumentException("cannot add a check to missing result: " + runId + "/" + caseId);
+                            throw new IllegalArgumentException(
+                                    "cannot add a check to missing result: " + runId + "/" + caseId);
                         }
                         record = Json.parseObject(rows.getString(1));
                     }
@@ -138,11 +140,7 @@ final class JdbcCaseRepository {
                 checks.add(payload);
                 record = new LinkedHashMap<>(record);
                 record.put("checks", checks);
-                if ("hard".equals(check.level()) && !check.passed()) {
-                    record.put("hard_pass", false);
-                } else if (("soft".equals(check.level()) || "candidate".equals(check.level())) && !check.passed()) {
-                    record.put("soft_warning_count", JdbcSupport.intValue(record.get("soft_warning_count")) + 1);
-                }
+                CaseChecks.apply(record, check);
                 try (PreparedStatement update = connection.prepareStatement(
                         "update assay_case set payload_json = ?, hard_pass = ?, soft_warning_count = ?, updated_at = ? "
                                 + "where run_id = ? and case_id = ?")) {

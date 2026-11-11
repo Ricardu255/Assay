@@ -5,6 +5,14 @@ const sections = [
   ["compare", "版本对比", "⇋"], ["evolution", "版本演化", "⇄"],
   ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
+const sectionHints = {
+  run: "每次评测的用例、Trace、规则和原始证据。",
+  compare: "同一批用例，比较两次已存运行的发布门禁。",
+  evolution: "基线 vs 候选在 improvement / regression / holdout 三组数据上的决策。",
+  auto: "自动诊断 → 生成候选 → 沙箱评测 → 接受 / 拒绝 / 回退的迭代记录。",
+  audit: "检查 AI 改动是否越界，并查看 diff 证据。",
+  release: "regression → smoke → full 的发布验证阶段。"
+};
 const labels = {
   passed: "通过", failed: "失败", warning: "软告警", accept: "接受", reject: "拒绝", rollback: "回退", ok: "成功", success: "成功", error: "错误", failure: "失败",
   completed: "已完成", running: "运行中", unknown: "未知", budget_exhausted: "预算用尽",
@@ -36,7 +44,7 @@ function savePreference(key, value) {
   try { localStorage.setItem(`assay.${key}`, JSON.stringify(value)); } catch { /* Storage may be disabled. */ }
 }
 let preferredSplit = preference("caseSplit", 0.5), traceCollapsed = preference("traceCollapsed", false) === true;
-let disposeSplit = () => {}, routeReady = false, restoringRoute = false;
+let disposeSplit = () => {}, routeReady = false, restoringRoute = false, lastSection = null;
 const view = document.getElementById("view");
 const $ = (id) => document.getElementById(id);
 const array = (value) => Array.isArray(value) ? value : [];
@@ -110,6 +118,21 @@ function stat(title, value, note, color = "") {
   return `<div class="stat"><div class="stat-label">${escape(title)}</div><div class="stat-value ${color}">${escape(value)}</div><div class="stat-note">${escape(note)}</div></div>`;
 }
 
+function rateMeter(value, tone = "positive") {
+  if (number(value) === null) return "";
+  const width = Math.max(0, Math.min(100, value * 100));
+  return `<span class="rate-meter ${tone}" aria-hidden="true"><span style="width:${width}%"></span></span>`;
+}
+
+function rateCell(value, tone = "positive") {
+  return `<div class="rate-cell"><span class="number ${tone}">${percent(value)}</span>${rateMeter(value, tone)}</div>`;
+}
+
+function rateTone(value) {
+  if (number(value) === null) return "muted";
+  return value >= 0.9 ? "positive" : value >= 0.7 ? "warning-text" : "negative";
+}
+
 function empty(title = "还没有评测结果", description = "运行评测后点击刷新，或导入已有 JSON 报告。") {
   return `<div class="empty"><div class="empty-symbol" aria-hidden="true">▤</div><h2>${escape(title)}</h2><p>${escape(description)}</p></div>`;
 }
@@ -159,8 +182,24 @@ function suiteHealthTable(rows) {
   return `<div class="table-wrap"><table class="suite-health-table"><thead><tr><th>测试集</th><th>最近运行</th><th>状态</th><th>通过率</th><th>硬失败</th><th>软告警</th><th>较上次</th></tr></thead><tbody>
     ${rows.map((row) => {
       const change = row.delta === null ? "—" : `<span class="trend-delta ${row.delta > 0 ? "positive" : row.delta < 0 ? "negative" : ""}">${delta(row.delta, true)}</span>`;
-      return `<tr><td><strong>${escape(row.suite)}</strong><div class="record-path">${integer(row.runs)} 次运行</div></td><td class="muted number">${row.lastAt ? escape(date(row.lastAt)) : "—"}</td><td>${badge(row.status)}</td><td class="number">${percent(row.passRate)}</td><td class="number">${integer(row.hardFailures)}</td><td class="number">${integer(row.softWarnings)}</td><td>${change}</td></tr>`;
+      return `<tr><td><strong>${escape(row.suite)}</strong><div class="record-path">${integer(row.runs)} 次运行</div></td><td class="muted number">${row.lastAt ? escape(date(row.lastAt)) : "—"}</td><td>${badge(row.status)}</td><td>${rateCell(row.passRate, rateTone(row.passRate))}</td><td class="number">${integer(row.hardFailures)}</td><td class="number">${integer(row.softWarnings)}</td><td>${change}</td></tr>`;
     }).join("")}</tbody></table></div>`;
+}
+
+function onboardingCard(open) {
+  return `<details class="panel onboarding-card" ${open ? "open" : ""}>
+    <summary>第一次使用？三步开始</summary>
+    <div class="panel-body">
+      <div class="eyebrow">PREMIER PAS · 首次使用</div>
+      <h2>三步开始使用 Assay</h2>
+      <ol class="onboarding-steps">
+        <li><strong>运行内置示例</strong><pre>java -jar app/target/assay.jar demo</pre><span>无需 API Key；会跑一条 EchoAdapter 评测，并自动打开本界面。</span></li>
+        <li><strong>查看证据</strong><span>在「运行记录」里点开 demo 运行，查看用例、Trace 和规则检查。</span></li>
+        <li><strong>接入自己的 Agent</strong><span>进入「开始评测」，选择 HTTP 接口，按向导生成配置和运行命令。</span></li>
+      </ol>
+      <div class="form-actions"><button class="button primary" data-section="setup">开始评测 →</button><button class="button secondary" data-section="queue">任务队列</button></div>
+    </div>
+  </details>`;
 }
 
 function overview() {
@@ -175,7 +214,8 @@ function overview() {
   const recent = filteredItems().slice(0, 8);
   const trend = AssayUI.runTrend(items(), 7);
   const health = AssayUI.suiteHealth(items(), 8);
-  return `${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
+  const onboarding = onboardingCard(items().length === 0);
+  return `${onboarding}${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
     <div class="stats">${stat("评测运行", integer(runs.length), "包含基线与候选的独立运行")}
       ${stat("硬门禁通过率", total ? percent((total - failures) / total) : "—", `${integer(total)} 条已记录用例`, "positive")}
       ${stat("硬失败用例", integer(failures), "需要优先关注的执行或门禁失败", failures ? "negative" : "")}
@@ -308,7 +348,7 @@ function stopQueuePolling() {
 
 function listing() {
   const records = filteredItems(state.section);
-  return `${heading(kindName(state.section), "选择一份报告，展开指标、规则结果与原始证据。")}${warnings()}
+  return `${heading(kindName(state.section), sectionHints[state.section] || "选择一份报告，展开指标、规则结果与原始证据。")}${warnings()}
     <section class="panel"><div class="panel-head"><h2>报告记录</h2><span class="count-chip">${records.length} 份</span></div>${artifactTable(records)}</section>`;
 }
 
@@ -451,7 +491,7 @@ async function restoreLocation() {
         } else break;
       }
       if (current().item.kind === "run") {
-        if (["cases", "scenarios", "rules", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
+        if (["cases", "scenarios", "rules", "multi", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
         if (["all", "passed", "warning", "failed"].includes(params.get("filter"))) state.caseFilter = params.get("filter");
         state.caseQuery = (params.get("caseQuery") || "").slice(0, 1000);
         const selected = array(current().payload.results).findIndex((result) => object(result.case).case_id === params.get("case"));
@@ -535,7 +575,7 @@ function scenarioTable(results) {
   if (!groups.size) return empty("没有场景数据");
   return `<div class="table-wrap"><table><thead><tr><th>场景</th><th>样本数</th><th>硬门禁通过率</th><th>95% 置信区间</th><th>软告警</th></tr></thead><tbody>${[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, stats]) => {
     const [low, high] = interval(stats.passed, stats.total);
-    return `<tr><td>${escape(name)}</td><td class="number">${stats.passed} / ${stats.total}</td><td class="positive number">${percent(stats.passed / stats.total)}</td>
+    return `<tr><td>${escape(name)}</td><td class="number">${stats.passed} / ${stats.total}</td><td>${rateCell(stats.passed / stats.total, rateTone(stats.passed / stats.total))}</td>
       <td><svg class="scenario-ci" viewBox="0 0 150 20" role="img" aria-label="${percent(low)} 至 ${percent(high)}"><line x1="5" y1="10" x2="145" y2="10" stroke="var(--line)" stroke-width="3"/><line x1="${5 + low * 140}" y1="10" x2="${5 + high * 140}" y2="10" stroke="var(--chart-good)" stroke-width="4"/><circle cx="${5 + stats.passed / stats.total * 140}" cy="10" r="4" fill="var(--teal)"/></svg><span class="muted">${percent(low)} – ${percent(high)}</span></td><td class="number">${stats.soft}</td></tr>`;
   }).join("")}</tbody></table></div>`;
 }
@@ -585,17 +625,76 @@ function ruleStatsTable(payload) {
   const rows = AssayUI.ruleStats(payload);
   if (!rows.length) return `<div class="panel-body"><p class="muted">本次运行没有规则统计。</p></div>`;
   return `<div class="table-wrap"><table class="rule-stats-table"><thead><tr><th>规则</th><th>层级</th><th>评测数</th><th>通过</th><th>通过率</th><th>缺失</th><th>历史</th></tr></thead><tbody>
-    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td class="number ${row.passRate === null ? "muted" : row.passRate < 1 ? "negative" : "positive"}">${percent(row.passRate)}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td><td><button class="link-button" data-rule-history="${escape(row.name)}">查看趋势</button></td></tr>`).join("")}</tbody></table></div>`;
+    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td>${rateCell(row.passRate, rateTone(row.passRate))}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td><td><button class="link-button" data-rule-history="${escape(row.name)}">查看趋势</button></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function runVerdict(payload, results, failures, soft) {
+  const multi = object(payload.multi_agent);
+  const firstFailure = results.find((result) => result.hard_pass !== true);
+  const status = failures ? "failed" : soft ? "warning" : "passed";
+  const summary = failures
+    ? `${integer(failures)} 条用例硬失败，${integer(soft)} 条软告警。`
+    : soft
+      ? `全部硬门禁通过，但有 ${integer(soft)} 条软告警需要复核。`
+      : "全部硬门禁通过，没有软告警。";
+  const points = [];
+  if (firstFailure) {
+    points.push(`首个失败用例：${escape(object(firstFailure.case).case_id || "—")}`);
+  }
+  if (count(multi.denied_tools)) {
+    points.push(`${integer(multi.denied_tools)} 次工具被全部拒绝`);
+  }
+  if (count(multi.handoffs)) {
+    points.push(`${integer(multi.handoffs)} 次 subagent 交接`);
+  }
+  if (count(multi.max_repeated_step) > 1) {
+    points.push(`最长连续重复步骤：${integer(multi.max_repeated_step)}`);
+  }
+  return `<section class="panel run-verdict ${status}">
+    <div class="run-verdict-head">${badge(status)}<h2>${status === "failed" ? "本次运行未通过" : status === "warning" ? "通过，但有复核信号" : "本次运行通过"}</h2></div>
+    <p>${escape(summary)}</p>
+    ${points.length ? `<ul class="run-verdict-points">${points.map((point) => `<li>${point}</li>`).join("")}</ul>` : ""}
+  </section>`;
+}
+
+function multiAgentPanel(payload) {
+  const multi = object(payload.multi_agent);
+  if (!Object.keys(multi).length) {
+    return `<section class="panel"><div class="panel-body"><p class="muted">本次运行没有多智能体指标。适配器没有上报模型/工具/subagent/权限拒绝事件。</p></div></section>`;
+  }
+  const agents = array(multi.agents);
+  const metrics = [
+    ["总步骤", multi.steps, "Trace 事件数"],
+    ["模型调用", multi.model_calls, "model/call_start"],
+    ["工具调用", multi.tool_calls, "tool/call_start"],
+    ["Agent 交接", multi.handoffs, "subagent_exposed"],
+    ["被拒工具", multi.denied_tools, "all_tools_denied"],
+    ["最长重复", multi.max_repeated_step, "连续相同 module/action"]
+  ];
+  return `<section class="panel">
+    <div class="panel-head"><h2>多智能体行为</h2><span class="muted">来自 Trace 的结构性信号</span></div>
+    <div class="panel-body">
+      <div class="multi-metrics">${metrics.map(([title, value, note]) => `<div class="multi-metric"><span>${escape(title)}</span><strong>${integer(value)}</strong><small>${escape(note)}</small></div>`).join("")}</div>
+      ${agents.length ? `<div class="agent-chips"><span class="muted">参与 Agent</span>${agents.map((agent) => `<span class="agent-chip">${escape(agent)}</span>`).join("")}</div>` : ""}
+      <p class="mini-note">这些计数只描述结构，不直接判断质量；工具漏调、乱序、重复调用和权限拒绝会进入规则与首错证据。</p>
+    </div>
+  </section>`;
 }
 
 function renderRun(context) {
   const payload = context.payload, results = array(payload.results);
   const failures = results.filter((result) => result.hard_pass !== true).length;
   const soft = results.reduce((sum, result) => sum + count(result.soft_warning_count), 0);
-  const header = `${detailHeader(context)}<div class="stats">${stat("用例数量", integer(results.length), payload.suite || "当前数据集")}${stat("硬门禁通过率", results.length ? percent((results.length - failures) / results.length) : "—", `${results.length - failures} 条通过`, "positive")}${stat("硬失败", integer(failures), "规则或执行失败", failures ? "negative" : "")}${stat("复核信号", integer(soft), "软告警与复核候选", soft ? "warning-text" : "")}</div>
-    <div class="tabs" role="tablist" aria-label="运行详情">${[["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["rules", "规则统计"], ["raw", "原始数据"]].map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
+  const multi = object(payload.multi_agent);
+  if (!Object.keys(multi).length && state.tab === "multi") state.tab = "cases";
+  const tabs = [["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["rules", "规则统计"]];
+  if (Object.keys(multi).length) tabs.push(["multi", "多智能体"]);
+  tabs.push(["raw", "原始数据"]);
+  const header = `${detailHeader(context)}${runVerdict(payload, results, failures, soft)}<div class="stats">${stat("用例数量", integer(results.length), payload.suite || "当前数据集")}${stat("硬门禁通过率", results.length ? percent((results.length - failures) / results.length) : "—", `${results.length - failures} 条通过`, "positive")}${stat("硬失败", integer(failures), "规则或执行失败", failures ? "negative" : "")}${stat("复核信号", integer(soft), "软告警与复核候选", soft ? "warning-text" : "")}</div>
+    <div class="tabs" role="tablist" aria-label="运行详情">${tabs.map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
   const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
   if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
+  if (state.tab === "multi") return `${header}<div ${panel}>${multiAgentPanel(payload)}</div>`;
   if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
   if (state.tab === "rules") return `${header}<section class="panel rule-stats-panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div><div class="rule-stats-layout"><div class="rule-stats-main">${ruleStatsTable(payload)}</div><div id="rule-history-panel" class="rule-history-panel" aria-live="polite"><div class="rule-history-empty"><strong>规则历史</strong><p class="muted">选择左侧「查看趋势」，查看同一 suite 最近 20 次运行。</p></div></div></div></section>`;
   return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
@@ -849,8 +948,17 @@ function renderRelease(context) {
   return `${detailHeader(context)}<section class="panel"><div class="panel-head"><h2>发布验证阶段</h2><span class="muted">硬门禁失败后停止后续阶段</span></div><div class="table-wrap"><table><thead><tr><th>阶段</th><th>结果</th><th>用例</th><th>硬失败</th><th>查看</th></tr></thead><tbody>${array(payload.stages).map((stage, index) => `<tr><td>${escape(stage.suite)}</td><td>${badge(stage.status)}</td><td>${integer(stage.case_count)}</td><td>${integer(stage.hard_failures)}</td><td><button class="link-button" data-stage="${index}">运行明细 →</button></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
+function enterPage(sectionChanged) {
+  if (!sectionChanged || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  view.classList.remove("page-enter");
+  void view.offsetWidth;
+  view.classList.add("page-enter");
+}
+
 function render(pushLocation = false) {
   const token = focusToken(document.activeElement);
+  const sectionChanged = lastSection !== state.section;
+  lastSection = state.section;
   disposeSplit();
   stopQueuePolling();
   renderNavigation();
@@ -862,6 +970,7 @@ function render(pushLocation = false) {
       refreshQueue();
       queueTimer = setInterval(refreshQueue, 3000);
     }
+    enterPage(sectionChanged);
     syncLocation(pushLocation); restoreFocus(token);
     return;
   }
@@ -870,6 +979,7 @@ function render(pushLocation = false) {
   if (context.item.kind === "run" && state.tab === "cases") renderCaseRows();
   if (context.item.kind === "audit") renderAuditPatch(context);
   if (context.item.kind === "run" && state.tab === "cases") mountSplit();
+  enterPage(sectionChanged);
   syncLocation(pushLocation); restoreFocus(token);
 }
 
@@ -1054,7 +1164,11 @@ document.addEventListener("keydown", (event) => {
     const position = Math.max(0, Math.min(cases.length - 1, next));
     if (cases[position]) { state.caseIndex = cases[position].index; state.casePage = Math.floor(position / 50); renderCaseRows(); syncLocation(); focusCase(); }
   } else if (event.target.matches('[role="tab"]') && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-    event.preventDefault(); const tabs = ["cases", "scenarios", "rules", "raw"], index = tabs.indexOf(state.tab);
+    event.preventDefault();
+    const tabs = ["cases", "scenarios", "rules"];
+    if (Object.keys(object(current().payload.multi_agent)).length) tabs.push("multi");
+    tabs.push("raw");
+    const index = tabs.indexOf(state.tab);
     state.tab = tabs[event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length];
     render(); $(`tab-${state.tab}`).focus();
   }

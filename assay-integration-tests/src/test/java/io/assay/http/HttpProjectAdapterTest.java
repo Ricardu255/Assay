@@ -4,13 +4,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import io.assay.cli.AssayCli;
 import io.assay.adapters.AdapterLoader;
+import io.assay.cli.AssayCli;
 import io.assay.json.Json;
 import io.assay.model.EvalCase;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.RunContext;
 import io.assay.rules.Rules;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -21,10 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class HttpProjectAdapterTest {
     @TempDir Path root;

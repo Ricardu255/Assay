@@ -9,16 +9,16 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TraceEvent;
-import io.assay.store.file.ResultStore;
 import io.assay.store.Results;
+import io.assay.store.file.ResultStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Observers receive the run/case/batch lifecycle and cannot change the verdict. */
 class EvaluationListenerTest {

@@ -1,6 +1,8 @@
 package io.assay.evolve;
 
+import io.assay.model.Values;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -14,15 +16,15 @@ final class EvolutionSupport {
     }
 
     static double doubleValue(Object value) {
-        return value instanceof Number number ? number.doubleValue() : 0;
+        return Values.numberAsDouble(value);
     }
 
     static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
+        return Values.numberAsInt(value);
     }
 
     static String percent(double value) {
-        return String.format(java.util.Locale.ROOT, "%.1f%%", value * 100);
+        return String.format(Locale.ROOT, "%.1f%%", value * 100);
     }
 
     static Map<String, Integer> coverage(int observed, int total) {
@@ -46,13 +48,11 @@ final class EvolutionSupport {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
-    @SuppressWarnings("unchecked")
     static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 
-    @SuppressWarnings("unchecked")
     static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

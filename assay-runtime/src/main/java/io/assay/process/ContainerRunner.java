@@ -20,7 +20,12 @@ public final class ContainerRunner {
 
     /** The container sandbox configuration. */
     public record Options(
-            String engine, String memory, double cpus, int pidsLimit, boolean networkEnabled, boolean workspaceWritable) {
+            String engine,
+            String memory,
+            double cpus,
+            int pidsLimit,
+            boolean networkEnabled,
+            boolean workspaceWritable) {
 
         public static Options defaults() {
             return new Options("docker", "512m", 1, 128, false, false);
@@ -97,7 +102,8 @@ public final class ContainerRunner {
 
     public static AgentProcessRunner.ProcessResult runAgentContainer(
             String image, List<String> command, Path workspace, Options options, double timeoutSeconds) {
-        return runAgentContainer(image, command, workspace, options, timeoutSeconds, AgentProcessRunner::runAgentProcess);
+        return runAgentContainer(
+                image, command, workspace, options, timeoutSeconds, AgentProcessRunner::runAgentProcess);
     }
 
     public static AgentProcessRunner.ProcessResult runAgentContainer(

@@ -10,12 +10,12 @@ import io.assay.model.NormalizedTrace;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TraceEvent;
 import io.assay.store.file.ResultStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class SuiteRunnerTest {
 

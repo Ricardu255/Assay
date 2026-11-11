@@ -1,17 +1,17 @@
 package io.assay.workspace;
 
 import io.assay.json.Json;
+import io.assay.model.SafePath;
 import io.assay.model.TextCandidate;
 import io.assay.model.TextFileOperation;
-import io.assay.model.SafePath;
 import io.assay.support.AtomicFiles;
 import io.assay.support.ExclusiveFileLock;
 import io.assay.support.Names;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 /**
@@ -163,7 +164,8 @@ public final class TextArtifactWorkspace {
                     operations.add(new TextFileOperation("write", entry.getKey(), entry.getValue(), null));
                 }
             }
-            List<TextFileOperations.Validated> validated = TextFileOperations.validate(asStringMap(current), operations);
+            List<TextFileOperations.Validated> validated =
+                    TextFileOperations.validate(asStringMap(current), operations);
 
             Path manifestPath = target.resolveSibling("artifact-manifest.json");
             if (Files.exists(manifestPath, LinkOption.NOFOLLOW_LINKS)) {
@@ -172,14 +174,14 @@ public final class TextArtifactWorkspace {
                 }
                 Map<String, Object> manifest = Json.parseObject(AtomicFiles.readText(manifestPath));
                 for (Map.Entry<String, Object> entry : manifestContent.entrySet()) {
-                    if (!java.util.Objects.equals(
+                    if (!Objects.equals(
                             Json.normalize(manifest.get(entry.getKey())), Json.normalize(entry.getValue()))) {
                         throw new IllegalArgumentException(
                                 "candidate artifact already exists with different content: " + target);
                     }
                 }
                 if (!Files.isDirectory(target)
-                        || !java.util.Objects.equals(manifest.get("tree_sha256"), treeSha256(target))) {
+                        || !Objects.equals(manifest.get("tree_sha256"), treeSha256(target))) {
                     throw new IllegalArgumentException(
                             "candidate artifact already exists with different content: " + target);
                 }

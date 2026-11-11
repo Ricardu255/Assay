@@ -1,15 +1,18 @@
 package io.assay.model;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
-/** Small numeric coercions shared by the model layer. */
-final class Values {
+/** Small coercions shared by the model layer and the storage backends. */
+public final class Values {
 
     private Values() {
     }
 
-    static double toDouble(Object value, double fallback) {
+    public static double toDouble(Object value, double fallback) {
         if (value instanceof Number number) {
             return number.doubleValue();
         }
@@ -23,7 +26,7 @@ final class Values {
         return fallback;
     }
 
-    static int toInt(Object value, int fallback) {
+    public static int toInt(Object value, int fallback) {
         if (value instanceof Number number) {
             return number.intValue();
         }
@@ -35,6 +38,33 @@ final class Values {
             }
         }
         return fallback;
+    }
+
+    /** Coerces a value to int, treating unparseable values as zero. */
+    public static int toInt(Object value) {
+        return toInt(value, 0);
+    }
+
+    /** Reads a numeric value without parsing strings; non-numbers become zero. */
+    public static int numberAsInt(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    /** Reads a numeric value without parsing strings; non-numbers become zero. */
+    public static double numberAsDouble(Object value) {
+        return value instanceof Number number ? number.doubleValue() : 0;
+    }
+
+    /** Returns the value as a mutable string-keyed map, or an empty map when it is not one. */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> asMap(Object value) {
+        return value instanceof Map<?, ?> ? (Map<String, Object>) value : new LinkedHashMap<>();
+    }
+
+    /** Returns the value as a mutable list, or an empty list when it is not one. */
+    @SuppressWarnings("unchecked")
+    public static List<Object> asList(Object value) {
+        return value instanceof List<?> ? (List<Object>) value : new ArrayList<>();
     }
 
     static double doubleField(Map<String, Object> values, String field, double fallback) {

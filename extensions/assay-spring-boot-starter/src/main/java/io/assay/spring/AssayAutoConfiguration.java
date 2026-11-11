@@ -3,11 +3,9 @@ package io.assay.spring;
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
 import io.assay.model.ProjectAdapter;
-import io.assay.store.file.ResultStore;
 import io.assay.store.Results;
+import io.assay.store.file.ResultStore;
 import io.assay.store.jdbc.JdbcResultStore;
-import java.nio.file.Path;
-import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -16,6 +14,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import java.nio.file.Path;
+import javax.sql.DataSource;
 
 /**
  * Optional Spring Boot wiring for Assay.

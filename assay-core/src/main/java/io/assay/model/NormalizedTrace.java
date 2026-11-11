@@ -1,11 +1,11 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** The framework's stable trace contract, produced by the domain adapter. */
 public record NormalizedTrace(

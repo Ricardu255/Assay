@@ -10,9 +10,11 @@ import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +25,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Serves a browser dashboard on IPv4 loopback, with GET-only report APIs. */
+/**
+ * Serves a browser dashboard on IPv4 loopback.
+ *
+ * <p>Report APIs are GET-only by default; starting with {@code --worker} also enables the job
+ * submission and cancellation POSTs.
+ */
 public final class DashboardServer implements AutoCloseable {
     private static final Map<String, String> STATIC_RESOURCES = Map.of(
             "/", "index.html",
@@ -31,6 +38,7 @@ public final class DashboardServer implements AutoCloseable {
             "/app.js", "app.js",
             "/dashboard-core.js", "dashboard-core.js",
             "/style.css", "style.css",
+            "/paper.css", "paper.css",
             "/theme.js", "theme.js",
             "/theme.css", "theme.css");
     private final HttpServer server;
@@ -52,7 +60,8 @@ public final class DashboardServer implements AutoCloseable {
         catalog = new ArtifactCatalog(output);
         this.jobs = jobs;
         this.storeReference = storeReference;
-        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), port), 32);
+        server = HttpServer.create(
+                new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), port), 32);
         executor = Executors.newFixedThreadPool(4, runnable -> {
             Thread thread = new Thread(runnable, "assay-dashboard");
             thread.setDaemon(true);
@@ -118,7 +127,9 @@ public final class DashboardServer implements AutoCloseable {
                         if (input == null) {
                             throw new IOException("dashboard resource missing: " + name);
                         }
-                        String mime = name.endsWith(".js") ? "text/javascript" : name.endsWith(".css") ? "text/css" : "text/html";
+                        String mime = name.endsWith(".js")
+                                ? "text/javascript"
+                                : name.endsWith(".css") ? "text/css" : "text/html";
                         send(exchange, 200, mime, input.readAllBytes());
                     }
                 } else {
@@ -127,7 +138,8 @@ public final class DashboardServer implements AutoCloseable {
             } catch (NoSuchFileException error) {
                 sendJson(exchange, 404, Map.of("error", "artifact not found"));
             } catch (IllegalArgumentException error) {
-                sendJson(exchange, 400, Map.of("error", error.getMessage() == null ? "invalid artifact" : error.getMessage()));
+                sendJson(exchange, 400, Map.of(
+                        "error", error.getMessage() == null ? "invalid artifact" : error.getMessage()));
             } catch (IOException | RuntimeException error) {
                 sendJson(exchange, 500, Map.of("error", "could not read report artifacts"));
             }
@@ -176,7 +188,8 @@ public final class DashboardServer implements AutoCloseable {
             }
             sendJson(exchange, 404, Map.of("error", "not found"));
         } catch (IllegalArgumentException error) {
-            sendJson(exchange, 400, Map.of("error", error.getMessage() == null ? "invalid request" : error.getMessage()));
+            sendJson(exchange, 400, Map.of(
+                    "error", error.getMessage() == null ? "invalid request" : error.getMessage()));
         } catch (IOException | RuntimeException error) {
             sendJson(exchange, 500, Map.of("error", "could not update job queue"));
         }
@@ -214,7 +227,8 @@ public final class DashboardServer implements AutoCloseable {
             payload.put("run_identity", request.get("run_identity"));
         }
         String runId = request.get("run_id") == null ? "" : String.valueOf(request.get("run_id")).trim();
-        payload.put("run_id", runId.isEmpty() ? "queued-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12) : runId);
+        String generated = "queued-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        payload.put("run_id", runId.isEmpty() ? generated : runId);
         return payload;
     }
 
@@ -235,7 +249,7 @@ public final class DashboardServer implements AutoCloseable {
     private Map<String, Object> jobList(String rawQuery) {
         Map<String, String> query = query(rawQuery);
         int limit = query.containsKey("limit") ? Integer.parseInt(query.get("limit")) : 20;
-        List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        List<Map<String, Object>> rows = new ArrayList<>();
         for (Job job : jobs.list(limit)) {
             rows.add(jobView(job));
         }
@@ -274,7 +288,7 @@ public final class DashboardServer implements AutoCloseable {
     }
 
     private static Map<String, String> query(String raw) {
-        Map<String, String> values = new java.util.LinkedHashMap<>();
+        Map<String, String> values = new LinkedHashMap<>();
         if (raw == null || raw.isEmpty()) {
             return values;
         }
@@ -283,8 +297,8 @@ public final class DashboardServer implements AutoCloseable {
             String key = separator < 0 ? part : part.substring(0, separator);
             String value = separator < 0 ? "" : part.substring(separator + 1);
             values.put(
-                    java.net.URLDecoder.decode(key, StandardCharsets.UTF_8),
-                    java.net.URLDecoder.decode(value, StandardCharsets.UTF_8));
+                    URLDecoder.decode(key, StandardCharsets.UTF_8),
+                    URLDecoder.decode(value, StandardCharsets.UTF_8));
         }
         return values;
     }

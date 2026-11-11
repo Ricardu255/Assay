@@ -1,6 +1,6 @@
 package io.assay.examples;
 
-import java.util.LinkedHashMap;
+import io.assay.model.Values;
 import java.util.Map;
 
 /** Shared coercions for the reference adapters. */
@@ -19,8 +19,7 @@ final class Shared {
         return value == null ? "" : String.valueOf(value);
     }
 
-    @SuppressWarnings("unchecked")
     static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : new LinkedHashMap<>();
+        return Values.asMap(value);
     }
 }

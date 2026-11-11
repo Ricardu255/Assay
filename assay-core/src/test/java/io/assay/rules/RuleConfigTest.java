@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.assay.model.Rule;
+import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /** The rule array shared by the HTTP and trace-file adapters rejects malformed entries. */
 class RuleConfigTest {

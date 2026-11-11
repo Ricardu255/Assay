@@ -2,18 +2,18 @@ package io.assay.model;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.assay.json.Json;
 import io.assay.engine.EvaluationEngine;
+import io.assay.json.Json;
 import io.assay.process.AgentProcessRunner;
 import io.assay.store.file.ResultStore;
 import io.assay.testing.Fixtures;
-import java.util.List;
-import java.util.Map;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 class EvolutionConfigurationTest {
 

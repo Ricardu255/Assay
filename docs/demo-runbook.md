@@ -2,6 +2,16 @@
 
 用于面试、项目答辩或录屏。完整流程约 3 分钟，不需要 API Key，也不会产生外部费用。
 
+> 各页面的白话说明见 [dashboard-guide.md](dashboard-guide.md)。
+
+## 0. 最快路径
+
+```bash
+java -jar app/target/assay.jar demo
+```
+
+它会跑一条内置 EchoAdapter 示例，启动带任务队列的 Dashboard 并打开浏览器，适合先熟悉界面。下面的手工步骤用于展示“基线 → 退化 → BLOCK → 修复 PASS”的完整故事。
+
 ## 1. 构建
 
 ```bash
@@ -83,7 +93,7 @@ java -jar app/target/assay.jar compare \
 java -jar app/target/assay.jar serve --output .assay/demo-runs --open-browser
 ```
 
-在运行页选择 `demo-candidate`，展示：
+运行页和版本对比页的字段含义见 [dashboard-guide.md](dashboard-guide.md#5-版本对比)。选择 `demo-candidate`，展示：
 
 1. 失败用例与硬门禁规则
 2. Trace 步骤卡片，定位第一个失败步骤

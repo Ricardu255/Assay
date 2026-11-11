@@ -1,8 +1,8 @@
 package io.assay.server.config;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Configuration for the optional HTTP server. */
 @ConfigurationProperties(prefix = "assay.server")
@@ -19,6 +19,7 @@ public class AssayServerProperties {
     private long pollMillis = 500;
     private int jobMaxAttempts = 1;
     private List<String> authTokens = new ArrayList<>();
+    private boolean failOnInsecureBinding;
 
     public String getStore() {
         return store;
@@ -106,5 +107,13 @@ public class AssayServerProperties {
 
     public void setAuthTokens(List<String> authTokens) {
         this.authTokens = authTokens == null ? new ArrayList<>() : new ArrayList<>(authTokens);
+    }
+
+    public boolean isFailOnInsecureBinding() {
+        return failOnInsecureBinding;
+    }
+
+    public void setFailOnInsecureBinding(boolean failOnInsecureBinding) {
+        this.failOnInsecureBinding = failOnInsecureBinding;
     }
 }

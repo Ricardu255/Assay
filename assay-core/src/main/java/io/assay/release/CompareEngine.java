@@ -4,6 +4,7 @@ import io.assay.compare.CompareGate;
 import io.assay.engine.CostEstimator;
 import io.assay.evolve.EvolutionEngine;
 import io.assay.model.EvalCase;
+import io.assay.model.Values;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -311,14 +312,12 @@ public final class CompareEngine {
                 : null;
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 
     private static final class Slice {

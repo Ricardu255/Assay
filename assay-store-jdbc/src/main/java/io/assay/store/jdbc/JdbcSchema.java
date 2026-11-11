@@ -4,7 +4,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-/** Creates the portable JDBC schema used by {@link JdbcResultStore}. */
+/** Creates the JDBC schema used by {@link JdbcResultStore} (H2/MySQL/PostgreSQL compatible). */
 final class JdbcSchema {
 
     private JdbcSchema() {

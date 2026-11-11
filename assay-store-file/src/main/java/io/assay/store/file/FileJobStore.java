@@ -11,13 +11,17 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +38,7 @@ import java.util.stream.Stream;
 public final class FileJobStore implements JobStore {
 
     private final Path jobs;
+    private final Path runIndex;
     private final Path lockFile;
     private final RetryPolicy retryPolicy;
 
@@ -43,9 +48,11 @@ public final class FileJobStore implements JobStore {
 
     public FileJobStore(Path root, RetryPolicy retryPolicy) {
         jobs = root.resolve("jobs");
+        runIndex = root.resolve("run-index");
         lockFile = root.resolve(".jobs.lock");
         this.retryPolicy = retryPolicy == null ? RetryPolicy.defaults() : retryPolicy;
         AtomicFiles.createDirectories(jobs);
+        AtomicFiles.createDirectories(runIndex);
     }
 
     @Override
@@ -70,7 +77,69 @@ public final class FileJobStore implements JobStore {
                     JobStatus.QUEUED, payload, 0, maxAttempts, null, null, false, now, null, null, null,
                     key, 0, null);
             write(job);
+            index(job);
             return job;
+        });
+    }
+
+    @Override
+    public Optional<Job> findByRunId(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return Optional.empty();
+        }
+        String wanted = runId.trim();
+        return locked(() -> {
+            Path pointer = indexFile(wanted);
+            if (Files.isRegularFile(pointer)) {
+                Path file = path(AtomicFiles.readText(pointer).trim());
+                if (Files.isRegularFile(file)) {
+                    Job job = read(file);
+                    if (wanted.equals(runId(job))) {
+                        return Optional.of(job);
+                    }
+                }
+            }
+            // Stores created before the index existed fall back to a scan that keeps the newest job
+            // when a run id has more than one job record.
+            Job newest = null;
+            for (Path file : files()) {
+                Job job = read(file);
+                if (wanted.equals(runId(job))
+                        && (newest == null || job.createdAt().isAfter(newest.createdAt()))) {
+                    newest = job;
+                }
+            }
+            return Optional.ofNullable(newest);
+        });
+    }
+
+    /**
+     * Rebuilds the run_id index from the job payloads.
+     *
+     * <p>Useful after upgrading a store created before the index existed, or after removing
+     * index files. Returns the number of indexed jobs.
+     */
+    @Override
+    public int rebuildRunIdIndex() {
+        return locked(() -> {
+            try (Stream<Path> stream = Files.list(runIndex)) {
+                for (Path pointer : stream.toList()) {
+                    Files.deleteIfExists(pointer);
+                }
+            }
+            List<Job> jobs = new ArrayList<>();
+            for (Path file : files()) {
+                Job job = read(file);
+                if (runId(job) != null) {
+                    jobs.add(job);
+                }
+            }
+            // Oldest first so a newer job for the same run id overwrites the pointer.
+            jobs.sort(Comparator.comparing(Job::createdAt));
+            for (Job job : jobs) {
+                index(job);
+            }
+            return jobs.size();
         });
     }
 
@@ -181,7 +250,7 @@ public final class FileJobStore implements JobStore {
 
     @Override
     public List<Job> list(int limit) {
-        int max = Math.max(1, Math.min(500, limit));
+        int max = Math.max(1, Math.min(MAX_LIST_LIMIT, limit));
         return locked(() -> {
             List<Job> jobs = new ArrayList<>();
             for (Path file : files()) {
@@ -295,6 +364,7 @@ public final class FileJobStore implements JobStore {
                 deleted.add(job.id());
                 if (!dryRun) {
                     Files.deleteIfExists(path(job.id()));
+                    unindex(job);
                 }
             }
             return deleted;
@@ -316,6 +386,39 @@ public final class FileJobStore implements JobStore {
 
     private Path path(String jobId) {
         return jobs.resolve(text(jobId, "jobId") + ".json");
+    }
+
+    private Path indexFile(String runId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(runId.getBytes(StandardCharsets.UTF_8));
+            return runIndex.resolve(HexFormat.of().formatHex(digest) + ".job");
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private void index(Job job) throws IOException {
+        String runId = runId(job);
+        if (runId != null) {
+            AtomicFiles.writeText(indexFile(runId), job.id() + "\n");
+        }
+    }
+
+    private void unindex(Job job) throws IOException {
+        String runId = runId(job);
+        if (runId == null) {
+            return;
+        }
+        Path pointer = indexFile(runId);
+        if (Files.isRegularFile(pointer) && job.id().equals(AtomicFiles.readText(pointer).trim())) {
+            Files.deleteIfExists(pointer);
+        }
+    }
+
+    private static String runId(Job job) {
+        Object value = job.payload() == null ? null : job.payload().get("run_id");
+        return value == null ? null : String.valueOf(value);
     }
 
     private Job read(Path file) throws IOException {

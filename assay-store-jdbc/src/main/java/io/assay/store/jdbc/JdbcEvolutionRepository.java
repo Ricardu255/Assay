@@ -34,8 +34,8 @@ final class JdbcEvolutionRepository {
                     update.setString(5, safe);
                     if (update.executeUpdate() == 0) {
                         try (PreparedStatement insert = connection.prepareStatement(
-                                "insert into assay_evolution(experiment_id, candidate_id, decision, result_json, created_at) "
-                                        + "values (?, ?, ?, ?, ?)")) {
+                                "insert into assay_evolution(experiment_id, candidate_id, decision, result_json, "
+                                        + "created_at) values (?, ?, ?, ?, ?)")) {
                             insert.setString(1, safe);
                             insert.setString(2, candidateId);
                             insert.setString(3, decision);

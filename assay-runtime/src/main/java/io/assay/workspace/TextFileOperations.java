@@ -2,7 +2,13 @@ package io.assay.workspace;
 
 import io.assay.model.SafePath;
 import io.assay.model.TextFileOperation;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -90,7 +96,7 @@ public final class TextFileOperations {
         return validated;
     }
 
-    public static void apply(java.nio.file.Path root, List<Validated> operations) {
+    public static void apply(Path root, List<Validated> operations) {
         // Validate public Validated records too; callers can construct them without validate().
         for (Validated validated : operations) {
             resolveFile(root, validated.relativePath());
@@ -99,7 +105,7 @@ public final class TextFileOperations {
             }
         }
         for (Validated validated : operations) {
-            java.nio.file.Path source = resolveFile(root, validated.relativePath());
+            Path source = resolveFile(root, validated.relativePath());
             switch (validated.operation().operation()) {
                 case "write" -> {
                     createParents(source);
@@ -107,51 +113,51 @@ public final class TextFileOperations {
                 }
                 case "delete" -> {
                     try {
-                        java.nio.file.Files.deleteIfExists(source);
-                    } catch (java.io.IOException error) {
-                        throw new java.io.UncheckedIOException(error);
+                        Files.deleteIfExists(source);
+                    } catch (IOException error) {
+                        throw new UncheckedIOException(error);
                     }
                 }
                 default -> {
-                    java.nio.file.Path moved = resolveFile(root, validated.destination());
+                    Path moved = resolveFile(root, validated.destination());
                     createParents(moved);
                     try {
-                        java.nio.file.Files.move(
+                        Files.move(
                                 source,
                                 moved,
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-                    } catch (java.io.IOException error) {
-                        throw new java.io.UncheckedIOException(error);
+                                StandardCopyOption.REPLACE_EXISTING,
+                                StandardCopyOption.ATOMIC_MOVE);
+                    } catch (IOException error) {
+                        throw new UncheckedIOException(error);
                     }
                 }
             }
         }
     }
 
-    private static java.nio.file.Path resolveFile(java.nio.file.Path root, String value) {
-        java.nio.file.Path base = root.toAbsolutePath().normalize();
-        java.nio.file.Path target = base.resolve(safeRelativeFile(value)).normalize();
+    private static Path resolveFile(Path root, String value) {
+        Path base = root.toAbsolutePath().normalize();
+        Path target = base.resolve(safeRelativeFile(value)).normalize();
         if (target.equals(base) || !target.startsWith(base)) {
             throw new IllegalArgumentException("candidate file escapes its workspace: " + value);
         }
-        for (java.nio.file.Path item = target; item != null && item.startsWith(base); item = item.getParent()) {
-            if (java.nio.file.Files.isSymbolicLink(item)) {
+        for (Path item = target; item != null && item.startsWith(base); item = item.getParent()) {
+            if (Files.isSymbolicLink(item)) {
                 throw new IllegalArgumentException("symbolic links are not supported: " + item);
             }
         }
         return target;
     }
 
-    private static void createParents(java.nio.file.Path path) {
-        java.nio.file.Path parent = path.getParent();
+    private static void createParents(Path path) {
+        Path parent = path.getParent();
         if (parent == null) {
             return;
         }
         try {
-            java.nio.file.Files.createDirectories(parent);
-        } catch (java.io.IOException error) {
-            throw new java.io.UncheckedIOException(error);
+            Files.createDirectories(parent);
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
         }
     }
 
@@ -172,7 +178,7 @@ public final class TextFileOperations {
 
     private static String sorted(Set<String> values) {
         List<String> items = new ArrayList<>(values);
-        java.util.Collections.sort(items);
+        Collections.sort(items);
         return items.toString();
     }
 }

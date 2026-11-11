@@ -8,13 +8,13 @@ import io.assay.json.Json;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.FileValueAdapter;
 import io.assay.testing.Fixtures;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The scope-audit slice end to end: read two commits, decide which suites to run, run them against the

@@ -2,10 +2,10 @@ package io.assay.adapters;
 
 import io.assay.engine.AutoEvolutionAdapterFactory;
 import io.assay.engine.ProjectAdapterFactory;
+import io.assay.http.HttpProjectAdapter;
 import io.assay.json.Json;
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.ProjectAdapter;
-import io.assay.http.HttpProjectAdapter;
 import io.assay.trace.TraceFileAdapter;
 import java.io.IOException;
 import java.io.InputStream;

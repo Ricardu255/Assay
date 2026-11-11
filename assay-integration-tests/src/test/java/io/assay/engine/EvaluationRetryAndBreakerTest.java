@@ -10,13 +10,13 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.Rule;
 import io.assay.runner.RetryPolicy;
 import io.assay.store.file.ResultStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** Adapter retries wait for the configured backoff, and an open breaker skips further calls. */
 class EvaluationRetryAndBreakerTest {

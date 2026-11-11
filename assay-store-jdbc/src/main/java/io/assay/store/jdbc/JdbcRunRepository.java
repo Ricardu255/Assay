@@ -76,8 +76,8 @@ final class JdbcRunRepository {
     private void verifyResumeManifest(Connection connection, String runId, Map<String, String> caseManifest)
             throws SQLException {
         Map<String, String> stored = new LinkedHashMap<>();
-        try (PreparedStatement select =
-                connection.prepareStatement("select case_id, content_sha256 from assay_case_manifest where run_id = ?")) {
+        try (PreparedStatement select = connection.prepareStatement(
+                "select case_id, content_sha256 from assay_case_manifest where run_id = ?")) {
             select.setString(1, runId);
             try (ResultSet rows = select.executeQuery()) {
                 while (rows.next()) {
@@ -86,7 +86,8 @@ final class JdbcRunRepository {
             }
         }
         int savedCount;
-        try (PreparedStatement count = connection.prepareStatement("select count(*) from assay_case where run_id = ?")) {
+        try (PreparedStatement count = connection.prepareStatement(
+                "select count(*) from assay_case where run_id = ?")) {
             count.setString(1, runId);
             try (ResultSet rows = count.executeQuery()) {
                 rows.next();

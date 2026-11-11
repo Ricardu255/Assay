@@ -5,6 +5,7 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.Rule;
 import io.assay.model.TraceEvent;
+import io.assay.model.Values;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -76,7 +77,8 @@ public final class Rules {
             return new SequenceResult(false, error.getMessage(), List.of(), List.of());
         }
         if (expectedSteps.isEmpty()) {
-            return new SequenceResult(false, "expected sequence must be a non-empty array", evidence(actualSteps), List.of());
+            return new SequenceResult(
+                    false, "expected sequence must be a non-empty array", evidence(actualSteps), List.of());
         }
         List<StepSpec> flatExpected = flatten(expectedSteps);
         if ("sequence_eq".equals(operator)) {
@@ -547,8 +549,7 @@ public final class Rules {
         return fallback;
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

@@ -13,6 +13,7 @@ import io.assay.model.ProjectAdapter;
 import io.assay.model.RetryableEvolverException;
 import io.assay.model.TextCandidate;
 import io.assay.model.TextFileOperation;
+import io.assay.model.Values;
 import io.assay.store.Results;
 import io.assay.support.ExclusiveFileLock;
 import io.assay.support.Names;
@@ -23,8 +24,10 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -156,7 +159,7 @@ public final class AutoEvolutionLoop {
                     }
                 }
                 if (!values.isEmpty()) {
-                    values.sort(java.util.Comparator.naturalOrder());
+                    values.sort(Comparator.naturalOrder());
                     identity.put(field, values);
                 }
             }
@@ -184,7 +187,7 @@ public final class AutoEvolutionLoop {
                 builder.append(Character.forDigit((item >> 4) & 0xF, 16));
                 builder.append(Character.forDigit(item & 0xF, 16));
             }
-            return builder.toString().toUpperCase(java.util.Locale.ROOT);
+            return builder.toString().toUpperCase(Locale.ROOT);
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-256 is required but unavailable", error);
         }
@@ -196,6 +199,8 @@ public final class AutoEvolutionLoop {
     private static final class EvolverCallBudgetExhausted extends RuntimeException {
     }
 
+    // One round-trip through diagnose/generate/apply/evaluate; split incrementally.
+    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity"})
     private Map<String, Object> runLocked(
             AutoEvolutionAdapter adapter,
             Map<String, List<EvalCase>> datasets,
@@ -256,13 +261,13 @@ public final class AutoEvolutionLoop {
                 return checkpoint;
             }
             currentVersion = String.valueOf(checkpoint.get("current_version"));
-            rounds = new ArrayList<>(asList(checkpoint.get("rounds")));
+            rounds = new ArrayList<>(Values.asList(checkpoint.get("rounds")));
             Object rawPending = checkpoint.get("pending_round");
-            pendingRound = rawPending instanceof Map ? asMap(rawPending) : null;
-            Map<String, Object> storedUsage = asMap(checkpoint.get("usage"));
-            usage.elapsedBefore = doubleValue(storedUsage.get("elapsed_seconds"));
-            usage.evolverCalls = intValue(storedUsage.get("evolver_calls"));
-            usage.evolverRetries = intValue(storedUsage.get("evolver_retries"));
+            pendingRound = rawPending instanceof Map ? Values.asMap(rawPending) : null;
+            Map<String, Object> storedUsage = Values.asMap(checkpoint.get("usage"));
+            usage.elapsedBefore = Values.numberAsDouble(storedUsage.get("elapsed_seconds"));
+            usage.evolverCalls = Values.numberAsInt(storedUsage.get("evolver_calls"));
+            usage.evolverRetries = Values.numberAsInt(storedUsage.get("evolver_retries"));
         } else {
             currentPath = workspace.snapshot(loopId, adapter.baselineArtifact());
             currentVersion = adapter.baselineVersion();
@@ -317,8 +322,8 @@ public final class AutoEvolutionLoop {
                                     "online",
                                     loopId + "-round-" + roundNumber + "-diagnosis",
                                     resume);
-                    if (intValue(diagnosisRun.get("hard_failures")) == 0
-                            && intValue(diagnosisRun.get("soft_warnings")) == 0) {
+                    if (Values.numberAsInt(diagnosisRun.get("hard_failures")) == 0
+                            && Values.numberAsInt(diagnosisRun.get("soft_warnings")) == 0) {
                         return state.save("completed");
                     }
                     if (state.timeExhausted()) {
@@ -384,14 +389,14 @@ public final class AutoEvolutionLoop {
                     state.pendingRound = pending;
                     state.save();
                 } else {
-                    if (intValue(state.pendingRound.get("round")) != roundNumber) {
+                    if (Values.numberAsInt(state.pendingRound.get("round")) != roundNumber) {
                         throw new IllegalArgumentException("checkpoint pending round does not match the next round");
                     }
-                    diagnosisRun = asMap(state.pendingRound.get("diagnosis_run"));
-                    diagnosis = EvolutionDiagnosis.fromJson(asMap(state.pendingRound.get("diagnosis")));
+                    diagnosisRun = Values.asMap(state.pendingRound.get("diagnosis_run"));
+                    diagnosis = EvolutionDiagnosis.fromJson(Values.asMap(state.pendingRound.get("diagnosis")));
                     proposals = new ArrayList<>();
-                    for (Object rawProposal : asList(state.pendingRound.get("proposals"))) {
-                        Map<String, Object> value = asMap(rawProposal);
+                    for (Object rawProposal : Values.asList(state.pendingRound.get("proposals"))) {
+                        Map<String, Object> value = Values.asMap(rawProposal);
                         proposals.add(
                                 new TextCandidate(
                                         String.valueOf(value.getOrDefault("candidate_id", "")),
@@ -399,7 +404,7 @@ public final class AutoEvolutionLoop {
                                         String.valueOf(value.getOrDefault("content", "")),
                                         String.valueOf(value.getOrDefault("summary", "")),
                                         String.valueOf(value.getOrDefault("change_type", "skill")),
-                                        asMap(value.get("metadata")),
+                                        Values.asMap(value.get("metadata")),
                                         stringMap(value.get("files")),
                                         TextFileOperation.listFromJson(value.get("operations"))));
                     }
@@ -412,8 +417,10 @@ public final class AutoEvolutionLoop {
                         !candidateResults.isEmpty()
                                 && "accept".equals(decisionOf(candidateResults.get(candidateResults.size() - 1)));
 
-                List<TextCandidate> remaining =
-                        accepted ? List.of() : proposals.subList(Math.min(candidateResults.size(), proposals.size()), proposals.size());
+                List<TextCandidate> remaining = accepted
+                        ? List.of()
+                        : proposals.subList(
+                                Math.min(candidateResults.size(), proposals.size()), proposals.size());
                 for (TextCandidate candidate : remaining) {
                     if (state.timeExhausted()) {
                         return state.save("time_budget_exhausted");
@@ -479,12 +486,13 @@ public final class AutoEvolutionLoop {
                     return state.save("no_acceptable_candidate");
                 }
 
-                Map<String, Object> lastCandidateResult = asMap(candidateResults.get(candidateResults.size() - 1));
-                Map<String, Object> acceptedImprovement =
-                        asMap(asMap(asMap(lastCandidateResult.get("evaluation")).get("candidate_runs"))
-                                .get("improvement"));
-                if (intValue(acceptedImprovement.get("hard_failures")) == 0
-                        && intValue(acceptedImprovement.get("soft_warnings")) == 0) {
+                Map<String, Object> lastCandidateResult =
+                        Values.asMap(candidateResults.get(candidateResults.size() - 1));
+                Map<String, Object> candidateRuns = Values.asMap(
+                        Values.asMap(lastCandidateResult.get("evaluation")).get("candidate_runs"));
+                Map<String, Object> acceptedImprovement = Values.asMap(candidateRuns.get("improvement"));
+                if (Values.numberAsInt(acceptedImprovement.get("hard_failures")) == 0
+                        && Values.numberAsInt(acceptedImprovement.get("soft_warnings")) == 0) {
                     return state.save("completed");
                 }
             }
@@ -499,7 +507,7 @@ public final class AutoEvolutionLoop {
     }
 
     private static String decisionOf(Object rawCandidateResult) {
-        return String.valueOf(asMap(asMap(rawCandidateResult).get("evaluation")).get("decision"));
+        return String.valueOf(Values.asMap(Values.asMap(rawCandidateResult).get("evaluation")).get("decision"));
     }
 
     /** Mutable bookkeeping shared by the loop body and its budget checks. */
@@ -638,7 +646,7 @@ public final class AutoEvolutionLoop {
 
     private static Map<String, String> stringMap(Object value) {
         Map<String, String> result = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : asMap(value).entrySet()) {
+        for (Map.Entry<String, Object> entry : Values.asMap(value).entrySet()) {
             result.put(entry.getKey(), String.valueOf(entry.getValue()));
         }
         return result;
@@ -649,21 +657,4 @@ public final class AutoEvolutionLoop {
         return value instanceof List ? (List<TextCandidate>) value : List.of();
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
-    }
-
-    private static double doubleValue(Object value) {
-        return value instanceof Number number ? number.doubleValue() : 0;
-    }
-
-    private static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
-    }
 }

@@ -1,63 +1,30 @@
 package io.assay.cli;
 
 import io.assay.adapters.AdapterLoader;
-import io.assay.audit.ScopeAudit;
-import io.assay.audit.ScopeAuditReport;
-import io.assay.autoevolve.AutoEvolutionLoop;
-import io.assay.release.CompareEngine;
-import io.assay.compare.CompareGate;
-import io.assay.diff.DiffAnalysis;
-import io.assay.diff.DiffSnapshot;
 import io.assay.engine.CaseLoader;
 import io.assay.engine.CircuitBreaker;
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
 import io.assay.engine.LlmReviewer;
-import io.assay.evolve.EvolutionEngine;
+import io.assay.execution.Stores;
 import io.assay.json.Json;
 import io.assay.llm.OpenAiCompatibleReviewer;
-import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.EvalCase;
 import io.assay.model.EvaluationBudget;
-import io.assay.model.EvolutionBudget;
-import io.assay.model.EvolutionCandidate;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TestSelection;
-import io.assay.report.CompareReport;
+import io.assay.model.Values;
 import io.assay.report.Reporting;
-import io.assay.review.ReviewSamples;
-import io.assay.runner.Job;
-import io.assay.runner.JobStatus;
-import io.assay.runner.JobStore;
 import io.assay.runner.RetryPolicy;
 import io.assay.selection.TestSelectionService;
 import io.assay.store.Results;
-import io.assay.store.file.FileJobStore;
-import io.assay.store.jdbc.JdbcJobStore;
 import io.assay.support.AtomicFiles;
-import io.assay.workspace.TextArtifactWorkspace;
-import io.assay.web.DashboardServer;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 /**
  * The {@code assay} command line.
@@ -69,8 +36,6 @@ import java.util.stream.Stream;
 public final class AssayCli {
 
     private static final String PROGRAM = "assay";
-    private static final BufferedReader INPUT =
-            new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
 
     @FunctionalInterface
     private interface Handler {
@@ -86,19 +51,20 @@ public final class AssayCli {
     /** Every subcommand in help order; the single source for parsing, dispatch, and usage text. */
     private static final List<Command> COMMANDS = List.of(
             new Command(
-                    new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
+                    new CommandLine.Spec("demo", "run the bundled example and open the dashboard")
                             .option("output", CommandLine.Kind.STRING, ".assay/runs")
-                            .option("port", CommandLine.Kind.INTEGER, "8080")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
-                            .option("worker-id", CommandLine.Kind.STRING, null)
-                            .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
-                            .option("poll", CommandLine.Kind.DECIMAL, "2")
-                            .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
-                            .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
-                            .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
+                            .option("port", CommandLine.Kind.INTEGER, "8080")
+                            .flag("no-open")
+                            .flag("no-serve"),
+                    DemoCommand::run),
+            new Command(
+                    queueOptions(new CommandLine.Spec("serve", "view report artifacts in a local read-only dashboard")
+                                    .option("output", CommandLine.Kind.STRING, ".assay/runs")
+                                    .option("port", CommandLine.Kind.INTEGER, "8080"))
                             .flag("worker")
                             .flag("open-browser"),
-                    AssayCli::serve),
+                    QueueCommands::serve),
             new Command(
                     new CommandLine.Spec("quickstart", "create and run a first HTTP evaluation")
                             .option("endpoint", CommandLine.Kind.STRING, null)
@@ -121,35 +87,28 @@ public final class AssayCli {
                             .option("run-id", CommandLine.Kind.STRING, null)
                             .option("idempotency-key", CommandLine.Kind.STRING, null)
                             .option("max-attempts", CommandLine.Kind.INTEGER, "3"),
-                    AssayCli::submit),
+                    QueueCommands::submit),
             new Command(
-                    new CommandLine.Spec("worker", "execute queued evaluation jobs")
-                            .option("store", CommandLine.Kind.STRING, ".assay/store")
-                            .option("worker-id", CommandLine.Kind.STRING, null)
-                            .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
-                            .option("poll", CommandLine.Kind.DECIMAL, "2")
-                            .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
-                            .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
-                            .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
+                    queueOptions(new CommandLine.Spec("worker", "execute queued evaluation jobs"))
                             .flag("once"),
-                    AssayCli::worker),
+                    QueueCommands::worker),
             new Command(
                     new CommandLine.Spec("jobs", "list queued evaluation jobs")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
                             .option("limit", CommandLine.Kind.INTEGER, "20"),
-                    AssayCli::jobs),
+                    QueueCommands::jobs),
             new Command(
                     new CommandLine.Spec("cancel", "cancel a queued or running job")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
                             .required("job-id", CommandLine.Kind.STRING),
-                    AssayCli::cancelJob),
+                    QueueCommands::cancelJob),
             new Command(
                     new CommandLine.Spec("replay", "replay a failed evaluation job")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
                             .required("job-id", CommandLine.Kind.STRING)
                             .option("max-attempts", CommandLine.Kind.INTEGER, "3")
                             .option("max-replays", CommandLine.Kind.INTEGER, "3"),
-                    AssayCli::replayJob),
+                    QueueCommands::replayJob),
             new Command(
                     new CommandLine.Spec("prune", "delete old runs and terminal job records")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
@@ -158,7 +117,11 @@ public final class AssayCli {
                             .option("keep-runs", CommandLine.Kind.INTEGER, "100")
                             .option("keep-jobs", CommandLine.Kind.INTEGER, "500")
                             .flag("dry-run"),
-                    AssayCli::prune),
+                    QueueCommands::prune),
+            new Command(
+                    new CommandLine.Spec("reindex-jobs", "rebuild the file job run_id index")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store"),
+                    QueueCommands::reindexJobs),
             new Command(
                     runtime(new CommandLine.Spec("run", "run one externally supplied suite"))
                             .required("adapter", CommandLine.Kind.STRING)
@@ -203,7 +166,7 @@ public final class AssayCli {
                             .required("smoke", CommandLine.Kind.STRING)
                             .option("full", CommandLine.Kind.STRING, null)
                             .option("release-id", CommandLine.Kind.STRING, null),
-                    AssayCli::release),
+                    EvolutionCommands::release),
             new Command(
                     new CommandLine.Spec("compare", "compare two stored runs with a flat release gate")
                             .required("baseline", CommandLine.Kind.STRING)
@@ -213,9 +176,11 @@ public final class AssayCli {
                             .option("profile", CommandLine.Kind.STRING, "balanced", "none", "balanced", "strict")
                             .option("format", CommandLine.Kind.STRING, "markdown", "markdown", "json")
                             .option("output", CommandLine.Kind.STRING, null),
-                    AssayCli::compare),
+                    CompareCommand::compare),
             new Command(
-                    runtime(new CommandLine.Spec("evolve", "compare a baseline and candidate across improvement, regression, and holdout"))
+                    runtime(new CommandLine.Spec(
+                                    "evolve",
+                                    "compare a baseline and candidate across improvement, regression, and holdout"))
                             .required("baseline-adapter", CommandLine.Kind.STRING)
                             .option("baseline-adapter-class", CommandLine.Kind.STRING, null)
                             .required("candidate-adapter", CommandLine.Kind.STRING)
@@ -226,9 +191,11 @@ public final class AssayCli {
                             .required("regression", CommandLine.Kind.STRING)
                             .required("holdout", CommandLine.Kind.STRING)
                             .option("experiment-id", CommandLine.Kind.STRING, null),
-                    AssayCli::evolve),
+                    EvolutionCommands::evolve),
             new Command(
-                    runtime(new CommandLine.Spec("evolve-auto", "diagnose, generate, apply, and evaluate text candidates in a sandbox"))
+                    runtime(new CommandLine.Spec(
+                                    "evolve-auto",
+                                    "diagnose, generate, apply, and evaluate text candidates in a sandbox"))
                             .required("auto-adapter", CommandLine.Kind.STRING)
                             .option("adapter-class", CommandLine.Kind.STRING, null)
                             .option("policy", CommandLine.Kind.STRING, null)
@@ -242,7 +209,7 @@ public final class AssayCli {
                             .option("max-elapsed-seconds", CommandLine.Kind.DECIMAL, null)
                             .option("max-evolver-calls", CommandLine.Kind.INTEGER, null)
                             .flag("resume"),
-                    AssayCli::autoEvolve),
+                    EvolutionCommands::autoEvolve),
             new Command(
                     new CommandLine.Spec("review", "store the human final conclusion")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
@@ -256,13 +223,13 @@ public final class AssayCli {
                                     "accepted",
                                     "needs_follow_up")
                             .required("conclusion", CommandLine.Kind.STRING),
-                    AssayCli::review),
+                    ReviewCommands::review),
             new Command(
                     new CommandLine.Spec("export", "export human-confirmed regression or few-shot candidates")
                             .option("store", CommandLine.Kind.STRING, ".assay/store")
                             .required("kind", CommandLine.Kind.STRING, "regression", "few-shot")
                             .required("output", CommandLine.Kind.STRING),
-                    AssayCli::export),
+                    ReviewCommands::export),
             new Command(
                     new CommandLine.Spec("promote-review", "adjudicate one evaluator-Skill review sample")
                             .required("input", CommandLine.Kind.STRING)
@@ -274,11 +241,17 @@ public final class AssayCli {
                                     "PARTIALLY_CORRECT",
                                     "INCORRECT",
                                     "UNRESOLVED")
-                            .required("role", CommandLine.Kind.STRING, "improvement", "regression", "holdout", "pending")
+                            .required(
+                                    "role",
+                                    CommandLine.Kind.STRING,
+                                    "improvement",
+                                    "regression",
+                                    "holdout",
+                                    "pending")
                             .required("conclusion", CommandLine.Kind.STRING)
                             .required("reviewer", CommandLine.Kind.STRING)
                             .option("reviewed-at", CommandLine.Kind.STRING, null),
-                    AssayCli::promoteReview));
+                    ReviewCommands::promoteReview));
 
     private AssayCli() {
     }
@@ -298,7 +271,7 @@ public final class AssayCli {
             System.out.print(CommandLine.usage(PROGRAM, specs()));
             return 0;
         }
-        String[] rest = java.util.Arrays.copyOfRange(argv, 1, argv.length);
+        String[] rest = Arrays.copyOfRange(argv, 1, argv.length);
         try {
             Command selected = select(command);
             if (selected == null) {
@@ -328,74 +301,15 @@ public final class AssayCli {
         return COMMANDS.stream().filter(candidate -> candidate.name().equals(name)).findFirst().orElse(null);
     }
 
-    private static int serve(CommandLine.Namespace args) {
-        JobStore jobs = args.flag("worker") ? jobStore(args) : null;
-        DashboardServer server = null;
-        try {
-            server = startDashboard(args, jobs);
-            Thread shutdown = new Thread(server::close, "assay-dashboard-shutdown");
-            Runtime.getRuntime().addShutdownHook(shutdown);
-            try {
-                System.out.println("dashboard: " + server.uri());
-                System.out.println("reports: " + server.output());
-                if (jobs != null) {
-                    int leaseSeconds = Math.max(1, args.integer("lease-seconds"));
-                    long pollMillis = Math.max(250, Math.round(Math.max(0.25, args.decimal("poll")) * 1000));
-                    String workerId = args.string("worker-id");
-                    if (workerId == null || workerId.isBlank()) {
-                        workerId = "dashboard-worker-" + shortId();
-                    }
-                    String finalWorkerId = workerId;
-                    Thread workerThread = new Thread(
-                            () -> runWorker(jobs, finalWorkerId, leaseSeconds, pollMillis, false),
-                            "assay-dashboard-worker");
-                    workerThread.setDaemon(true);
-                    workerThread.start();
-                    System.out.println("queue worker: " + workerId + " (store: " + args.string("store") + ")");
-                } else {
-                    System.out.println("Read-only local viewer. Use --worker to enable the job queue.");
-                }
-                System.out.println("Press Ctrl+C to stop.");
-                if (args.flag("open-browser")) {
-                    try {
-                        if (!java.awt.Desktop.isDesktopSupported()) throw new UnsupportedOperationException();
-                        java.awt.Desktop.getDesktop().browse(server.uri());
-                    } catch (java.io.IOException | UnsupportedOperationException | SecurityException unavailable) {
-                        System.out.println("Open the dashboard URL above in your browser.");
-                    }
-                }
-                server.await();
-                return 0;
-            } finally {
-                try {
-                    Runtime.getRuntime().removeShutdownHook(shutdown);
-                } catch (IllegalStateException shuttingDown) {
-                    // The hook owns shutdown when the JVM is already stopping.
-                }
-            }
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            return 0;
-        } catch (java.io.IOException error) {
-            throw new IllegalStateException("cannot start dashboard: " + error.getMessage(), error);
-        } finally {
-            if (server != null) {
-                server.close();
-            }
-            if (jobs != null) {
-                jobs.close();
-            }
-        }
-    }
 
-    private static DashboardServer startDashboard(CommandLine.Namespace args, JobStore jobs) throws java.io.IOException {
-        try {
-            return new DashboardServer(args.path("output"), args.integer("port"), jobs, args.string("store"));
-        } catch (java.net.BindException busy) {
-            if (!args.flag("open-browser") || args.integer("port") == 0) throw busy;
-            System.out.println("Requested port is busy; selecting an available local port.");
-            return new DashboardServer(args.path("output"), 0, jobs, args.string("store"));
-        }
+    private static CommandLine.Spec queueOptions(CommandLine.Spec spec) {
+        return spec.option("store", CommandLine.Kind.STRING, ".assay/store")
+                .option("worker-id", CommandLine.Kind.STRING, null)
+                .option("lease-seconds", CommandLine.Kind.INTEGER, "30")
+                .option("poll", CommandLine.Kind.DECIMAL, "2")
+                .option("retry-base-seconds", CommandLine.Kind.DECIMAL, "1")
+                .option("retry-max-seconds", CommandLine.Kind.DECIMAL, "16")
+                .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2");
     }
 
     private static CommandLine.Spec runtime(CommandLine.Spec spec) {
@@ -430,7 +344,7 @@ public final class AssayCli {
         return configured;
     }
 
-    private static EvaluationEngine engineFor(
+    static EvaluationEngine engineFor(
             CommandLine.Namespace args, Results store, String adapterRef, String adapterClass) {
         ProjectAdapter adapter = AdapterLoader.loadProjectAdapter(adapterRef, adapterClass);
         EvaluationBudget budget = new EvaluationBudget(
@@ -438,7 +352,7 @@ public final class AssayCli {
                 args.decimalOrNull("max-cost-usd"),
                 args.integer("reserve-output-tokens"),
                 args.decimal("reserve-cost-usd"));
-        RetryPolicy retryPolicy = retryPolicy(args);
+        RetryPolicy retryPolicy = QueueCommands.retryPolicy(args);
         CircuitBreaker adapterBreaker = breaker(args);
         LlmReviewer reviewer = reviewer(args.flag("use-llm"));
         CircuitBreaker reviewerBreaker = reviewer == null ? CircuitBreaker.disabled() : breaker(args);
@@ -464,389 +378,7 @@ public final class AssayCli {
                 Duration.ofMillis(Math.round(args.decimal("breaker-reset-seconds") * 1000)));
     }
 
-    private static int submit(CommandLine.Namespace args) {
-        try (JobStore store = jobStore(args)) {
-            String idempotencyKey = args.string("idempotency-key");
-            if (idempotencyKey != null) {
-                idempotencyKey = idempotencyKey.trim();
-                if (idempotencyKey.isEmpty()) {
-                    idempotencyKey = null;
-                }
-            }
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("adapter", args.string("adapter"));
-            if (args.string("adapter-class") != null) {
-                payload.put("adapter_class", args.string("adapter-class"));
-            }
-            payload.put("suite", args.string("suite"));
-            payload.put("cases", args.string("cases"));
-            payload.put("store", args.string("store"));
-            payload.put("output", args.string("output"));
-            payload.put("source", args.string("source"));
-            payload.put("workers", args.integer("workers"));
-            payload.put("retries", args.integer("retries"));
-            payload.put("timeout", args.decimal("timeout"));
-            if (args.integerOrNull("max-total-tokens") != null) {
-                payload.put("max_total_tokens", args.integerOrNull("max-total-tokens"));
-            }
-            if (args.decimalOrNull("max-cost-usd") != null) {
-                payload.put("max_cost_usd", args.decimalOrNull("max-cost-usd"));
-            }
-            payload.put("reserve_output_tokens", args.integer("reserve-output-tokens"));
-            payload.put("reserve_cost_usd", args.decimal("reserve-cost-usd"));
-            payload.put("retry_base_seconds", args.decimal("retry-base-seconds"));
-            payload.put("retry_max_seconds", args.decimal("retry-max-seconds"));
-            payload.put("retry_jitter", args.decimal("retry-jitter"));
-            payload.put("breaker_failures", args.integer("breaker-failures"));
-            payload.put("breaker_reset_seconds", args.decimal("breaker-reset-seconds"));
-            payload.put("use_llm", args.flag("use-llm"));
-            payload.put("collect_few_shot", args.flag("collect-few-shot"));
-            if (args.string("run-identity") != null) {
-                payload.put("run_identity", args.string("run-identity"));
-            }
-            String runId = args.string("run-id");
-            if (runId == null || runId.isBlank()) {
-                // A retried idempotent submit must produce the same payload; a random run id would
-                // make the same request look like a conflict.
-                runId = idempotencyKey == null ? "queued-" + shortId() : "queued-" + stableId(idempotencyKey);
-            }
-            payload.put("run_id", runId);
-            Job job = store.submit(idempotencyKey, payload, args.integer("max-attempts"));
-            Map<String, Object> output = new LinkedHashMap<>();
-            output.put("job_id", job.id());
-            output.put("run_id", job.payload().getOrDefault("run_id", runId));
-            output.put("status", job.status().name());
-            if (job.idempotencyKey() != null) {
-                output.put("idempotency_key", job.idempotencyKey());
-            }
-            System.out.println(Json.write(output));
-            return 0;
-        }
-    }
 
-    private static int jobs(CommandLine.Namespace args) {
-        try (JobStore store = jobStore(args)) {
-            List<Map<String, Object>> rows = new ArrayList<>();
-            for (Job job : store.list(args.integer("limit"))) {
-                rows.add(jobMap(job));
-            }
-            System.out.println(Json.write(rows));
-            return 0;
-        }
-    }
-
-    private static int cancelJob(CommandLine.Namespace args) {
-        try (JobStore store = jobStore(args)) {
-            String jobId = args.string("job-id");
-            boolean cancelled = store.cancel(jobId);
-            Map<String, Object> output = new LinkedHashMap<>();
-            output.put("job_id", jobId);
-            output.put("cancelled", cancelled);
-            store.find(jobId).ifPresent(job -> output.put("status", job.status().name()));
-            System.out.println(Json.write(output));
-            return cancelled ? 0 : 1;
-        }
-    }
-
-    private static int replayJob(CommandLine.Namespace args) {
-        try (JobStore store = jobStore(args)) {
-            String jobId = args.string("job-id");
-            Optional<Job> replayed = store.replay(jobId, args.integer("max-attempts"), args.integer("max-replays"));
-            Map<String, Object> output = new LinkedHashMap<>();
-            output.put("job_id", jobId);
-            output.put("replayed", replayed.isPresent());
-            replayed.ifPresent(job -> output.put("status", job.status().name()));
-            replayed.ifPresent(job -> output.put("replay_count", job.replayCount()));
-            System.out.println(Json.write(output));
-            return replayed.isPresent() ? 0 : 1;
-        }
-    }
-
-    private static int prune(CommandLine.Namespace args) {
-        int keepDays = args.integer("keep-days");
-        int keepRuns = args.integer("keep-runs");
-        int keepJobs = args.integer("keep-jobs");
-        if (keepDays < 0 || keepRuns < 0 || keepJobs < 0) {
-            throw new CommandLine.UsageException("prune limits must be non-negative", 2, false);
-        }
-        boolean dryRun = args.flag("dry-run");
-        Instant cutoff = Instant.now().minus(Duration.ofDays(keepDays));
-        List<String> runs;
-        List<String> jobs;
-        try (Results results = Stores.open(args.string("store"));
-                JobStore jobsStore = jobStore(args)) {
-            runs = results.pruneRuns(cutoff, keepRuns, dryRun);
-            jobs = jobsStore.pruneJobs(cutoff, keepJobs, dryRun);
-        }
-        int artifacts = pruneOutputArtifacts(args.path("output"), cutoff, keepRuns, dryRun);
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("cutoff", cutoff.toString());
-        output.put("dry_run", dryRun);
-        output.put("runs", runs);
-        output.put("jobs", jobs);
-        output.put("artifacts", artifacts);
-        System.out.println(Json.write(output));
-        return 0;
-    }
-
-    private static int pruneOutputArtifacts(Path output, Instant cutoff, int keepLatest, boolean dryRun) {
-        if (output == null || !Files.isDirectory(output)) {
-            return 0;
-        }
-        List<Path> directories;
-        try (Stream<Path> stream = Files.list(output)) {
-            directories = stream.filter(Files::isDirectory)
-                    .filter(AssayCli::isRunArtifactDirectory)
-                    .sorted(Comparator.comparing(AssayCli::lastModified).reversed())
-                    .toList();
-        } catch (IOException error) {
-            throw new UncheckedIOException(error);
-        }
-        int deleted = 0;
-        for (int index = keepLatest; index < directories.size(); index++) {
-            Path directory = directories.get(index);
-            if (!lastModified(directory).isBefore(cutoff)) {
-                continue;
-            }
-            deleted++;
-            if (!dryRun) {
-                AtomicFiles.deleteRecursively(directory);
-            }
-        }
-        return deleted;
-    }
-
-    private static Instant lastModified(Path path) {
-        try {
-            return Files.getLastModifiedTime(path).toInstant();
-        } catch (IOException error) {
-            throw new UncheckedIOException(error);
-        }
-    }
-
-    /** A report directory, not an arbitrary directory that happens to live under --output. */
-    private static boolean isRunArtifactDirectory(Path directory) {
-        return Files.isRegularFile(directory.resolve("results.json"))
-                || Files.isRegularFile(directory.resolve("report.md"));
-    }
-
-    private static int worker(CommandLine.Namespace args) {
-        int leaseSeconds = Math.max(1, args.integer("lease-seconds"));
-        long pollMillis = Math.max(250, Math.round(Math.max(0.25, args.decimal("poll")) * 1000));
-        String workerId = args.string("worker-id");
-        if (workerId == null || workerId.isBlank()) {
-            workerId = "worker-" + shortId();
-        }
-        try (JobStore store = jobStore(args)) {
-            return runWorker(store, workerId, leaseSeconds, pollMillis, args.flag("once"));
-        }
-    }
-
-    private static int runWorker(
-            JobStore store, String workerId, int leaseSeconds, long pollMillis, boolean once) {
-        while (true) {
-            Optional<Job> claimed = store.claim(workerId, Duration.ofSeconds(leaseSeconds));
-            if (claimed.isEmpty()) {
-                if (once) {
-                    return 0;
-                }
-                try {
-                    Thread.sleep(pollMillis);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    return 1;
-                }
-                continue;
-            }
-            executeJob(store, claimed.get(), workerId, leaseSeconds);
-            if (once) {
-                return 0;
-            }
-        }
-    }
-
-    private static void executeJob(JobStore store, Job job, String workerId, int leaseSeconds) {
-        Thread execution = Thread.currentThread();
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "assay-worker-heartbeat");
-            thread.setDaemon(true);
-            return thread;
-        });
-        long interval = Math.max(1, leaseSeconds / 3);
-        ScheduledFuture<?> heartbeat = scheduler.scheduleAtFixedRate(() -> {
-            try {
-                if (!store.heartbeat(job.id(), workerId, Duration.ofSeconds(leaseSeconds))
-                        || store.isCancelRequested(job.id())) {
-                    execution.interrupt();
-                }
-            } catch (RuntimeException error) {
-                execution.interrupt();
-            }
-        }, interval, interval, TimeUnit.SECONDS);
-        int code = 1;
-        try {
-            code = run(runArgs(job));
-            if (store.isCancelRequested(job.id())) {
-                store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
-            } else if (code == 0) {
-                store.succeed(job.id(), workerId);
-            } else {
-                store.finish(job.id(), workerId, JobStatus.FAILED, failureReason(job, code));
-            }
-        } catch (RuntimeException error) {
-            if (store.isCancelRequested(job.id())) {
-                store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
-            } else {
-                store.fail(job.id(), workerId, error.getMessage() == null ? error.toString() : error.getMessage());
-            }
-        } finally {
-            heartbeat.cancel(false);
-            scheduler.shutdownNow();
-            Thread.interrupted();
-        }
-        System.out.println("job " + job.id() + " finished with exit code " + code);
-    }
-
-    /** Reads the produced summary so a failed job says why, not only which exit code it returned. */
-    private static String failureReason(Job job, int code) {
-        Object output = job.payload().get("output");
-        Object runId = job.payload().get("run_id");
-        if (output == null || runId == null) {
-            return "exit code " + code;
-        }
-        Path results = Path.of(String.valueOf(output)).resolve(String.valueOf(runId)).resolve("results.json");
-        if (!Files.isRegularFile(results)) {
-            return "exit code " + code;
-        }
-        try {
-            Map<String, Object> summary = Json.parseObject(AtomicFiles.readText(results));
-            String status = String.valueOf(summary.getOrDefault("status", "unknown"));
-            if ("budget_exhausted".equals(status)) {
-                return "run budget_exhausted: skipped "
-                        + summary.getOrDefault("skipped_case_count", 0) + " cases (exit code " + code + ")";
-            }
-            if ("failed".equals(status)) {
-                return "run failed: " + summary.getOrDefault("hard_failures", 0)
-                        + " hard failures (exit code " + code + ")";
-            }
-            return "run status " + status + " (exit code " + code + ")";
-        } catch (RuntimeException malformed) {
-            return "exit code " + code;
-        }
-    }
-
-    private static String[] runArgs(Job job) {
-        Map<String, Object> payload = job.payload();
-        List<String> args = new ArrayList<>(List.of(
-                "run",
-                "--adapter", text(payload, "adapter"),
-                "--suite", text(payload, "suite"),
-                "--cases", text(payload, "cases"),
-                "--store", text(payload, "store"),
-                "--output", text(payload, "output"),
-                "--source", text(payload, "source"),
-                "--workers", String.valueOf(integer(payload, "workers")),
-                "--retries", String.valueOf(integer(payload, "retries")),
-                "--timeout", String.valueOf(decimal(payload, "timeout")),
-                "--run-id", text(payload, "run_id")));
-        if (payload.get("adapter_class") != null) {
-            args.add("--adapter-class");
-            args.add(String.valueOf(payload.get("adapter_class")));
-        }
-        if (Boolean.TRUE.equals(payload.get("use_llm"))) {
-            args.add("--use-llm");
-        }
-        if (Boolean.TRUE.equals(payload.get("collect_few_shot"))) {
-            args.add("--collect-few-shot");
-        }
-        if (payload.get("run_identity") != null) {
-            args.add("--run-identity");
-            args.add(String.valueOf(payload.get("run_identity")));
-        }
-        addOption(args, payload, "max_total_tokens", "--max-total-tokens");
-        addOption(args, payload, "max_cost_usd", "--max-cost-usd");
-        addOption(args, payload, "reserve_output_tokens", "--reserve-output-tokens");
-        addOption(args, payload, "reserve_cost_usd", "--reserve-cost-usd");
-        addOption(args, payload, "retry_base_seconds", "--retry-base-seconds");
-        addOption(args, payload, "retry_max_seconds", "--retry-max-seconds");
-        addOption(args, payload, "retry_jitter", "--retry-jitter");
-        addOption(args, payload, "breaker_failures", "--breaker-failures");
-        addOption(args, payload, "breaker_reset_seconds", "--breaker-reset-seconds");
-        if (job.attempts() > 1) {
-            args.add("--resume");
-        }
-        return args.toArray(String[]::new);
-    }
-
-    private static void addOption(List<String> args, Map<String, Object> payload, String key, String option) {
-        Object value = payload.get(key);
-        if (value != null) {
-            args.add(option);
-            args.add(String.valueOf(value));
-        }
-    }
-
-    private static String text(Map<String, Object> payload, String key) {
-        Object value = payload.get(key);
-        if (value == null || String.valueOf(value).isBlank()) {
-            throw new IllegalArgumentException("job payload is missing " + key);
-        }
-        return String.valueOf(value);
-    }
-
-    private static int integer(Map<String, Object> payload, String key) {
-        Object value = payload.get(key);
-        return value instanceof Number number ? number.intValue() : Integer.parseInt(String.valueOf(value));
-    }
-
-    private static double decimal(Map<String, Object> payload, String key) {
-        Object value = payload.get(key);
-        return value instanceof Number number ? number.doubleValue() : Double.parseDouble(String.valueOf(value));
-    }
-
-    private static JobStore jobStore(CommandLine.Namespace args) {
-        String reference = args.string("store");
-        if (reference == null || reference.isBlank()) {
-            throw new CommandLine.UsageException("queue commands require --store", 2, false);
-        }
-        RetryPolicy retryPolicy = retryPolicy(args);
-        if (reference.startsWith("jdbc:")) {
-            return JdbcJobStore.fromUrl(reference, retryPolicy);
-        }
-        return new FileJobStore(Path.of(reference), retryPolicy);
-    }
-
-    private static RetryPolicy retryPolicy(CommandLine.Namespace args) {
-        Double base = args.decimalOrNull("retry-base-seconds");
-        Double max = args.decimalOrNull("retry-max-seconds");
-        Double jitter = args.decimalOrNull("retry-jitter");
-        if (base == null && max == null && jitter == null) {
-            return RetryPolicy.defaults();
-        }
-        return new RetryPolicy(
-                Duration.ofMillis(Math.round((base == null ? 1 : base) * 1000)),
-                Duration.ofMillis(Math.round((max == null ? 16 : max) * 1000)),
-                jitter == null ? 0.2 : jitter);
-    }
-
-    private static Map<String, Object> jobMap(Job job) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("job_id", job.id());
-        row.put("status", job.status().name());
-        row.put("attempts", job.attempts());
-        row.put("max_attempts", job.maxAttempts());
-        row.put("lease_owner", job.leaseOwner());
-        row.put("lease_expires_at", job.leaseExpiresAt() == null ? null : job.leaseExpiresAt().toString());
-        row.put("cancel_requested", job.cancelRequested());
-        row.put("created_at", job.createdAt().toString());
-        row.put("started_at", job.startedAt() == null ? null : job.startedAt().toString());
-        row.put("finished_at", job.finishedAt() == null ? null : job.finishedAt().toString());
-        row.put("error", job.error());
-        row.put("idempotency_key", job.idempotencyKey());
-        row.put("replay_count", job.replayCount());
-        row.put("next_attempt_at", job.nextAttemptAt() == null ? null : job.nextAttemptAt().toString());
-        return row;
-    }
 
     private static int runSuite(CommandLine.Namespace args) {
         try (Results store = Stores.open(args.string("store"))) {
@@ -859,7 +391,7 @@ public final class AssayCli {
             Reporting.writeRunArtifacts(summary, output);
             printSummary(summary);
             System.out.println("report: " + output.resolve("report.md"));
-            return intValue(summary.get("hard_failures")) > 0
+            return Values.numberAsInt(summary.get("hard_failures")) > 0
                             || "budget_exhausted".equals(summary.get("status"))
                     ? 1
                     : 0;
@@ -894,7 +426,7 @@ public final class AssayCli {
     }
 
     /** Creates the output file's directory when it has one; a bare filename has none. */
-    private static void createParent(Path output) {
+    static void createParent(Path output) {
         Path parent = output.toAbsolutePath().getParent();
         if (parent != null) {
             AtomicFiles.createDirectories(parent);
@@ -902,603 +434,13 @@ public final class AssayCli {
     }
 
     private static int auditScope(CommandLine.Namespace args) {
-        Map<String, Object> specification = Json.parseObject(AtomicFiles.readText(args.path("spec")));
-        DiffSnapshot snapshot =
-                DiffAnalysis.readGitDiff(args.path("repository"), args.string("base"), args.string("target"));
-        boolean useAi = "local".equals(args.string("ai-provider"));
-        OpenAiCompatibleReviewer jsonReviewer = useAi ? OpenAiCompatibleReviewer.fromEnvironment() : null;
-        if (useAi && jsonReviewer == null) {
-            throw new CommandLine.UsageException("--use-llm requires ASSAY_MODEL", 1, false);
-        }
-        TestSelectionService.JsonReviewer selectionReviewer = jsonReviewer;
-        TestSelection selection =
-                TestSelectionService.selectTests(
-                        Path.of("."), "HEAD", args.string("ai-provider"), "auto", selectionReviewer, 0.7, snapshot);
-        Map<String, Object> result = ScopeAudit.auditScope(snapshot, specification, selectionReviewer);
-        result.put("test_selection", selection.toJson());
-
-        Path output =
-                args.path("output") != null
-                        ? args.path("output")
-                        : Path.of(".assay", "audits").resolve(shortId());
-        List<String> missing = new ArrayList<>();
-        List<Map<String, Object>> runs = new ArrayList<>();
-        if (snapshot.files().isEmpty()) {
-            missing.add("The commit comparison contains no changed files.");
-        } else if (args.string("adapter") == null) {
-            missing.add("No ProjectAdapter was supplied; selected regression suites were not executed.");
-        } else {
-            Path repository = args.path("repository").toAbsolutePath().normalize();
-            if (!DiffAnalysis.git(repository, "rev-parse", "HEAD").trim().equals(snapshot.targetCommit())) {
-                missing.add("Tests were not run because the repository HEAD is not the target commit.");
-            } else if (!DiffAnalysis.git(repository, "status", "--porcelain").trim().isEmpty()) {
-                missing.add("Tests were not run because the target checkout has uncommitted files.");
-            } else {
-                Map<String, Path> suitePaths = new LinkedHashMap<>();
-                for (String suite : selection.suites()) {
-                    suitePaths.put(suite, args.path(suite));
-                }
-                List<String> available = new ArrayList<>();
-                for (Map.Entry<String, Path> entry : suitePaths.entrySet()) {
-                    if (entry.getValue() == null) {
-                        missing.add("Selected " + entry.getKey() + " suite has no case file.");
-                    } else {
-                        available.add(entry.getKey());
-                    }
-                }
-                if (!available.isEmpty()) {
-                    try (Results store = Stores.open(
-                            args.provided("store") ? args.string("store") : output.resolve("store").toString())) {
-                        EvaluationEngine engine =
-                                new EvaluationEngine(
-                                        AdapterLoader.loadProjectAdapter(args.string("adapter"), args.string("adapter-class")),
-                                        store,
-                                        null,
-                                        args.integer("workers"),
-                                        args.integer("retries"),
-                                        args.decimal("timeout"),
-                                        false,
-                                        snapshot.targetCommit());
-                        for (String suite : available) {
-                            try {
-                                Map<String, Object> summary =
-                                        engine.runSuite(
-                                                CaseLoader.loadCases(suitePaths.get(suite), suite),
-                                                suite,
-                                                "online",
-                                                "scope-" + shortId() + "-" + suite,
-                                                false);
-                                Reporting.writeRunArtifacts(summary, output.resolve("tests").resolve(suite));
-                                Map<String, Object> run = new LinkedHashMap<>();
-                                run.put("suite", suite);
-                                run.put("status", summary.get("status"));
-                                run.put("case_count", summary.get("case_count"));
-                                run.put("hard_failures", summary.get("hard_failures"));
-                                run.put("report_path", "tests/" + suite + "/report.md");
-                                runs.add(run);
-                            } catch (RuntimeException error) {
-                                missing.add(
-                                        "Selected " + suite + " suite could not run: "
-                                                + error.getClass().getSimpleName() + ": " + error.getMessage());
-                            }
-                        }
-                    } catch (RuntimeException error) {
-                        missing.add(
-                                "Regression execution unavailable: " + error.getClass().getSimpleName() + ": "
-                                        + error.getMessage());
-                    }
-                }
-            }
-        }
-
-        String testStatus;
-        if (runs.isEmpty()) {
-            testStatus = "not_run";
-        } else if (runs.stream().anyMatch(run -> "failed".equals(run.get("status")))) {
-            testStatus = "failed";
-        } else if (runs.size() < selection.suites().size()) {
-            testStatus = "partial";
-        } else {
-            testStatus = "passed";
-        }
-        Map<String, Object> tests = new LinkedHashMap<>();
-        tests.put("status", testStatus);
-        tests.put("runs", runs);
-        tests.put("selected_suites", selection.suites());
-        result.put("tests", tests);
-
-        for (Object warning : asList(result.get("warnings"))) {
-            missing.add(String.valueOf(warning));
-        }
-        if (selection.humanReviewRequired()) {
-            missing.addAll(selection.reviewReasons());
-        }
-        if (String.valueOf(result.get("requirement")).isEmpty() || asList(result.get("acceptance_criteria")).isEmpty()) {
-            missing.add("Requirement and acceptance criteria must be specific enough for scope judgment.");
-        }
-        for (Object rawFinding : asList(result.get("findings"))) {
-            if (asMap(rawFinding).get("line") == null) {
-                missing.add("Some changed files have no source line evidence (binary or metadata-only change).");
-                break;
-            }
-        }
-        List<String> uncovered = new ArrayList<>();
-        for (String item : missing) {
-            if (!uncovered.contains(item)) {
-                uncovered.add(item);
-            }
-        }
-        result.put("uncovered_risks", uncovered);
-
-        List<Object> findings = asList(result.get("findings"));
-        String conclusion;
-        if (findings.stream()
-                .anyMatch(finding -> "clear_out_of_scope".equals(asMap(finding).get("status"))
-                        && "rules".equals(asMap(finding).get("source")))) {
-            conclusion = "clear_out_of_scope";
-        } else if (findings.stream()
-                        .anyMatch(finding -> List.of("clear_out_of_scope", "suspected_out_of_scope")
-                                .contains(asMap(finding).get("status")))
-                || "failed".equals(testStatus)) {
-            conclusion = "review_required";
-        } else if (findings.stream().anyMatch(finding -> "insufficient_evidence".equals(asMap(finding).get("status")))
-                || !uncovered.isEmpty()
-                || !"passed".equals(testStatus)) {
-            conclusion = "insufficient_evidence";
-        } else {
-            conclusion = "no_obvious_issue";
-        }
-        result.put("conclusion", conclusion);
-        ScopeAuditReport.writeArtifacts(result, output, snapshot.rawDiff());
-        Map<String, Object> printed = new LinkedHashMap<>();
-        printed.put("conclusion", conclusion);
-        printed.put("tests", testStatus);
-        System.out.println(Json.write(printed));
-        System.out.println("report: " + output.resolve("report.md"));
-        if ("no_obvious_issue".equals(conclusion)) {
-            return 0;
-        }
-        return "clear_out_of_scope".equals(conclusion) ? 1 : 2;
+        return AuditScopeCommand.run(args);
     }
 
-    private static int compare(CommandLine.Namespace args) {
-        if (args.provided("config") && args.provided("profile")) {
-            throw new CommandLine.UsageException("use either --config or --profile, not both", 2, false);
-        }
-        CompareGate gate = args.path("config") != null
-                ? CompareGate.fromFile(args.path("config"))
-                : CompareGate.profile(args.string("profile"));
-        String baselineRef = args.string("baseline");
-        String candidateRef = args.string("candidate");
-        Map<String, Object> baselineSummary;
-        Map<String, Object> candidateSummary;
-        Results store = null;
-        try {
-            if (needsStore(baselineRef) || needsStore(candidateRef)) {
-                store = Stores.open(args.string("store"));
-            }
-            baselineSummary = loadCompareSummary(baselineRef, store);
-            candidateSummary = loadCompareSummary(candidateRef, store);
-        } finally {
-            if (store != null) {
-                store.close();
-            }
-        }
 
-        Map<String, Object> report =
-                CompareEngine.compare(baselineRef, candidateRef, baselineSummary, candidateSummary, gate);
-        String markdown = CompareReport.markdown(report);
-        String json = Json.write(report, 2) + "\n";
-        Path output = args.path("output");
-        if (output != null) {
-            if (isDirectoryOutput(args.string("output"), output)) {
-                AtomicFiles.createDirectories(output);
-                Path markdownPath = output.resolve("report.md");
-                Path jsonPath = output.resolve("compare.json");
-                AtomicFiles.writeText(markdownPath, markdown);
-                AtomicFiles.writeText(jsonPath, json);
-                Map<String, Object> printed = new LinkedHashMap<>();
-                printed.put("status", asMap(report.get("gate")).get("status"));
-                printed.put("report", markdownPath.toString());
-                printed.put("artifact", jsonPath.toString());
-                System.out.println(Json.write(printed));
-            } else {
-                createParent(output);
-                AtomicFiles.writeText(output, "json".equals(args.string("format")) ? json : markdown);
-                Map<String, Object> printed = new LinkedHashMap<>();
-                printed.put("status", asMap(report.get("gate")).get("status"));
-                printed.put("report", output.toString());
-                System.out.println(Json.write(printed));
-            }
-        } else {
-            System.out.print("json".equals(args.string("format")) ? json : markdown);
-        }
-        return "BLOCK".equals(asMap(report.get("gate")).get("status")) ? 1 : 0;
-    }
-
-    /**
-     * A trailing separator or an existing directory means "writer folder"; an extension means "file".
-     *
-     * <p>The folder form writes both artifacts: the Markdown report for a person and
-     * {@code compare.json} for the dashboard catalog.
-     */
-    private static boolean isDirectoryOutput(String reference, Path path) {
-        if (Files.isDirectory(path)) {
-            return true;
-        }
-        if (reference != null && (reference.endsWith("/") || reference.endsWith("\\"))) {
-            return true;
-        }
-        Path name = path.getFileName();
-        return name == null || !name.toString().contains(".");
-    }
-
-    /**
-     * Reads a comparison input from a {@code results.json} file, a run directory, or a stored run id.
-     *
-     * <p>The file path is the portable form: a report can be compared on a machine that never had the
-     * original store. A run id is the convenient form when both runs live in the same local store.
-     */
-    private static Map<String, Object> loadCompareSummary(String reference, Results store) {
-        Path path;
-        try {
-            path = Path.of(reference);
-        } catch (RuntimeException invalidPath) {
-            path = null;
-        }
-        if (path != null && Files.isDirectory(path)) {
-            path = path.resolve("results.json");
-        }
-        if (path != null && Files.isRegularFile(path)) {
-            Map<String, Object> summary = Json.parseObject(AtomicFiles.readText(path));
-            if (!(summary.get("results") instanceof List<?>)) {
-                throw new IllegalArgumentException("comparison input has no results array: " + path);
-            }
-            return summary;
-        }
-        if (store == null) {
-            throw new IllegalArgumentException("cannot read comparison input: " + reference);
-        }
-        List<Map<String, Object>> results = store.listResults(reference);
-        if (results.isEmpty()) {
-            throw new IllegalArgumentException("run has no stored cases: " + reference);
-        }
-        return summaryFromResults(reference, results);
-    }
-
-    private static boolean needsStore(String reference) {
-        try {
-            Path path = Path.of(reference);
-            return !Files.isDirectory(path) && !Files.isRegularFile(path);
-        } catch (RuntimeException invalidPath) {
-            return true;
-        }
-    }
-
-    private static Map<String, Object> summaryFromResults(String reference, List<Map<String, Object>> results) {
-        String runId = reference;
-        String suite = "custom";
-        String source = "online";
-        int hardFailures = 0;
-        int softWarnings = 0;
-        List<Object> rows = new ArrayList<>(results.size());
-        for (Map<String, Object> result : results) {
-            rows.add(result);
-            if (result.get("run_id") != null) {
-                runId = String.valueOf(result.get("run_id"));
-            }
-            if (result.get("suite") != null) {
-                suite = String.valueOf(result.get("suite"));
-            }
-            if (result.get("source") != null) {
-                source = String.valueOf(result.get("source"));
-            }
-            if (!Boolean.TRUE.equals(result.get("hard_pass"))) {
-                hardFailures++;
-            }
-            softWarnings += intValue(result.get("soft_warning_count"));
-        }
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("run_id", runId);
-        summary.put("suite", suite);
-        summary.put("source", source);
-        summary.put("status", hardFailures == 0 ? "passed" : "failed");
-        summary.put("case_count", results.size());
-        summary.put("hard_failures", hardFailures);
-        summary.put("soft_warnings", softWarnings);
-        summary.put("results", rows);
-        return summary;
-    }
-
-    private static int release(CommandLine.Namespace args) {
-        List<EvaluationEngine.SuiteCases> suites = new ArrayList<>();
-        suites.add(new EvaluationEngine.SuiteCases("regression", CaseLoader.loadCases(args.path("regression"), "regression")));
-        suites.add(new EvaluationEngine.SuiteCases("smoke", CaseLoader.loadCases(args.path("smoke"), "smoke")));
-        if (args.path("full") != null) {
-            suites.add(new EvaluationEngine.SuiteCases("full", CaseLoader.loadCases(args.path("full"), "full")));
-        }
-        Map<String, Object> release;
-        try (Results store = Stores.open(args.string("store"))) {
-            release = engineFor(args, store, args.string("adapter"), args.string("adapter-class"))
-                    .runRelease(suites, args.string("source"), args.string("release-id"));
-        }
-        Path output = args.path("output").resolve(String.valueOf(release.get("release_id")));
-        AtomicFiles.createDirectories(output);
-        for (Object rawStage : asList(release.get("stages"))) {
-            Map<String, Object> stage = asMap(rawStage);
-            Reporting.writeRunArtifacts(stage, output.resolve(String.valueOf(stage.get("suite"))));
-        }
-        AtomicFiles.writeText(output.resolve("release.json"), Json.write(release, 2));
-        Map<String, Object> printed = new LinkedHashMap<>();
-        printed.put("release_id", release.get("release_id"));
-        printed.put("status", release.get("status"));
-        System.out.println(Json.write(printed));
-        System.out.println("release: " + output.resolve("release.json"));
-        return "failed".equals(release.get("status")) || "budget_exhausted".equals(release.get("status")) ? 1 : 0;
-    }
-
-    private static int evolve(CommandLine.Namespace args) {
-        Map<String, List<EvalCase>> datasets = new LinkedHashMap<>();
-        datasets.put("improvement", CaseLoader.loadCases(args.path("improvement"), "improvement"));
-        datasets.put("regression", CaseLoader.loadCases(args.path("regression"), "regression"));
-        datasets.put("holdout", CaseLoader.loadCases(args.path("holdout"), "holdout"));
-        EvolutionCandidate change = EvolutionEngine.loadCandidate(args.path("candidate"));
-        Map<String, Object> result;
-        try (Results store = Stores.open(args.string("store"))) {
-            result =
-                    new EvolutionEngine(
-                                    engineFor(
-                                            args,
-                                            store,
-                                            args.string("baseline-adapter"),
-                                            args.string("baseline-adapter-class")),
-                                    engineFor(
-                                            args,
-                                            store,
-                                            args.string("candidate-adapter"),
-                                            args.string("candidate-adapter-class")),
-                                    EvolutionEngine.loadPolicy(args.path("policy")))
-                            .run(change, datasets, args.string("source"), args.string("experiment-id"), false);
-        }
-        Path output = args.path("output").resolve(String.valueOf(result.get("experiment_id")));
-        Reporting.writeEvolutionArtifacts(result, output);
-        for (String role : List.of("improvement", "regression", "holdout")) {
-            Reporting.writeRunArtifacts(asMap(asMap(result.get("baseline_runs")).get(role)), output.resolve("baseline").resolve(role));
-            Reporting.writeRunArtifacts(asMap(asMap(result.get("candidate_runs")).get(role)), output.resolve("candidate").resolve(role));
-        }
-        Map<String, Object> printed = new LinkedHashMap<>();
-        printed.put("experiment_id", result.get("experiment_id"));
-        printed.put("candidate_id", change.candidateId());
-        printed.put("decision", result.get("decision"));
-        System.out.println(Json.write(printed));
-        System.out.println("evolution: " + output.resolve("evolution_report.md"));
-        return "accept".equals(result.get("decision")) ? 0 : 1;
-    }
-
-    private static int autoEvolve(CommandLine.Namespace args) {
-        Map<String, List<EvalCase>> datasets = new LinkedHashMap<>();
-        datasets.put("improvement", CaseLoader.loadCases(args.path("improvement"), "improvement"));
-        datasets.put("regression", CaseLoader.loadCases(args.path("regression"), "regression"));
-        datasets.put("holdout", CaseLoader.loadCases(args.path("holdout"), "holdout"));
-        AutoEvolutionAdapter adapter =
-                AdapterLoader.loadAutoEvolutionAdapter(args.string("auto-adapter"), args.string("adapter-class"));
-        Map<String, Object> result;
-        try (Results store = Stores.open(args.string("store"))) {
-            result =
-                    new AutoEvolutionLoop(
-                                    store,
-                                    new TextArtifactWorkspace(args.path("workspace")),
-                                    EvolutionEngine.loadPolicy(args.path("policy")),
-                                    args.integer("workers"),
-                                    args.integer("retries"),
-                                    args.decimal("timeout"))
-                            .run(
-                                    adapter,
-                                    datasets,
-                                    new EvolutionBudget(
-                                            args.integer("max-rounds"),
-                                            args.integer("max-candidates-per-round"),
-                                            args.decimalOrNull("max-elapsed-seconds"),
-                                            args.integerOrNull("max-evolver-calls")),
-                                    args.string("loop-id"),
-                                    args.string("source"),
-                                    args.flag("resume"));
-        }
-        Path output = args.path("output").resolve(String.valueOf(result.get("loop_id")));
-        Reporting.writeAutoEvolutionArtifacts(result, output);
-        for (Object rawRound : asList(result.get("rounds"))) {
-            Map<String, Object> round = asMap(rawRound);
-            for (Object rawCandidate : asList(round.get("candidates"))) {
-                Map<String, Object> candidate = asMap(rawCandidate);
-                Map<String, Object> evaluation = asMap(candidate.get("evaluation"));
-                Path candidateOutput =
-                        output.resolve("rounds")
-                                .resolve(String.valueOf(round.get("round")))
-                                .resolve(String.valueOf(asMap(evaluation.get("candidate")).get("candidate_id")));
-                Reporting.writeEvolutionArtifacts(evaluation, candidateOutput);
-            }
-        }
-        Map<String, Object> printed = new LinkedHashMap<>();
-        printed.put("loop_id", result.get("loop_id"));
-        printed.put("status", result.get("status"));
-        printed.put("current_version", result.get("current_version"));
-        System.out.println(Json.write(printed));
-        System.out.println("auto evolution: " + output.resolve("auto_evolution_report.md"));
-        return "completed".equals(result.get("status")) ? 0 : 1;
-    }
-
-    private static int review(CommandLine.Namespace args) {
-        try (Results store = Stores.open(args.string("store"))) {
-            store.saveReview(
-                    args.string("run-id"), args.string("case-id"), args.string("decision"), args.string("conclusion"));
-        }
-        System.out.println("human conclusion saved");
-        return 0;
-    }
-
-    private static int export(CommandLine.Namespace args) {
-        String kind = args.string("kind");
-        String decision = "regression".equals(kind) ? "confirmed_badcase" : "accepted";
-        List<Map<String, Object>> results;
-        try (Results store = Stores.open(args.string("store"))) {
-            results = store.listReviewedResults(decision);
-        }
-        List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> result : results) {
-            if ("regression".equals(kind)) {
-                Map<String, Object> evalCase = asMap(result.get("case"));
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("id", evalCase.get("case_id"));
-                row.put("scenario", evalCase.get("scenario"));
-                row.put("input", evalCase.get("payload"));
-                row.put("expected", evalCase.get("expected"));
-                row.put("metadata", evalCase.get("metadata"));
-                row.put("human_final_conclusion", result.get("human_final_conclusion"));
-                rows.add(row);
-            } else if (!asMap(result.get("few_shot_candidate")).isEmpty()) {
-                Map<String, Object> row = new LinkedHashMap<>(asMap(result.get("few_shot_candidate")));
-                row.put("status", "human_accepted");
-                row.put("human_final_conclusion", result.get("human_final_conclusion"));
-                rows.add(row);
-            }
-        }
-        Path output = args.path("output");
-        createParent(output);
-        StringBuilder builder = new StringBuilder();
-        for (Map<String, Object> row : rows) {
-            builder.append(Json.write(row)).append('\n');
-        }
-        AtomicFiles.writeText(output, builder.toString());
-        System.out.println("exported " + rows.size() + " records to " + output);
-        return 0;
-    }
-
-    private static int promoteReview(CommandLine.Namespace args) {
-        String content = AtomicFiles.readText(args.path("input")).trim();
-        if (content.isEmpty()) {
-            throw new IllegalArgumentException("review input is empty");
-        }
-        Map<String, Object> record = Json.parseObject(content);
-        Path output = args.path("output");
-        if (Files.exists(output)) {
-            String recordId = String.valueOf(
-                    record.get("id") != null ? record.get("id") : record.get("case_id"));
-            for (String line : AtomicFiles.readText(output).split("\n", -1)) {
-                if (line.isBlank()) {
-                    continue;
-                }
-                Map<String, Object> existing = Json.parseObject(line);
-                String existingId = String.valueOf(
-                        existing.get("id") != null ? existing.get("id") : existing.get("case_id"));
-                if (existingId.equals(recordId)) {
-                    record = existing;
-                    break;
-                }
-            }
-        }
-        Map<String, Object> promoted =
-                ReviewSamples.promoteReviewRecord(
-                        record,
-                        args.string("outcome"),
-                        args.string("conclusion"),
-                        args.string("role"),
-                        args.string("reviewer"),
-                        args.string("reviewed-at"));
-        ReviewSamples.writeReviewRecord(output, promoted);
-        Object id = promoted.get("id") != null ? promoted.get("id") : promoted.get("case_id");
-        System.out.println("promoted " + id + " to " + output);
-        return 0;
-    }
 
     private static int quickstart(CommandLine.Namespace args) {
-        System.out.println("Assay quickstart - answer a few questions, then the report opens.");
-        String endpoint = args.string("endpoint");
-        if (endpoint == null || endpoint.isBlank()) {
-            endpoint = ask("Agent HTTP endpoint", "");
-        }
-        if (endpoint == null || endpoint.isBlank()) {
-            throw new CommandLine.UsageException("endpoint is required", 2, false);
-        }
-        String outputPath = args.provided("output-path")
-                ? args.string("output-path")
-                : ask("JSON field containing the answer", "output");
-        String keyword = args.provided("keyword")
-                ? args.string("keyword")
-                : ask("Expected keyword in the answer", "hello");
-        if (outputPath == null || outputPath.isBlank() || keyword == null || keyword.isBlank()) {
-            throw new CommandLine.UsageException("output-path and keyword must be non-empty", 2, false);
-        }
-        Path dir = args.path("dir");
-        AtomicFiles.createDirectories(dir);
-        Path config = dir.resolve("my-agent.http.json");
-        Path cases = dir.resolve("cases.jsonl");
-
-        Map<String, Object> gate = new LinkedHashMap<>();
-        gate.put("name", "answer");
-        gate.put("actual", "final_output");
-        gate.put("operator", "contains");
-        gate.put("expected", "keyword");
-        Map<String, Object> http = new LinkedHashMap<>();
-        http.put("type", "http");
-        http.put("name", "my-agent");
-        http.put("endpoint", endpoint);
-        http.put("output_path", outputPath);
-        if (args.string("events-path") != null && !args.string("events-path").isBlank()) {
-            http.put("events_path", args.string("events-path"));
-        }
-        http.put("hard_gates", List.of(gate));
-        AtomicFiles.writeText(config, Json.write(http, 2) + "\n");
-
-        Object request;
-        try {
-            request = Json.parseObject(args.string("request"));
-        } catch (RuntimeException error) {
-            throw new CommandLine.UsageException("request must be a JSON object", 2, false);
-        }
-        List<String> lines = new ArrayList<>();
-        for (int index = 1; index <= 3; index++) {
-            Map<String, Object> evalCase = new LinkedHashMap<>();
-            evalCase.put("id", "Q-" + index);
-            evalCase.put("input", request);
-            evalCase.put("expected", Map.of("keyword", keyword));
-            lines.add(Json.write(evalCase));
-        }
-        AtomicFiles.writeText(cases, String.join("\n", lines) + "\n");
-        System.out.println("Created " + config.toAbsolutePath());
-        System.out.println("Created " + cases.toAbsolutePath());
-        if (args.flag("generate-only")) {
-            System.out.println("Next: java -jar app/target/assay.jar run --adapter " + config
-                    + " --suite quickstart --cases " + cases);
-            return 0;
-        }
-
-        System.out.println("Running the first evaluation...");
-        int code = run(new String[] {
-            "run",
-            "--adapter", config.toString(),
-            "--suite", "quickstart",
-            "--cases", cases.toString(),
-            "--store", ".assay/store",
-            "--output", ".assay/runs",
-            "--workers", String.valueOf(args.integer("workers")),
-            "--timeout", String.valueOf(args.decimal("timeout"))
-        });
-        if (args.flag("no-serve")) {
-            return code;
-        }
-        System.out.println("Opening the report dashboard. Press Ctrl+C to stop.");
-        return run(new String[] {"serve", "--output", ".assay/runs", "--open-browser"});
-    }
-
-    private static String ask(String label, String fallback) {
-        System.out.print(label + (fallback.isEmpty() ? "" : " [" + fallback + "]") + ": ");
-        System.out.flush();
-        try {
-            String line = INPUT.readLine();
-            return line == null || line.isBlank() ? fallback : line.trim();
-        } catch (IOException error) {
-            throw new UncheckedIOException(error);
-        }
+        return QuickstartCommand.run(args);
     }
 
     private static void printSummary(Map<String, Object> summary) {
@@ -1507,29 +449,4 @@ public final class AssayCli {
         System.out.println(Json.write(printed));
     }
 
-    private static String shortId() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-    }
-
-    /** Stable 12-hex-character id derived from an idempotency key, not from wall-clock state. */
-    private static String stableId(String key) {
-        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8))
-                .toString()
-                .replace("-", "")
-                .substring(0, 12);
-    }
-
-    private static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
-    }
 }

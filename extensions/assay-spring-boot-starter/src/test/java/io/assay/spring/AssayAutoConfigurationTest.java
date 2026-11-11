@@ -6,20 +6,20 @@ import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
 import io.assay.model.EvalCase;
 import io.assay.model.ProjectAdapter;
-import io.assay.store.file.ResultStore;
 import io.assay.store.Results;
+import io.assay.store.file.ResultStore;
 import io.assay.store.jdbc.JdbcResultStore;
+import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
-import org.h2.jdbcx.JdbcDataSource;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.springframework.boot.autoconfigure.AutoConfigurations;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 /** The starter wires existing Assay types without taking over the agent adapter. */
 class AssayAutoConfigurationTest {

@@ -43,6 +43,25 @@ class EvaluationSettingsTest {
     }
 
     @Test
+    void builderAppliesDefaultsAndOverrides() {
+        EvaluationSettings settings = EvaluationSettings.builder()
+                .workers(4)
+                .retries(2)
+                .timeoutSeconds(5.5)
+                .collectFewShot(true)
+                .runIdentity("adapter-v2")
+                .build();
+
+        assertEquals(4, settings.workers());
+        assertEquals(2, settings.retries());
+        assertEquals(5.5, settings.timeoutSeconds());
+        assertEquals(true, settings.collectFewShot());
+        assertEquals("adapter-v2", settings.runIdentity());
+        assertSame(EvaluationListener.NOOP, settings.listener());
+        assertFalse(settings.budget().enabled());
+    }
+
+    @Test
     void defaultsCarriesTheGivenValues() {
         EvaluationSettings settings = EvaluationSettings.defaults(4, 2, 5.5, true, "adapter-v2");
 

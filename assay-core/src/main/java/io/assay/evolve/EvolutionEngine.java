@@ -9,6 +9,7 @@ import io.assay.model.MetricObjective;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,7 +66,7 @@ public final class EvolutionEngine {
             }
         }
         if (!missing.isEmpty()) {
-            missing.sort(java.util.Comparator.naturalOrder());
+            missing.sort(Comparator.naturalOrder());
             throw new IllegalArgumentException(
                     "evolution datasets require: " + String.join(", ", missing));
         }

@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.model.EvaluationBudget;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
+import java.util.Map;
 
 /** The ledger must reserve before a call and never treat missing usage as zero. */
 class BudgetLedgerTest {

@@ -1,5 +1,6 @@
 package io.assay.report;
 
+import io.assay.model.Values;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,9 +51,8 @@ public final class RuleStats {
         return rows;
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
     private static final class Stat {

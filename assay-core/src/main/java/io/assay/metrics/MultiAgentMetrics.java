@@ -74,7 +74,8 @@ public record MultiAgentMetrics(
             maxRepeated = Math.max(maxRepeated, repeated);
         }
         return new MultiAgentMetrics(
-                trace.events().size(), modelCalls, toolCalls, handoffs, deniedTools, maxRepeated, agents.stream().toList());
+                trace.events().size(), modelCalls, toolCalls, handoffs, deniedTools, maxRepeated,
+                agents.stream().toList());
     }
 
     /** The metrics as a JSON-shaped map, suitable for a report or trace field. */

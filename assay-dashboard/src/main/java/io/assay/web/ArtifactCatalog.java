@@ -2,10 +2,12 @@ package io.assay.web;
 
 import io.assay.json.Json;
 import io.assay.model.SafePath;
+import io.assay.model.Values;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
@@ -13,9 +15,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
@@ -151,7 +154,7 @@ public final class ArtifactCatalog {
             default -> payload.getOrDefault("requirement", relative);
         });
         Object status = "compare".equals(kind)
-                ? String.valueOf(gate.getOrDefault("status", "unknown")).toLowerCase(java.util.Locale.ROOT)
+                ? String.valueOf(gate.getOrDefault("status", "unknown")).toLowerCase(Locale.ROOT)
                 : payload.getOrDefault(
                         "decision", payload.getOrDefault("conclusion", payload.getOrDefault("status", "unknown")));
         fields.put("status", status);
@@ -162,7 +165,8 @@ public final class ArtifactCatalog {
             fields.put("hard_failures", candidate.get("hard_failures"));
             fields.put("soft_warnings", candidate.get("soft_warning_count"));
         } else {
-            for (String field : List.of("suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
+            for (String field : List.of(
+                    "suite", "source", "case_count", "hard_failures", "soft_warnings", "current_version")) {
                 fields.put(field, payload.get(field));
             }
         }
@@ -204,9 +208,8 @@ public final class ArtifactCatalog {
         return name == null || String.valueOf(name).isBlank() ? fallback : String.valueOf(name);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
     /** Never-null file-name view: Path.getFileName() returns null for root and empty paths. */
     private static String fileName(Path path) {
@@ -226,7 +229,8 @@ public final class ArtifactCatalog {
         String text = readText(patch, 8L * 1024 * 1024);
         String digest;
         try {
-            digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+            digest = HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -263,13 +267,14 @@ public final class ArtifactCatalog {
             }
         }
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !path.toRealPath().startsWith(root)) {
-            throw new java.nio.file.NoSuchFileException(fileName(path));
+            throw new NoSuchFileException(fileName(path));
         }
     }
 
     private String readText(Path path, long maxBytes) throws IOException {
         if (Files.size(path) > maxBytes) {
-            throw new IllegalArgumentException("artifact exceeds the " + (maxBytes / 1024 / 1024) + " MiB viewer limit");
+            throw new IllegalArgumentException(
+                    "artifact exceeds the " + (maxBytes / 1024 / 1024) + " MiB viewer limit");
         }
         return Files.readString(path, StandardCharsets.UTF_8);
     }

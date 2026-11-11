@@ -1,9 +1,9 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import io.assay.support.Immutable;
 
 /** One evaluation case supplied by the domain project. */
 public record EvalCase(
@@ -64,8 +64,7 @@ public record EvalCase(
         return value == null ? "" : String.valueOf(value).trim();
     }
 
-    @SuppressWarnings("unchecked")
     static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 }

@@ -9,11 +9,11 @@ import io.assay.model.EvalCase;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
 import io.assay.report.CompareReport;
+import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
 
 /** The comparison report: transitions, scenario slices, estimates, and the gate verdict. */
 class CompareEngineTest {

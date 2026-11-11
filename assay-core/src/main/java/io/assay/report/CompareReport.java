@@ -1,7 +1,9 @@
 package io.assay.report;
 
+import io.assay.model.Values;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -63,7 +65,7 @@ public final class CompareReport {
             for (Object raw : violations) {
                 Map<String, Object> violation = asMap(raw);
                 lines.add("- [" + String.valueOf(violation.get("severity"))
-                        .toUpperCase(java.util.Locale.ROOT) + "] `"
+                        .toUpperCase(Locale.ROOT) + "] `"
                         + violation.get("rule") + "`: actual "
                         + renderActual(violation.get("rule"), violation.get("actual"))
                         + ", threshold "
@@ -201,11 +203,11 @@ public final class CompareReport {
             case RATE -> percent(value);
             case INTEGER -> String.valueOf(value);
             case MS -> value instanceof Number number
-                    ? String.format(java.util.Locale.ROOT, "%.1f ms", number.doubleValue())
+                    ? String.format(Locale.ROOT, "%.1f ms", number.doubleValue())
                     : DASH;
             case USD -> usd(value);
             case NUMBER -> value instanceof Number number
-                    ? String.format(java.util.Locale.ROOT, "%.1f", number.doubleValue())
+                    ? String.format(Locale.ROOT, "%.1f", number.doubleValue())
                     : DASH;
         };
     }
@@ -220,7 +222,7 @@ public final class CompareReport {
             case INTEGER -> Fmt.signedInt((int) numberValue);
             case MS -> Fmt.signedFixed1(numberValue) + " ms";
             case USD -> (numberValue >= 0 ? "+$" : "-$")
-                    + String.format(java.util.Locale.ROOT, "%.6f", Math.abs(numberValue));
+                    + String.format(Locale.ROOT, "%.6f", Math.abs(numberValue));
             case NUMBER -> Fmt.signedFixed1(numberValue);
         };
     }
@@ -269,7 +271,7 @@ public final class CompareReport {
         }
         return number.doubleValue() == number.intValue()
                 ? String.valueOf(number.intValue())
-                : String.format(java.util.Locale.ROOT, "%.2f", number.doubleValue());
+                : String.format(Locale.ROOT, "%.2f", number.doubleValue());
     }
 
     private static String percent(Object value) {
@@ -282,13 +284,13 @@ public final class CompareReport {
 
     private static String usd(Object value) {
         return value instanceof Number number
-                ? String.format(java.util.Locale.ROOT, "$%.6f", number.doubleValue())
+                ? String.format(Locale.ROOT, "$%.6f", number.doubleValue())
                 : DASH;
     }
 
     private static String number(Object value) {
         return value instanceof Number number
-                ? String.format(java.util.Locale.ROOT, "%.1f", number.doubleValue())
+                ? String.format(Locale.ROOT, "%.1f", number.doubleValue())
                 : DASH;
     }
 
@@ -311,13 +313,11 @@ public final class CompareReport {
         return value == null ? "unknown" : String.valueOf(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 }

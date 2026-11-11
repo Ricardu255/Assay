@@ -1,8 +1,8 @@
 package io.assay.agentscope;
 
-import io.assay.model.NormalizedTrace;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentEventEmitter;
+import io.assay.model.NormalizedTrace;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;

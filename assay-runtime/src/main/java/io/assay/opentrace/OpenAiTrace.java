@@ -3,6 +3,7 @@ package io.assay.opentrace;
 import io.assay.json.Json;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
+import io.assay.model.Values;
 import io.assay.support.AtomicFiles;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -532,9 +533,8 @@ public final class OpenAiTrace {
         return String.valueOf(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
     private record Duration(double milliseconds, Double start, Double end) {

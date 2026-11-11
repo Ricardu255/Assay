@@ -8,14 +8,14 @@ import io.assay.runner.JobStatus;
 import io.assay.store.Results;
 import io.assay.store.file.FileJobStore;
 import io.assay.store.file.ResultStore;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class JobRunQueueTest {
 
@@ -58,6 +58,25 @@ class JobRunQueueTest {
         } finally {
             first.close();
             second.close();
+            jobs.close();
+        }
+    }
+
+    @Test
+    void findsAQueuedJobByRunId(@TempDir Path root) {
+        FileJobStore jobs = new FileJobStore(root);
+        try (JobRunQueue queue = new JobRunQueue(
+                jobs, () -> new ResultStore(root), new SuiteRunner(), RunOptions.defaults(),
+                root.resolve("reports"), 0, Duration.ofSeconds(10), 25, 1)) {
+            RunSpec spec = new RunSpec(
+                    "io.assay.execution.SuiteRunnerTestAdapter", null, "cases.jsonl", "smoke", "online",
+                    "queued-run", "queued-run", false);
+
+            queue.submit(spec, null);
+
+            assertTrue(queue.findJobByRunId("queued-run").isPresent());
+            assertTrue(queue.findJobByRunId("missing-run").isEmpty());
+        } finally {
             jobs.close();
         }
     }

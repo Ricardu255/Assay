@@ -10,14 +10,14 @@ import io.assay.diff.DiffSnapshot;
 import io.assay.selection.TestSelectionService;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.Fixtures;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Scope auditing: what the rules decide on their own, and what a model is allowed to add.

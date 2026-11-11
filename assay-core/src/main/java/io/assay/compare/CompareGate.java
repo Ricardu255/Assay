@@ -2,11 +2,13 @@ package io.assay.compare;
 
 import io.assay.json.Json;
 import io.assay.json.Jsonable;
+import io.assay.model.Values;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -209,6 +211,23 @@ public record CompareGate(
         List<GateViolation> violations = new ArrayList<>();
         Map<String, Object> estimated = estimatedEfficiency == null ? Map.of() : estimatedEfficiency;
 
+        checkCompleteness(violations, baselineIncomplete, candidateIncomplete);
+        checkSamplesAndPassRate(violations, baselineMetrics, candidateMetrics);
+        checkRegressions(violations, transitions);
+        checkLatency(violations, candidateMetrics);
+        checkEfficiency(violations, candidateMetrics, estimated);
+        checkRulePassRates(violations, candidateMetrics);
+
+        boolean blocked = violations.stream().anyMatch(item -> "block".equals(item.severity()));
+        boolean warned = violations.stream().anyMatch(item -> "warning".equals(item.severity()));
+        String status = blocked ? "BLOCK" : warned ? "WARNING" : "PASS";
+        return new GateOutcome(status, violations);
+    }
+
+    private void checkCompleteness(
+            List<GateViolation> violations,
+            boolean baselineIncomplete,
+            boolean candidateIncomplete) {
         if (baselineIncomplete) {
             violations.add(block(
                     "run_completeness",
@@ -223,31 +242,25 @@ public record CompareGate(
                     "complete",
                     "Candidate run did not execute every case; comparison is unsafe."));
         }
+    }
 
+    private void checkSamplesAndPassRate(
+            List<GateViolation> violations,
+            Map<String, Object> baselineMetrics,
+            Map<String, Object> candidateMetrics) {
         int caseCount = intValue(candidateMetrics.get("case_count"));
         if (caseCount < minimumSamples) {
             violations.add(block(
                     "minimum_samples",
                     caseCount,
                     minimumSamples,
-                    "Candidate has " + caseCount + " cases; at least " + minimumSamples + " are required."));
+                    "Candidate has " + caseCount + " cases; at least " + minimumSamples
+                            + " are required."));
         }
 
         Double passRate = number(candidateMetrics.get("hard_pass_rate"));
         if (minimumHardPassRate != null) {
-            if (passRate == null) {
-                violations.add(block(
-                        "minimum_hard_pass_rate",
-                        null,
-                        minimumHardPassRate,
-                        "Candidate hard pass rate is unavailable."));
-            } else if (passRate < minimumHardPassRate) {
-                violations.add(block(
-                        "minimum_hard_pass_rate",
-                        passRate,
-                        minimumHardPassRate,
-                        "Candidate hard pass rate is below the required minimum."));
-            }
+            checkMinimumHardPassRate(violations, passRate);
         }
 
         Double baselinePassRate = number(baselineMetrics.get("hard_pass_rate"));
@@ -261,7 +274,25 @@ public record CompareGate(
                         "Candidate hard pass rate dropped further than allowed."));
             }
         }
+    }
 
+    private void checkMinimumHardPassRate(List<GateViolation> violations, Double passRate) {
+        if (passRate == null) {
+            violations.add(block(
+                    "minimum_hard_pass_rate",
+                    null,
+                    minimumHardPassRate,
+                    "Candidate hard pass rate is unavailable."));
+        } else if (passRate < minimumHardPassRate) {
+            violations.add(block(
+                    "minimum_hard_pass_rate",
+                    passRate,
+                    minimumHardPassRate,
+                    "Candidate hard pass rate is below the required minimum."));
+        }
+    }
+
+    private void checkRegressions(List<GateViolation> violations, Map<String, Object> transitions) {
         int regressions = intValue(transitions.get("regressed_count"));
         if (maximumTaskRegressions != null && regressions > maximumTaskRegressions) {
             violations.add(violation(
@@ -272,14 +303,17 @@ public record CompareGate(
         }
 
         int criticalRegressions = countCriticalRegressions(transitions);
-        if (maximumCriticalTaskRegressions != null && criticalRegressions > maximumCriticalTaskRegressions) {
+        if (maximumCriticalTaskRegressions != null
+                && criticalRegressions > maximumCriticalTaskRegressions) {
             violations.add(block(
                     "maximum_critical_task_regressions",
                     criticalRegressions,
                     maximumCriticalTaskRegressions,
                     "Candidate regressed more critical cases than allowed."));
         }
+    }
 
+    private void checkLatency(List<GateViolation> violations, Map<String, Object> candidateMetrics) {
         checkUpperBound(
                 violations,
                 "maximum_average_latency_ms",
@@ -294,11 +328,17 @@ public record CompareGate(
                 number(candidateMetrics.get("p95_latency_ms")),
                 null,
                 "Candidate P95 latency");
+    }
 
+    private void checkEfficiency(
+            List<GateViolation> violations,
+            Map<String, Object> candidateMetrics,
+            Map<String, Object> estimated) {
         Map<String, Object> efficiency = asMap(candidateMetrics.get("efficiency"));
         Double totalTokens = number(efficiency.get("mean_total_tokens"));
         Double cost = number(efficiency.get("mean_cost_usd"));
-        Double estimatedTokens = useEstimatedMetrics ? number(estimated.get("mean_total_tokens")) : null;
+        Double estimatedTokens =
+                useEstimatedMetrics ? number(estimated.get("mean_total_tokens")) : null;
         Double estimatedCost = useEstimatedMetrics ? number(estimated.get("mean_cost_usd")) : null;
         checkUpperBound(
                 violations,
@@ -314,7 +354,10 @@ public record CompareGate(
                 cost,
                 estimatedCost,
                 "Candidate mean cost");
+    }
 
+    private void checkRulePassRates(
+            List<GateViolation> violations, Map<String, Object> candidateMetrics) {
         Map<String, Object> ruleStats = asMap(candidateMetrics.get("rule_stats"));
         for (Map.Entry<String, Double> entry : minimumRulePassRates.entrySet()) {
             Map<String, Object> rule = asMap(ruleStats.get(entry.getKey()));
@@ -341,11 +384,6 @@ public record CompareGate(
                         "Rule `" + entry.getKey() + "` is below the required pass rate."));
             }
         }
-
-        boolean blocked = violations.stream().anyMatch(item -> "block".equals(item.severity()));
-        boolean warned = violations.stream().anyMatch(item -> "warning".equals(item.severity()));
-        String status = blocked ? "BLOCK" : warned ? "WARNING" : "PASS";
-        return new GateOutcome(status, violations);
     }
 
     private void checkUpperBound(
@@ -377,7 +415,7 @@ public record CompareGate(
             }
             return;
         }
-        violations.add(missing(rule, threshold, label.toLowerCase(java.util.Locale.ROOT)));
+        violations.add(missing(rule, threshold, label.toLowerCase(Locale.ROOT)));
     }
 
     private GateViolation block(String rule, Object actual, Object threshold, String message) {
@@ -412,7 +450,7 @@ public record CompareGate(
     }
 
     private static String estimate(double value) {
-        return String.format(java.util.Locale.ROOT, "%.4f", value);
+        return String.format(Locale.ROOT, "%.4f", value);
     }
 
     @Override
@@ -515,16 +553,14 @@ public record CompareGate(
     }
 
     private static int intValue(Object value) {
-        return value instanceof Number number ? number.intValue() : 0;
+        return Values.numberAsInt(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
-        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+        return Values.asMap(value);
     }
 
-    @SuppressWarnings("unchecked")
     private static List<Object> asList(Object value) {
-        return value instanceof List ? (List<Object>) value : List.of();
+        return Values.asList(value);
     }
 }

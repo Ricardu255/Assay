@@ -1,9 +1,13 @@
 package io.assay.execution;
 
+import io.assay.json.Json;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
 import io.assay.store.Results;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -32,7 +36,7 @@ import java.util.function.Supplier;
  */
 public final class JobRunQueue implements AutoCloseable {
 
-    private static final int LIST_LIMIT = 1000;
+    private static final System.Logger LOGGER = System.getLogger(JobRunQueue.class.getName());
 
     private final JobStore jobs;
     private final Supplier<Results> stores;
@@ -106,17 +110,7 @@ public final class JobRunQueue implements AutoCloseable {
 
     /** Finds the job that owns a run id, so a queued run can be reported before it starts. */
     public Optional<Job> findJobByRunId(String runId) {
-        if (runId == null || runId.isBlank()) {
-            return Optional.empty();
-        }
-        String wanted = runId.trim();
-        for (Job job : jobs.list(LIST_LIMIT)) {
-            Object value = job.payload() == null ? null : job.payload().get("run_id");
-            if (value != null && wanted.equals(String.valueOf(value))) {
-                return Optional.of(job);
-            }
-        }
-        return Optional.empty();
+        return jobs.findByRunId(runId);
     }
 
     /** Lists durable jobs (newest first when the store orders them). */
@@ -148,15 +142,22 @@ public final class JobRunQueue implements AutoCloseable {
     }
 
     private void pollLoop() {
+        int consecutiveFailures = 0;
         while (!closed.get()) {
             try {
                 if (!runOnce()) {
                     Thread.sleep(pollMillis);
                 }
+                consecutiveFailures = 0;
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 return;
             } catch (RuntimeException failure) {
+                if (consecutiveFailures++ == 0) {
+                    LOGGER.log(System.Logger.Level.WARNING, "job worker loop failed; retrying", failure);
+                } else {
+                    LOGGER.log(System.Logger.Level.DEBUG, "job worker loop still failing; retrying", failure);
+                }
                 try {
                     Thread.sleep(pollMillis);
                 } catch (InterruptedException interrupted) {
@@ -171,17 +172,28 @@ public final class JobRunQueue implements AutoCloseable {
         String jobId = job.id();
         Thread worker = Thread.currentThread();
         AtomicBoolean cancelled = new AtomicBoolean();
-        ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(threadFactory("assay-job-heartbeat"));
+        ScheduledExecutorService heartbeat =
+                Executors.newSingleThreadScheduledExecutor(threadFactory("assay-job-heartbeat"));
         long beatMillis = Math.max(1, lease.toMillis() / 3);
         ScheduledFuture<?> beat = heartbeat.scheduleAtFixedRate(() -> {
             try {
-                if (!jobs.heartbeat(jobId, workerId, lease) || jobs.isCancelRequested(jobId)) {
-                    cancelled.set(true);
-                    worker.interrupt();
+                if (!jobs.heartbeat(jobId, workerId, lease)) {
+                    LOGGER.log(System.Logger.Level.WARNING, "job {0} lost its lease; stopping worker", jobId);
+                    stopWorker(worker, cancelled);
+                    return;
+                }
+                if (jobs.isCancelRequested(jobId)) {
+                    LOGGER.log(System.Logger.Level.INFO, "job {0} cancellation requested", jobId);
+                    stopWorker(worker, cancelled);
                 }
             } catch (RuntimeException failure) {
-                cancelled.set(true);
-                worker.interrupt();
+                // A transient store failure must not turn a healthy run into a terminal cancellation.
+                // The next tick retries; if the lease really expires, another worker reclaims the job.
+                LOGGER.log(
+                        System.Logger.Level.WARNING,
+                        "job {0} heartbeat failed; will retry",
+                        jobId,
+                        failure);
             }
         }, beatMillis, beatMillis, TimeUnit.MILLISECONDS);
         try {
@@ -195,6 +207,11 @@ public final class JobRunQueue implements AutoCloseable {
             if (cancelled.get() || jobs.isCancelRequested(jobId)) {
                 jobs.finish(jobId, workerId, JobStatus.CANCELLED, "cancelled");
             } else {
+                LOGGER.log(
+                        System.Logger.Level.WARNING,
+                        "job {0} failed: {1}",
+                        jobId,
+                        describe(failure));
                 jobs.fail(jobId, workerId, describe(failure));
             }
         } finally {
@@ -206,13 +223,17 @@ public final class JobRunQueue implements AutoCloseable {
 
     private void writeSummary(RunExecution execution) {
         try {
-            java.nio.file.Path dir = execution.reportDir();
-            java.nio.file.Files.createDirectories(dir);
-            java.nio.file.Files.writeString(
-                    dir.resolve("run-summary.json"), io.assay.json.Json.write(execution.summary()));
-        } catch (java.io.IOException error) {
-            throw new java.io.UncheckedIOException(error);
+            Path dir = execution.reportDir();
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve("run-summary.json"), Json.write(execution.summary()));
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
         }
+    }
+
+    private static void stopWorker(Thread worker, AtomicBoolean cancelled) {
+        cancelled.set(true);
+        worker.interrupt();
     }
 
     private static String describe(RuntimeException failure) {

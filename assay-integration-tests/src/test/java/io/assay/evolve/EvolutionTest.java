@@ -13,8 +13,8 @@ import io.assay.model.EvolutionCandidate;
 import io.assay.model.EvolutionPolicy;
 import io.assay.model.MetricObjective;
 import io.assay.model.NormalizedTrace;
-import io.assay.model.QualityGate;
 import io.assay.model.ProjectAdapter;
+import io.assay.model.QualityGate;
 import io.assay.model.Rule;
 import io.assay.model.ScenarioGate;
 import io.assay.model.TraceEvent;
@@ -22,13 +22,13 @@ import io.assay.report.Reporting;
 import io.assay.store.file.ResultStore;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.Fixtures;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /** The accept / reject / rollback decision, and the evidence each one records. */
 class EvolutionTest {
