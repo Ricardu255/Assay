@@ -2,6 +2,7 @@ package io.assay.agentscope;
 
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AgentEventType;
 import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.AgentStartEvent;
 import io.agentscope.core.event.AllToolsDeniedEvent;
@@ -12,8 +13,11 @@ import io.agentscope.core.event.SubagentExposedEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultState;
+import io.agentscope.core.model.ChatUsage;
 import io.assay.metrics.MultiAgentMetrics;
 import io.assay.model.NormalizedTrace;
 import io.assay.model.TraceEvent;
@@ -57,7 +61,13 @@ public final class AgentScopeTraceAdapter {
             if (resolvedTraceId == null && event.getId() != null) {
                 resolvedTraceId = event.getId();
             }
-            switch (event.getType()) {
+            AgentEventType type = event.getType();
+            if (type == null) {
+                mapped.add(new TraceEvent(
+                        "agent", "unknown_event", "ok", 0, null, fields("event_id", event.getId())));
+                continue;
+            }
+            switch (type) {
                 case AGENT_START -> {
                     AgentStartEvent start = (AgentStartEvent) event;
                     sessionId = start.getSessionId();
@@ -77,7 +87,7 @@ public final class AgentScopeTraceAdapter {
                     AgentResultEvent result = (AgentResultEvent) event;
                     Msg message = result.getResult();
                     if (message != null) {
-                        finalOutput = message.getTextContent();
+                        finalOutput = textOf(message);
                     }
                     mapped.add(new TraceEvent(
                             "agent", "result", "ok", 0, null,
@@ -92,7 +102,7 @@ public final class AgentScopeTraceAdapter {
                     ModelCallEndEvent call = (ModelCallEndEvent) event;
                     mapped.add(new TraceEvent(
                             "model", "call_end", "ok", 0, null,
-                            fields("reply_id", call.getReplyId(), "usage", call.getUsage())));
+                            fields("reply_id", call.getReplyId(), "usage", usageMap(call.getUsage()))));
                 }
                 case TOOL_CALL_START -> {
                     ToolCallStartEvent call = (ToolCallStartEvent) event;
@@ -139,7 +149,7 @@ public final class AgentScopeTraceAdapter {
                                     : denied.getDeniedToolCalls().size())));
                 }
                 default -> mapped.add(new TraceEvent(
-                        defaultModule(event), event.getType().getValue().toLowerCase(Locale.ROOT), "ok", 0, null,
+                        defaultModule(type), type.getValue().toLowerCase(Locale.ROOT), "ok", 0, null,
                         fields("event_id", event.getId())));
             }
         }
@@ -161,11 +171,53 @@ public final class AgentScopeTraceAdapter {
                 withoutFields.traceId(), finalOutput, mapped, traceFields);
     }
 
-    private static String defaultModule(AgentEvent event) {
-        String type = event.getType().getValue();
-        return type.startsWith("REQUIRE_") || type.startsWith("USER_") || type.startsWith("EXTERNAL_")
+    private static String defaultModule(AgentEventType type) {
+        String value = type.getValue();
+        return value.startsWith("REQUIRE_") || value.startsWith("USER_") || value.startsWith("EXTERNAL_")
                 ? "permission"
                 : "agent";
+    }
+
+    private static String textOf(Msg message) {
+        if (message == null) {
+            return null;
+        }
+        String text = message.getTextContent();
+        if (text != null && !text.isBlank()) {
+            return text;
+        }
+        List<ContentBlock> content = message.getContent();
+        if (content == null || content.isEmpty()) {
+            return text;
+        }
+        StringBuilder joined = new StringBuilder();
+        for (ContentBlock block : content) {
+            String piece = block instanceof TextBlock textBlock
+                    ? textBlock.getText()
+                    : String.valueOf(block);
+            if (piece == null || piece.isBlank()) {
+                continue;
+            }
+            if (!joined.isEmpty()) {
+                joined.append('\n');
+            }
+            joined.append(piece);
+        }
+        return joined.isEmpty() ? text : joined.toString();
+    }
+
+    private static Map<String, Object> usageMap(ChatUsage usage) {
+        if (usage == null) {
+            return null;
+        }
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("input_tokens", usage.getInputTokens());
+        values.put("output_tokens", usage.getOutputTokens());
+        values.put("total_tokens", usage.getTotalTokens());
+        values.put("cached_tokens", usage.getCachedTokens());
+        values.put("reasoning_tokens", usage.getReasoningTokens());
+        values.put("time", usage.getTime());
+        return values;
     }
 
     private static Map<String, Object> fields(Object... pairs) {
