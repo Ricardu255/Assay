@@ -53,6 +53,13 @@
         <scope>import</scope>
       </dependency>
       <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring-boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
         <groupId>io.assay</groupId>
         <artifactId>assay</artifactId>
         <version>${project.version}</version>
@@ -127,21 +134,6 @@
         <version>${h2.version}</version>
       </dependency>
       <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-autoconfigure</artifactId>
-        <version>${spring-boot.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-configuration-processor</artifactId>
-        <version>${spring-boot.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-test</artifactId>
-        <version>${spring-boot.version}</version>
-      </dependency>
-      <dependency>
         <groupId>io.micrometer</groupId>
         <artifactId>micrometer-core</artifactId>
         <version>${micrometer.version}</version>
@@ -203,7 +195,7 @@
           <effort>Max</effort>
           <threshold>Medium</threshold>
           <failOnError>true</failOnError>
-          <excludeFilterFile>${session.executionRootDirectory}/config/spotbugs/exclude.xml</excludeFilterFile>
+          <excludeFilterFile>${maven.multiModuleProjectDirectory}/config/spotbugs/exclude.xml</excludeFilterFile>
         </configuration>
         <executions>
           <execution>

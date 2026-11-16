@@ -1,3 +1,15 @@
 # The framework writes LF and its tests read LF, so pin it everywhere: a Windows checkout
 # with CRLF would make the example data files differ from what the code produces.
 * text=auto eol=lf
+
+# Keep binary assets byte-for-byte; line-ending normalization would corrupt them.
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

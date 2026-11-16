@@ -5,6 +5,15 @@ if ! command -v java >/dev/null 2>&1; then
   echo 'Java 17 or newer is required. Install a JDK and try again.' >&2
   exit 1
 fi
+JAVA_SPEC=$(java -XshowSettings:properties -version 2>&1 \
+  | sed -n 's/^ *java\.specification\.version = //p' | head -n 1)
+case "$JAVA_SPEC" in
+  17|18|19|2[0-9]|3[0-9]) ;;
+  *)
+    echo "Java 17 or newer is required (found ${JAVA_SPEC:-unknown})." >&2
+    exit 1
+    ;;
+esac
 ASSAY_JAR=assay.jar
 if [ ! -f "$ASSAY_JAR" ]; then
   if ! command -v mvn >/dev/null 2>&1; then
