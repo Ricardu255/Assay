@@ -46,7 +46,7 @@ final class EvolutionCommands {
         Path output = args.path("output").resolve(String.valueOf(release.get("release_id")));
         AtomicFiles.createDirectories(output);
         for (Object rawStage : Values.asList(release.get("stages"))) {
-            Map<String, Object> stage = Values.asMap(rawStage);
+            Map<String, Object> stage = new LinkedHashMap<>(Values.asMap(rawStage));
             Reporting.writeRunArtifacts(stage, output.resolve(String.valueOf(stage.get("suite"))));
         }
         AtomicFiles.writeText(output.resolve("release.json"), Json.write(release, 2));

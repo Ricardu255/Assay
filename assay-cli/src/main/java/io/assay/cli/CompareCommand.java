@@ -87,7 +87,9 @@ final class CompareCommand {
     }
 
     /**
-     * A trailing separator or an existing directory means "writer folder"; an extension means "file".
+     * A trailing separator or an existing directory means "writer folder"; a name without an
+     * extension is the documented folder shorthand, so {@code --output report} writes
+     * {@code report/report.md} and {@code report/compare.json}.
      *
      * <p>The folder form writes both artifacts: the Markdown report for a person and
      * {@code compare.json} for the dashboard catalog.

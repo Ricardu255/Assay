@@ -41,6 +41,9 @@ final class QuickstartCommand {
             throw new CommandLine.UsageException("output-path and keyword must be non-empty", 2, false);
         }
         Path dir = args.path("dir");
+        if (dir == null) {
+            dir = Path.of(".assay", "quickstart");
+        }
         AtomicFiles.createDirectories(dir);
         Path config = dir.resolve("my-agent.http.json");
         Path cases = dir.resolve("cases.jsonl");
@@ -59,7 +62,6 @@ final class QuickstartCommand {
             http.put("events_path", args.string("events-path"));
         }
         http.put("hard_gates", List.of(gate));
-        AtomicFiles.writeText(config, Json.write(http, 2) + "\n");
 
         Object request;
         try {
@@ -67,6 +69,7 @@ final class QuickstartCommand {
         } catch (RuntimeException error) {
             throw new CommandLine.UsageException("request must be a JSON object", 2, false);
         }
+        AtomicFiles.writeText(config, Json.write(http, 2) + "\n");
         List<String> lines = new ArrayList<>();
         for (int index = 1; index <= 3; index++) {
             Map<String, Object> evalCase = new LinkedHashMap<>();
@@ -96,6 +99,10 @@ final class QuickstartCommand {
             "--timeout", String.valueOf(args.decimal("timeout"))
         });
         if (args.flag("no-serve")) {
+            return code;
+        }
+        if (code != 0) {
+            System.out.println("Evaluation failed with exit code " + code + "; not opening the dashboard.");
             return code;
         }
         System.out.println("Opening the report dashboard. Press Ctrl+C to stop.");

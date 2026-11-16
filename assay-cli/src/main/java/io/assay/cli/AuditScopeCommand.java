@@ -35,13 +35,13 @@ final class AuditScopeCommand {
         boolean useAi = "local".equals(args.string("ai-provider"));
         OpenAiCompatibleReviewer jsonReviewer = useAi ? OpenAiCompatibleReviewer.fromEnvironment() : null;
         if (useAi && jsonReviewer == null) {
-            throw new CommandLine.UsageException("--use-llm requires ASSAY_MODEL", 1, false);
+            throw new CommandLine.UsageException("--ai-provider local requires ASSAY_MODEL", 2, false);
         }
         TestSelectionService.JsonReviewer selectionReviewer = jsonReviewer;
         TestSelection selection =
                 TestSelectionService.selectTests(
-                        Path.of("."), "HEAD", args.string("ai-provider"), "auto", selectionReviewer, 0.7,
-                        snapshot);
+                        args.path("repository"), args.string("target"), args.string("ai-provider"), "auto",
+                        selectionReviewer, 0.7, snapshot);
         Map<String, Object> result = ScopeAudit.auditScope(snapshot, specification, selectionReviewer);
         result.put("test_selection", selection.toJson());
 
@@ -64,7 +64,9 @@ final class AuditScopeCommand {
         if (selection.humanReviewRequired()) {
             missing.addAll(selection.reviewReasons());
         }
-        if (String.valueOf(result.get("requirement")).isEmpty()
+        Object requirement = result.get("requirement");
+        if (requirement == null
+                || String.valueOf(requirement).isBlank()
                 || Values.asList(result.get("acceptance_criteria")).isEmpty()) {
             missing.add("Requirement and acceptance criteria must be specific enough for scope judgment.");
         }
@@ -181,6 +183,11 @@ final class AuditScopeCommand {
             run.put("report_path", "tests/" + suite + "/report.md");
             runs.add(run);
         } catch (RuntimeException error) {
+            Map<String, Object> run = new LinkedHashMap<>();
+            run.put("suite", suite);
+            run.put("status", "failed");
+            run.put("error", error.getClass().getSimpleName() + ": " + error.getMessage());
+            runs.add(run);
             missing.add(
                     "Selected " + suite + " suite could not run: "
                             + error.getClass().getSimpleName() + ": " + error.getMessage());

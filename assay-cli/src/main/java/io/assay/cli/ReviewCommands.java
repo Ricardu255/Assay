@@ -6,8 +6,14 @@ import io.assay.model.Values;
 import io.assay.review.ReviewSamples;
 import io.assay.store.Results;
 import io.assay.support.AtomicFiles;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,12 +52,36 @@ final class ReviewCommands {
             }
         }
         Path output = args.path("output");
-        AssayCli.createParent(output);
-        StringBuilder builder = new StringBuilder();
-        for (Map<String, Object> row : rows) {
-            builder.append(Json.write(row)).append('\n');
+        Path parent = output.getParent();
+        if (parent != null) {
+            AtomicFiles.createDirectories(parent);
         }
-        AtomicFiles.writeText(output, builder.toString());
+        Path temporary = null;
+        try {
+            temporary = Files.createTempFile(parent != null ? parent : Path.of("."), ".review-export-", ".tmp");
+            try (BufferedWriter writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
+                for (Map<String, Object> row : rows) {
+                    writer.write(Json.write(row));
+                    writer.newLine();
+                }
+            }
+            try {
+                Files.move(temporary, output,
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException error) {
+            throw new UncheckedIOException(error);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException ignored) {
+                    // The atomic move already removed it; a leftover temp file is harmless.
+                }
+            }
+        }
         System.out.println("exported " + rows.size() + " records to " + output);
         return 0;
     }

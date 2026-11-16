@@ -1,5 +1,6 @@
 package io.assay.cli;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -52,14 +53,43 @@ public final class CommandLine {
         }
 
         public Spec option(String optionName, Kind kind, String defaultValue, String... allowed) {
+            if (kinds.containsKey(optionName)) {
+                throw new IllegalArgumentException("duplicate option: --" + optionName);
+            }
+            List<String> accepted = allowed.length == 0 ? null : List.of(allowed);
+            if (defaultValue != null) {
+                validateDefault(optionName, kind, defaultValue, accepted);
+            }
             kinds.put(optionName, kind);
             if (defaultValue != null) {
                 defaults.put(optionName, defaultValue);
             }
-            if (allowed.length > 0) {
-                choices.put(optionName, List.of(allowed));
+            if (accepted != null) {
+                choices.put(optionName, accepted);
             }
             return this;
+        }
+
+        private static void validateDefault(
+                String optionName, Kind kind, String defaultValue, List<String> allowed) {
+            if (kind == Kind.FLAG) {
+                throw new IllegalArgumentException("flag --" + optionName + " cannot have a default value");
+            }
+            if (allowed != null && !allowed.contains(defaultValue)) {
+                throw new IllegalArgumentException(
+                        "invalid default for --" + optionName + ": '" + defaultValue + "' is not one of "
+                                + String.join(", ", allowed));
+            }
+            try {
+                if (kind == Kind.INTEGER) {
+                    Integer.parseInt(defaultValue);
+                } else if (kind == Kind.DECIMAL && !Double.isFinite(Double.parseDouble(defaultValue))) {
+                    throw new NumberFormatException("non-finite value");
+                }
+            } catch (NumberFormatException error) {
+                throw new IllegalArgumentException(
+                        "invalid default for --" + optionName + ": '" + defaultValue + "'");
+            }
         }
 
         public Spec required(String optionName, Kind kind, String... allowed) {
@@ -95,7 +125,14 @@ public final class CommandLine {
 
         public Path path(String name) {
             String value = string(name);
-            return value == null || value.isEmpty() ? null : Path.of(value);
+            if (value == null || value.isEmpty()) {
+                return null;
+            }
+            try {
+                return Path.of(value);
+            } catch (InvalidPathException error) {
+                throw new UsageException("argument --" + name + ": invalid path: '" + value + "'", 2, true);
+            }
         }
 
         public int integer(String name) {
@@ -174,7 +211,7 @@ public final class CommandLine {
             }
             String value = inline;
             if (value == null) {
-                if (index + 1 >= argv.length) {
+                if (index + 1 >= argv.length || argv[index + 1].startsWith("--")) {
                     throw new UsageException("argument --" + name + ": expected one argument", 2, true);
                 }
                 value = argv[++index];

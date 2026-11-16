@@ -27,6 +27,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 /** Implements the dashboard and durable-queue commands. */
@@ -38,6 +40,8 @@ final class QueueCommands {
     static int serve(CommandLine.Namespace args) {
         JobStore jobs = args.flag("worker") ? jobStore(args) : null;
         DashboardServer server = null;
+        Thread workerThread = null;
+        AtomicBoolean workerRunning = new AtomicBoolean(true);
         try {
             server = startDashboard(args, jobs);
             Thread shutdown = new Thread(server::close, "assay-dashboard-shutdown");
@@ -54,8 +58,9 @@ final class QueueCommands {
                         workerId = "dashboard-worker-" + CliIds.shortId();
                     }
                     String finalWorkerId = workerId;
-                    Thread workerThread = new Thread(
-                            () -> runWorker(jobs, finalWorkerId, leaseSeconds, pollMillis, false),
+                    workerThread = new Thread(
+                            () -> runWorker(
+                                    jobs, finalWorkerId, leaseSeconds, pollMillis, false, workerRunning::get),
                             "assay-dashboard-worker");
                     workerThread.setDaemon(true);
                     workerThread.start();
@@ -88,6 +93,15 @@ final class QueueCommands {
         } catch (IOException error) {
             throw new IllegalStateException("cannot start dashboard: " + error.getMessage(), error);
         } finally {
+            workerRunning.set(false);
+            if (workerThread != null) {
+                workerThread.interrupt();
+                try {
+                    workerThread.join(5000);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             if (server != null) {
                 server.close();
             }
@@ -282,7 +296,22 @@ final class QueueCommands {
         return deleted;
     }
 
-    private static Instant lastModified(Path path) {
+    private static Instant lastModified(Path directory) {
+        Instant newest = null;
+        for (String artifact : List.of("results.json", "report.md")) {
+            Path file = directory.resolve(artifact);
+            if (!Files.isRegularFile(file)) {
+                continue;
+            }
+            Instant modified = modified(file);
+            if (newest == null || modified.isAfter(newest)) {
+                newest = modified;
+            }
+        }
+        return newest != null ? newest : modified(directory);
+    }
+
+    private static Instant modified(Path path) {
         try {
             return Files.getLastModifiedTime(path).toInstant();
         } catch (IOException error) {
@@ -310,7 +339,17 @@ final class QueueCommands {
 
     static int runWorker(
             JobStore store, String workerId, int leaseSeconds, long pollMillis, boolean once) {
-        while (true) {
+        return runWorker(store, workerId, leaseSeconds, pollMillis, once, () -> true);
+    }
+
+    static int runWorker(
+            JobStore store,
+            String workerId,
+            int leaseSeconds,
+            long pollMillis,
+            boolean once,
+            BooleanSupplier running) {
+        while (running.getAsBoolean()) {
             Optional<Job> claimed;
             try {
                 claimed = store.claim(workerId, Duration.ofSeconds(leaseSeconds));
@@ -320,7 +359,7 @@ final class QueueCommands {
                     return 1;
                 }
                 if (!pause(pollMillis)) {
-                    return 1;
+                    return running.getAsBoolean() ? 1 : 0;
                 }
                 continue;
             }
@@ -329,7 +368,7 @@ final class QueueCommands {
                     return 0;
                 }
                 if (!pause(pollMillis)) {
-                    return 1;
+                    return running.getAsBoolean() ? 1 : 0;
                 }
                 continue;
             }
@@ -346,6 +385,7 @@ final class QueueCommands {
                 return 0;
             }
         }
+        return 0;
     }
 
     private static boolean pause(long millis) {
@@ -364,6 +404,8 @@ final class QueueCommands {
 
     private static void executeJob(JobStore store, Job job, String workerId, int leaseSeconds) {
         Thread execution = Thread.currentThread();
+        AtomicBoolean leaseLost = new AtomicBoolean(false);
+        AtomicBoolean cancelRequested = new AtomicBoolean(false);
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "assay-worker-heartbeat");
             thread.setDaemon(true);
@@ -372,8 +414,13 @@ final class QueueCommands {
         long interval = Math.max(1, leaseSeconds / 3);
         ScheduledFuture<?> heartbeat = scheduler.scheduleAtFixedRate(() -> {
             try {
-                if (!store.heartbeat(job.id(), workerId, Duration.ofSeconds(leaseSeconds))
-                        || store.isCancelRequested(job.id())) {
+                if (!store.heartbeat(job.id(), workerId, Duration.ofSeconds(leaseSeconds))) {
+                    leaseLost.set(true);
+                    execution.interrupt();
+                    return;
+                }
+                if (store.isCancelRequested(job.id())) {
+                    cancelRequested.set(true);
                     execution.interrupt();
                 }
             } catch (RuntimeException error) {
@@ -381,28 +428,35 @@ final class QueueCommands {
             }
         }, interval, interval, TimeUnit.SECONDS);
         int code = 1;
+        RuntimeException executionFailure = null;
         try {
             code = AssayCli.run(runArgs(job));
-            if (store.isCancelRequested(job.id())) {
+        } catch (RuntimeException error) {
+            executionFailure = error;
+        } finally {
+            heartbeat.cancel(false);
+            scheduler.shutdownNow();
+            Thread.interrupted();
+        }
+        if (leaseLost.get()) {
+            System.err.println(
+                    "worker: job " + job.id() + " lease was lost; the new owner writes the terminal state");
+            return;
+        }
+        try {
+            if (cancelRequested.get() || store.isCancelRequested(job.id())) {
                 store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
+            } else if (executionFailure != null) {
+                store.fail(job.id(), workerId, message(executionFailure));
             } else if (code == 0) {
                 store.succeed(job.id(), workerId);
             } else {
                 store.finish(job.id(), workerId, JobStatus.FAILED, failureReason(job, code));
             }
-        } catch (RuntimeException error) {
-            if (store.isCancelRequested(job.id())) {
-                store.finish(job.id(), workerId, JobStatus.CANCELLED, "cancelled by user");
-            } else {
-                store.fail(
-                        job.id(),
-                        workerId,
-                        error.getMessage() == null ? error.toString() : error.getMessage());
-            }
-        } finally {
-            heartbeat.cancel(false);
-            scheduler.shutdownNow();
-            Thread.interrupted();
+        } catch (RuntimeException terminalFailure) {
+            System.err.println(
+                    "worker: job " + job.id() + " terminal state write failed: " + message(terminalFailure));
+            return;
         }
         System.out.println("job " + job.id() + " finished with exit code " + code);
     }
