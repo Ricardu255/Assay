@@ -7,7 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
+import io.assay.engine.EvaluationSettings;
+import io.assay.metrics.Metric;
+import io.assay.metrics.MetricContext;
 import io.assay.model.EvalCase;
+import io.assay.model.MetricResult;
 import io.assay.model.EvaluationBudget;
 import io.assay.model.EvolutionCandidate;
 import io.assay.model.EvolutionPolicy;
@@ -128,12 +132,81 @@ class EvolutionTest {
         return new EvolutionCandidate("router-v2", "skill", "router", "1", "2", "skill");
     }
 
+    private static final class QualityMetric implements Metric {
+
+        @Override
+        public String name() {
+            return "quality";
+        }
+
+        @Override
+        public String fingerprint() {
+            return "v1";
+        }
+
+        @Override
+        public MetricResult measure(MetricContext context) {
+            Object value = context.trace().fields().get("quality");
+            double score = value instanceof Number number
+                    ? Math.max(0, Math.min(1, number.doubleValue()))
+                    : 0;
+            return score >= 0.5
+                    ? MetricResult.pass("quality", score, 0.5, "ok")
+                    : MetricResult.fail("quality", score, 0.5, "low");
+        }
+    }
+
     private static EvolutionPolicy qualityPolicy() {
         return new EvolutionPolicy(
                 List.of(new MetricObjective("quality", "trace.fields.quality", 0.1)), List.of(), 0);
     }
 
     /** A required objective with a missing value must fail the whole objective, not average over gaps. */
+    @Test
+    void metricObjectivesReadScoresAndTreatSkipsAsMissing() {
+        Map<String, Object> summary = Map.of("results", List.of(
+                Map.of("hard_pass", true, "metrics", List.of(
+                        Map.of("name", "quality", "status", "pass", "score", 0.8))),
+                Map.of("hard_pass", true, "metrics", List.of(
+                        Map.of("name", "quality", "status", "fail", "score", 0.4))),
+                Map.of("hard_pass", true, "metrics", List.of(
+                        Map.of("name", "quality", "status", "skip", "reason", "no trace")))), "hard_failures", 0,
+                "soft_warnings", 0);
+
+        Map<String, Object> metrics = EvolutionEngine.summarizeMetrics(summary,
+                List.of(new MetricObjective("quality", "metric:quality")));
+
+        assertNull(Fixtures.asMap(metrics.get("objectives")).get("quality"));
+        assertEquals(2, Fixtures.asMap(Fixtures.asMap(metrics.get("metric_stats")).get("quality")).get("evaluated"));
+        assertEquals(1, Fixtures.asMap(Fixtures.asMap(metrics.get("metric_stats")).get("quality")).get("skipped"));
+    }
+
+    @Test
+    void metricScoresDriveEvolutionObjectivesAndTheReport(@TempDir Path root) {
+        EvaluationSettings settings =
+                EvaluationSettings.builder().metrics(List.of(new QualityMetric())).build();
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result = new EvolutionEngine(
+                    new EvaluationEngine(adapter("1", false, false), store, null, settings),
+                    new EvaluationEngine(adapter("2", true, false), store, null, settings),
+                    new EvolutionPolicy(
+                            List.of(new MetricObjective("quality", "metric:quality", 0.1)), List.of(), 0))
+                    .run(change(), evolutionCases(), "online", "metric-objective", false);
+        }
+
+        assertEquals("accept", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons")).contains("objective improved: quality"));
+        Map<String, Object> comparison =
+                Fixtures.asMap(Fixtures.asMap(result.get("comparisons")).get("improvement"));
+        Map<String, Object> quality =
+                Fixtures.asMap(Fixtures.asMap(comparison.get("metric_deltas")).get("quality"));
+        assertEquals(0.7, Fixtures.doubleOf(quality.get("mean_score_delta")), 1e-9);
+
+        Reporting.writeEvolutionArtifacts(result, root.resolve("out"));
+        assertTrue(AtomicFiles.readText(root.resolve("out/evolution_report.md")).contains("## Metric scores"));
+    }
+
     @Test
     void requiredMetricNeedsEveryCase() {
         Map<String, Object> summary = new LinkedHashMap<>();
@@ -227,6 +300,72 @@ class EvolutionTest {
         String report = AtomicFiles.readText(root.resolve("out/evolution_report.md"));
         assertTrue(report.contains("missing"));
         assertTrue(report.contains("0/1"));
+    }
+
+    @Test
+    void syntheticCasesInRegressionOrHoldoutCauseARollback(@TempDir Path root) {
+        Map<String, List<EvalCase>> datasets = evolutionCases();
+        List<EvalCase> regression = new ArrayList<>(datasets.get("regression"));
+        regression.add(new EvalCase(
+                "SYNTHETIC-REGRESSION",
+                Map.of("message", "generated"),
+                Map.of("route", "GENERAL"),
+                "routing",
+                Map.of("source", "synthetic", "source_file", "docs/policy.md"),
+                "regression"));
+        datasets.put("regression", regression);
+
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result = new EvolutionEngine(
+                    new EvaluationEngine(adapter("1", false, false), store),
+                    new EvaluationEngine(adapter("2", true, false), store),
+                    new EvolutionPolicy())
+                    .run(change(), datasets, "online", "synthetic-regression", false);
+        }
+
+        assertEquals("rollback", result.get("decision"));
+        assertTrue(Fixtures.stringsOf(result.get("reasons")).stream()
+                .anyMatch(reason -> reason.contains("only allowed in the improvement set")));
+        assertTrue(Fixtures.asMap(result.get("comparisons")).isEmpty());
+    }
+
+    @Test
+    void syntheticRatioCapAndProvenanceAreEnforced(@TempDir Path root) {
+        Map<String, List<EvalCase>> datasets = evolutionCases();
+        List<EvalCase> improvement = new ArrayList<>(datasets.get("improvement"));
+        improvement.add(new EvalCase(
+                "SYNTHETIC-UNPROVENANCED",
+                Map.of("message", "generated"),
+                Map.of("route", "SUPPORT"),
+                "routing",
+                Map.of("source", "synthetic"),
+                "improvement"));
+        datasets.put("improvement", improvement);
+
+        Map<String, Object> ratio;
+        Map<String, Object> provenance;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            EvolutionPolicy cap = EvolutionPolicy.fromDict(Map.of("synthetic_ratio_cap", 0.25));
+            ratio = new EvolutionEngine(
+                    new EvaluationEngine(adapter("1", false, false), store),
+                    new EvaluationEngine(adapter("2", true, false), store),
+                    cap)
+                    .run(change(), datasets, "online", "synthetic-ratio", false);
+            EvolutionPolicy strict = EvolutionPolicy.fromDict(Map.of("require_provenance", true));
+            provenance = new EvolutionEngine(
+                    new EvaluationEngine(adapter("1", false, false), store),
+                    new EvaluationEngine(adapter("2", true, false), store),
+                    strict)
+                    .run(change(), datasets, "online", "synthetic-provenance", false);
+        }
+
+        assertEquals("rollback", ratio.get("decision"));
+        assertTrue(Fixtures.stringsOf(ratio.get("reasons")).stream()
+                .anyMatch(reason -> reason.contains("synthetic ratio")));
+        assertEquals("rollback", provenance.get("decision"));
+        assertTrue(Fixtures.stringsOf(provenance.get("reasons")).stream()
+                .anyMatch(reason -> reason.contains("provenance")));
     }
 
     @Test

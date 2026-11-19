@@ -114,6 +114,21 @@ class EvolutionConfigurationTest {
     }
 
     @Test
+    void validatesAndRoundTripsSyntheticPolicyFields() {
+        EvolutionPolicy policy = EvolutionPolicy.fromDict(Map.of(
+                "synthetic_ratio_cap", 0.3,
+                "require_provenance", true));
+
+        assertEquals(0.3, policy.syntheticRatioCap());
+        assertTrue(policy.requireProvenance());
+        assertEquals(policy, EvolutionPolicy.fromDict(Fixtures.asMap(Json.normalize(policy.toJson()))));
+        assertThrows(IllegalArgumentException.class,
+                () -> EvolutionPolicy.fromDict(Map.of("synthetic_ratio_cap", 1.1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> EvolutionPolicy.fromDict(Map.of("synthetic_ratio_cap", "NaN")));
+    }
+
+    @Test
     void invalidExecutionLimitsFailBeforeCallingTheAdapterOrProcess(@TempDir Path root) {
         ProjectAdapter adapter = new ProjectAdapter("unused", (evalCase, context) -> {
             throw new AssertionError("invalid execution limits must not call the adapter");
