@@ -7,7 +7,9 @@ COPY pom.xml .
 COPY assay-core/pom.xml ./assay-core/pom.xml
 COPY assay-store-file/pom.xml ./assay-store-file/pom.xml
 COPY assay-store-jdbc/pom.xml ./assay-store-jdbc/pom.xml
+COPY assay-bootstrap/pom.xml ./assay-bootstrap/pom.xml
 COPY assay-dashboard/pom.xml ./assay-dashboard/pom.xml
+COPY assay-synth/pom.xml ./assay-synth/pom.xml
 COPY assay-cli/pom.xml ./assay-cli/pom.xml
 COPY assay-integration-tests/pom.xml ./assay-integration-tests/pom.xml
 # POM-only modules: copied so the reactor resolves; app does not depend on them.
@@ -26,7 +28,9 @@ RUN mvn -B -ntp -DskipTests dependency:go-offline || true
 COPY assay-core/src ./assay-core/src
 COPY assay-store-file/src ./assay-store-file/src
 COPY assay-store-jdbc/src ./assay-store-jdbc/src
+COPY assay-bootstrap/src ./assay-bootstrap/src
 COPY assay-dashboard/src ./assay-dashboard/src
+COPY assay-synth/src ./assay-synth/src
 COPY assay-cli/src ./assay-cli/src
 COPY assay-runtime/src ./assay-runtime/src
 COPY assay-examples/src ./assay-examples/src

@@ -5,6 +5,8 @@
 - **方法**：把上一轮口头 review 的 10 条结论逐条回到源码、配置、构建产物核对，标记「属实 / 部分属实（需修正措辞）/ 撤回」；并补查复核过程中新暴露的问题
 - **变更范围**：复核分析本身为只读；随后按第 6 节清单完成了一轮整改（见第 9 节），源码、README、Dockerfile 与工作区记忆日志已更新
 
+> **时点数据声明**：本报告内所有数字（267 个跟踪文件、363/364 项测试、66.0% 分支、13 个模块等）均为 2026-11-11 验收时点的快照，不随代码演进更新。**当前口径一律以 `docs/assay-interview-prep.md`「快速口径速查」为准**（现为 365 项测试、82.1% 行 / 66.1% 分支、14 个模块）。
+
 ---
 
 ## 1. 结论摘要
@@ -392,7 +394,7 @@ ScheduledFuture<?> beat = heartbeat.scheduleAtFixedRate(() -> {
 
 ## 9. 整改记录（2026-11-11）
 
-本轮整改后新增 6 个 Java 文件（`CaseChecks.java`、`CaseChecksTest.java`、`SecurityStartupCheck.java`、`execution/Stores.java`、`AuditScopeCommand.java`、`QuickstartCommand.java`）与第 14 个模块 `assay-integration-tests`（迁入 10 个跨模块测试），删除 `cli/Stores.java`；共 130+ 个文件变更（含 import 排序与 120 列换行）。验证命令：
+本轮整改后新增 6 个 Java 文件（`CaseChecks.java`、`CaseChecksTest.java`、`SecurityStartupCheck.java`、`bootstrap/Stores.java`、`AuditScopeCommand.java`、`QuickstartCommand.java`）与第 14 个模块 `assay-integration-tests`（迁入 10 个跨模块测试），删除 `cli/Stores.java`；共 130+ 个文件变更（含 import 排序与 120 列换行）。验证命令：
 
 ```bash
 mvn -B -o -q verify
@@ -410,7 +412,7 @@ mvn -B -o -q verify
 | F5 存储规则重复 | ✅ 已完成 | 新增 `CaseChecks.apply()` 供文件与 JDBC 后端共用，并加单元测试 |
 | F2 JDBC 方言 | ✅ 已完成 | `JdbcJobStore.list` 的 `limit` 改为 `?` 参数；schema 迁移改为 `DatabaseMetaData` 检测列/索引后执行普通 `ALTER/CREATE INDEX`，避免 MySQL 不支持的 `IF NOT EXISTS`；注释与 README 明确 H2/MySQL/PostgreSQL 兼容范围（MySQL 仍无 CI 覆盖） |
 | N3 全限定名 | ✅ 已完成 | 主代码非 import 的 `java.*` FQN 从 76 处降到 **0**；同时清理未使用 import |
-| N5 CLI/Store 重复 | ✅ 已完成 | `serve`/`worker` 的队列选项抽成 `queueOptions()`；store 工厂下沉到 `io.assay.execution.Stores`，CLI 与 `RunService` 共用 |
+| N5 CLI/Store 重复 | ✅ 已完成 | `serve`/`worker` 的队列选项抽成 `queueOptions()`；store 工厂下沉到 `io.assay.bootstrap.Stores`（`assay-bootstrap` 模块），CLI 与 `RunService` 共用 |
 | N2 Dashboard 注释 | ✅ 已完成 | 类注释说明默认 GET-only、`--worker` 才启用 job POST |
 | F8 测试归属 | ✅ 已完成 | 10 个跨模块测试迁入新模块 `assay-integration-tests`（第 14 个模块）；`app` 以 **test scope** 依赖它，覆盖数据进入聚合但不会打进发行 jar；README 已说明 |
 | F6 上帝类 | ✅ 本轮完成 | 命令族已拆到 `QueueCommands`/`EvolutionCommands`/`CompareCommand`/`ReviewCommands`/`AuditScopeCommand`/`QuickstartCommand`，`AssayCli` 1535 → **440 行**（只保留命令表、分发和共享的引擎/输出辅助）；`EvaluationSettings` 改为 public + Builder |

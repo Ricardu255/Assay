@@ -99,6 +99,21 @@ java -jar app/target/assay.jar run \
 - 没有测真实 Agent 的 P50/P95；`trace_duration` 是适配器声明的步骤耗时，不是墙钟延迟。
 - 没有做多轮重复取中位数；单次结果只适合做趋势参考。
 
+## 2026-11-18 复核：规则 + 指标
+
+同一台机器、同一份 10,000 条 `agent` 用例、20 workers、文件存储，使用当前 shaded jar：
+
+| 组合 | Wall ms | Cases/s | results.json | 备注 |
+|---|---:|---:|---:|---|
+| 纯规则 | 2,506 | ~3,991 | — | 无指标 |
+| `--preset agent-safety` | 3,025 | ~3,305 | 62.3 MB（约 6.2 KB/case） | `tool_permission` / `loop_detection` 各 10,000 次 `skip` |
+
+`-Xmx512m` 下同一 10k 指标运行通过（约 3.2s），说明“小 trace + 确定性指标”的 10k 级运行不需要大堆。
+
+注意：`BenchmarkAgentAdapter` 发出的是历史事件名 `Tool/search`，而指标契约使用 `tool/call_start`，所以两项指标在这份基准里全部 `skip`。上表衡量的是调度、指标执行框架和序列化开销，不是实际评分成本。接真实 Agent 时请按 `NormalizedTrace` 的事件契约上报工具调用。
+
+真实 LLM judge 的吞吐由供应商限流和单次延迟决定，不能从这张表推算。建议单次 judge 运行先控制在 500–2,000 条，并开启 `--metric-cache`。
+
 ## 下一步
 
 - 用真实 HTTP/AgentScope/ADK 跑 100～1,000 条，记录 P50/P95 和超时。

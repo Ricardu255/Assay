@@ -1,6 +1,7 @@
 target/
 .assay/
 dist/
+deepeval-main/
 __pycache__/
 *.pyc
 .workbuddy/

@@ -1,5 +1,7 @@
 # Assay 工程化改进方案（2026-10）
 
+> **历史文档声明**：本文写于 2026-10 规划阶段，文中全部数字（242 项测试、13k 行、17 项 Node 测试等）均为**当时快照**，不随代码演进更新。多数规划项已落地；现状与正式口径一律以 `docs/assay-interview-prep.md`「快速口径速查」为准（现为 365 项测试、82.1% 行 / 66.1% 分支、14 个模块、约 2.28 万行主代码）。
+
 > 目标：让 Assay 从“功能完整的评测框架”变成“看起来和用起来都像工程系统”的项目，同时不破坏它最重要的优势：领域解耦、零运行时依赖、可移植、可审计。
 >
 > 适用场景：面试展示、团队内部落地、后续产品化评估。
@@ -164,8 +166,9 @@ assay-parent/
 ├── assay-core/                 # model, rules, engine, evolve, report, release, json, support, Results
 ├── assay-store-file/           # io.assay.store.file.ResultStore
 ├── assay-store-jdbc/           # io.assay.store.jdbc.JdbcResultStore
+├── assay-bootstrap/            # 组合层：io.assay.bootstrap.Stores，供 CLI/Server 打开文件/JDBC store
 ├── assay-dashboard/            # web + resources
-├── assay-runtime/              # audit, diff, trace, process, workspace, selection, review 等运行服务
+├── assay-runtime/              # audit, diff, trace, process, workspace, selection, review 等运行服务（只依赖 core 接口）
 ├── assay-examples/             # Echo/IntentRouter 等示例适配器（保留在 distribution 中）
 ├── assay-cli/                  # 纯命令行入口与命令分发
 ├── app/                        # distribution：shade 成 assay.jar
@@ -537,6 +540,8 @@ Micrometer/OTel 实现放外围模块，不污染 core。
 ### 8.2 简历 bullet（当前已落地版）
 
 > Java 17 Maven reactor 的 Agent 评测与发布门禁引擎；core 零运行时依赖，外围提供 JDBC 存储、Spring Boot Starter、Micrometer 指标与 OTel span；实现批式落盘/断点恢复/跨进程锁、LCS 轨迹首错、三数据集演化门禁；242 项测试 + 10k 文件/JDBC/多步参考 Agent 基准，CI 双平台。
+
+> 本节是规划阶段的历史快照（242 tests / 13k 行为当时数值）。**简历正式文本与当前数字口径一律以 `docs/assay-interview-prep.md` 第六章及「快速口径速查」为准**（现为 365 项测试、82.1% 行 / 66.1% 分支）。
 
 ### 8.3 面试三句话
 

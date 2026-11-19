@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assay 全流程与模块拆解 · 架构说明</title>
+<style>
+  :root{
+    --bg:#f6f8fc; --surface:#ffffff; --surface-2:#fbfcfe;
+    --text:#1b2434; --text-2:#4f5b70; --text-3:#7c879b;
+    --line:#e3e9f2; --line-2:#d3dcea;
+    --blue:#2563eb; --blue-bg:#eef4ff;
+    --cyan:#0891b2; --cyan-bg:#ecfaff;
+    --purple:#7c3aed; --purple-bg:#f4f0ff;
+    --green:#059669; --green-bg:#ecfdf5;
+    --orange:#ea580c; --orange-bg:#fff4ec;
+    --slate:#475569; --slate-bg:#f1f5f9;
+    --rose:#be123c; --rose-bg:#fff1f4;
+    --shadow:0 1px 2px rgba(24,40,80,.04),0 6px 20px rgba(24,40,80,.05);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
+    font-size:14px; line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1280px;margin:0 auto;padding:0 28px 80px}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------- header ---------- */
+  header.hero{
+    background:linear-gradient(135deg,#ffffff 0%,#f0f5ff 55%,#eefaff 100%);
+    border-bottom:1px solid var(--line); padding:44px 0 34px;
+  }
+  .hero-inner{max-width:1280px;margin:0 auto;padding:0 28px}
+  .eyebrow{font-size:12px;letter-spacing:.16em;color:var(--blue);font-weight:700;text-transform:uppercase}
+  h1{font-size:30px;line-height:1.3;margin:10px 0 8px;letter-spacing:-.5px}
+  .lede{font-size:15px;color:var(--text-2);max-width:920px;margin:0}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .badge{background:#fff;border:1px solid var(--line-2);border-radius:999px;padding:5px 13px;font-size:12px;color:var(--text-2);box-shadow:var(--shadow)}
+  .badge b{color:var(--text);font-weight:650}
+
+  /* ---------- nav ---------- */
+  nav.toc{
+    position:sticky;top:0;z-index:20;background:rgba(255,255,255,.94);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+  }
+  .toc-inner{max-width:1280px;margin:0 auto;padding:10px 28px;display:flex;gap:6px;flex-wrap:wrap}
+  .toc a{font-size:12.5px;color:var(--text-2);padding:5px 11px;border-radius:7px;white-space:nowrap}
+  .toc a:hover{background:var(--blue-bg);color:var(--blue);text-decoration:none}
+
+  /* ---------- sections ---------- */
+  section{margin-top:52px;scroll-margin-top:60px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  .sec-num{font-size:12px;font-weight:800;color:#fff;background:var(--slate);border-radius:6px;padding:3px 9px;letter-spacing:.05em}
+  h2{font-size:21px;margin:0;letter-spacing:-.3px}
+  .sec-desc{color:var(--text-2);font-size:13.5px;margin:0 0 22px}
+  h3{font-size:16px;margin:0 0 10px}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  .pad{padding:20px 22px}
+
+  /* ---------- flow chart (HTML/CSS) ---------- */
+  .flow{display:flex;flex-direction:column;align-items:stretch;gap:0}
+  .stage{
+    position:relative;background:var(--surface);border:1px solid var(--line);
+    border-left:4px solid var(--c);border-radius:12px;padding:16px 20px 18px;box-shadow:var(--shadow);
+    transition:box-shadow .18s,border-color .18s,transform .18s;
+  }
+  .stage:hover{box-shadow:0 8px 28px rgba(24,40,80,.11);transform:translateY(-1px)}
+  .stage-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .stage-idx{
+    width:26px;height:26px;border-radius:8px;background:var(--c-bg);color:var(--c);
+    display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:none;
+  }
+  .stage-title{font-weight:700;font-size:15px}
+  .stage-sub{font-size:12px;color:var(--text-3);margin-left:auto}
+  .nodes{display:grid;gap:10px}
+  .n2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .n3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .n4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .node{
+    background:var(--c-bg);border:1px solid var(--c-bd);border-radius:9px;padding:10px 12px;min-width:0;
+  }
+  .node b{display:block;font-size:13px;color:var(--text);font-weight:700;line-height:1.45}
+  .node span{display:block;font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.55}
+  .node code{font-size:11px;color:var(--c);background:rgba(255,255,255,.7);padding:1px 4px;border-radius:4px}
+  .stage-note{
+    margin-top:11px;padding:9px 12px;background:var(--surface-2);border:1px dashed var(--line-2);
+    border-radius:8px;font-size:12px;color:var(--text-2);
+  }
+  .stage-note b{color:var(--text)}
+  .arrow{height:38px;display:flex;align-items:center;justify-content:center;position:relative;color:var(--text-3)}
+  .arrow::before{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--line-2)}
+  .arrow i{
+    position:relative;background:var(--bg);padding:0 10px;font-style:normal;font-size:11px;
+    color:var(--text-3);border:1px solid var(--line);border-radius:999px;
+  }
+  .arrow::after{
+    content:"";position:absolute;bottom:2px;width:0;height:0;
+    border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--line-2);
+  }
+  .fork{display:flex;gap:10px;align-items:stretch}
+  .fork .stage{flex:1}
+  .flow-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-2);margin-top:14px}
+  .flow-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+  /* ---------- dependency svg ---------- */
+  .svg-box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:var(--shadow);overflow-x:auto}
+  .svg-box svg{display:block;min-width:900px;width:100%;height:auto}
+  .svg-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--text-2);padding:10px 8px 2px}
+  .svg-legend span::before{content:"";display:inline-block;width:14px;height:3px;background:var(--line-2);vertical-align:3px;margin-right:6px;border-radius:2px}
+  .svg-legend .solid::before{background:var(--blue)}
+  .svg-legend .dash::before{background:repeating-linear-gradient(90deg,var(--purple) 0 4px,transparent 4px 7px)}
+  .svg-legend .pack::before{background:var(--green)}
+
+  /* ---------- domain flow diagrams ---------- */
+  .svg-wide{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 16px 12px;box-shadow:var(--shadow);overflow-x:auto;margin:0 0 18px}
+  .svg-wide svg{display:block;width:100%;min-width:960px;height:auto}
+  .svg-wide text,.dom-flow text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}
+  .dom-flow{margin:14px 0 2px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:10px 10px 8px}
+  .dom-flow .df-cap{font-size:11px;font-weight:700;color:var(--c);letter-spacing:.03em;margin:0 0 6px 3px}
+  .dom-flow svg{display:block;width:100%;height:auto}
+  .dom-flow .df-note{font-size:11px;color:var(--text-3);line-height:1.62;margin:6px 3px 1px;border-top:1px dashed var(--line);padding-top:7px}
+  .dom-flow .df-note b{color:var(--text-2)}
+  .df-bar{fill:var(--c);stroke:none}
+  .df-box{fill:#fff;stroke:var(--c-bd);stroke-width:1.2}
+  .df-box2{fill:var(--c-bg);stroke:var(--c-bd);stroke-width:1.2}
+  .df-t{fill:#1b2434;font-size:11.5px;font-weight:700}
+  .df-s{fill:#4f5b70;font-size:9.6px}
+  .df-idx{fill:var(--c);font-size:10px;font-weight:800}
+  .df-lbl{fill:#7c879b;font-size:9.2px}
+  .df-line{stroke:#94a3b8;stroke-width:1.5;fill:none}
+  .df-dash{stroke:#cbd5e1;stroke-width:1.4;stroke-dasharray:4 3;fill:none}
+  .df-back{stroke:#ea580c;stroke-width:1.5;stroke-dasharray:5 3;fill:none}
+
+  /* ---------- domain cards ---------- */
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .domain{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  .domain-head{padding:14px 18px;border-bottom:1px solid var(--line);background:var(--c-bg);display:flex;align-items:center;gap:10px}
+  .domain-head .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
+  .domain-head h3{margin:0;font-size:15px}
+  .domain-head .tag{margin-left:auto;font-size:11px;color:var(--c);background:#fff;border:1px solid var(--c-bd);border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .domain-body{padding:16px 18px}
+  .explain{margin:0 0 12px}
+  .explain .lbl{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:5px;margin-bottom:6px}
+  .lbl.formal{background:var(--slate-bg);color:var(--slate)}
+  .lbl.plain{background:var(--orange-bg);color:var(--orange)}
+  .explain p{margin:0;font-size:13px;color:var(--text-2);line-height:1.72}
+  .kv{display:grid;grid-template-columns:76px 1fr;gap:5px 10px;font-size:12px;border-top:1px dashed var(--line);padding-top:12px}
+  .kv dt{color:var(--text-3)}
+  .kv dd{margin:0;color:var(--text-2)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:11px;background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:2px 7px;color:var(--text-2)}
+
+  /* ---------- module cards ---------- */
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .btn{
+    font:inherit;font-size:12.5px;border:1px solid var(--line-2);background:#fff;color:var(--text-2);
+    padding:6px 13px;border-radius:8px;cursor:pointer;transition:.15s;
+  }
+  .btn:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-bg)}
+  .btn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .mods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .mod{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  .mod-head{padding:13px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;border-bottom:1px solid transparent}
+  .mod.open .mod-head{border-bottom-color:var(--line);background:var(--surface-2)}
+  .mod-head .layer{width:8px;height:26px;border-radius:4px;background:var(--c);flex:none}
+  .mod-head h3{margin:0;font-size:14.5px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:700}
+  .mod-head .jar{font-size:10.5px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .jar.in{background:var(--green-bg);color:var(--green);border:1px solid #bbf0d6}
+  .jar.out{background:var(--slate-bg);color:var(--slate);border:1px solid var(--line-2)}
+  .jar.makes{background:var(--blue-bg);color:var(--blue);border:1px solid #cfe0ff}
+  .mod-head .chev{margin-left:auto;color:var(--text-3);font-size:12px;transition:transform .2s}
+  .mod.open .chev{transform:rotate(90deg)}
+  .mod-body{display:none;padding:15px 17px 18px}
+  .mod.open .mod-body{display:block}
+  .mod-body .explain p{font-size:12.8px}
+
+  /* ---------- tables ---------- */
+  .tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:840px}
+  th{background:var(--surface-2);text-align:left;padding:11px 13px;border-bottom:1px solid var(--line-2);color:var(--text-2);font-weight:700;white-space:nowrap}
+  td{padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--text-2)}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafcff}
+  td code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;color:var(--purple)}
+  .dir{color:var(--blue);font-weight:700;white-space:nowrap}
+  .pill{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:999px;background:var(--slate-bg);color:var(--slate);border:1px solid var(--line)}
+
+  /* ---------- callouts ---------- */
+  .callout{border-left:4px solid var(--rose);background:var(--rose-bg);border-radius:0 10px 10px 0;padding:14px 18px;margin-top:14px}
+  .callout h3{font-size:14px;color:var(--rose);margin:0 0 8px}
+  .callout ul{margin:0;padding-left:20px;font-size:12.8px;color:var(--text-2)}
+  .callout li{margin:5px 0}
+  .note{background:var(--blue-bg);border:1px solid #cfe0ff;border-radius:10px;padding:13px 16px;font-size:12.8px;color:var(--text-2);margin-top:14px}
+  .note b{color:var(--blue)}
+
+  footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--text-3);font-size:12px}
+
+  @media (max-width:900px){
+    .grid2,.mods{grid-template-columns:1fr}
+    .n4,.n3{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .fork{flex-direction:column}
+    h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow">Architecture Reference · 基于源码核对</div>
+    <h1>Assay 全流程与功能模块拆解</h1>
+    <p class="lede">一个与领域解耦的 Agent 评测与发布准出平台。本文按「端到端流程 → 功能域 → Maven 模块 → 调用边」四层展开，每个模块同时给出正式解释与大白话解释。所有类名、接口、调用方向均来自仓库源码，未实现的机制一律标注为边界。</p>
+    <div class="badges">
+      <span class="badge"><b>Java 17</b> · Maven Reactor</span>
+      <span class="badge"><b>14</b> 个 Maven 模块</span>
+      <span class="badge">核心 <b>零运行时依赖</b>（仅 JUnit test）</span>
+      <span class="badge">存储 <b>文件 / JDBC</b> 双实现</span>
+      <span class="badge">接入 <b>4 类形态</b></span>
+      <span class="badge">发行包 <b>assay.jar</b> · shade</span>
+      <span class="badge">四层评测 <b>结构/行为/一致性/反馈</b></span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc"><div class="toc-inner">
+  <a href="#flow">① 端到端全流程图</a>
+  <a href="#dep">② 模块依赖分层图</a>
+  <a href="#domains">③ 功能域拆解</a>
+  <a href="#modules">④ 14 个模块逐项说明</a>
+  <a href="#edges">⑤ 调用关系明细</a>
+  <a href="#entries">⑥ 三条入口链路对照</a>
+  <a href="#boundary">⑦ 边界与易混淆点</a>
+</div></nav>
+
+<div class="wrap">
+
+<!-- ============ 1 FLOW ============ -->
+<section id="flow">
+  <div class="sec-head"><span class="sec-num">01</span><h2>端到端全流程图</h2></div>
+  <p class="sec-desc">从「有人发起一次评测」到「决策落盘、人工复核、数据集回流」的完整链路。方框内是真实类/产物名，箭头上的小字是这一步传下去的东西。</p>
+
+  <div class="flow">
+
+    <div class="stage" style="--c:var(--blue);--c-bg:var(--blue-bg);--c-bd:#cfe0ff">
+      <div class="stage-top"><span class="stage-idx">0</span><span class="stage-title">入口：三种发起方式</span><span class="stage-sub">assay-cli / assay-server / assay-dashboard</span></div>
+      <div class="nodes n3">
+        <div class="node"><b>CLI 命令</b><span><code>run</code> 同步直连；<code>submit</code> + <code>worker</code> 走队列；另有 evolve / compare / release / review 等</span></div>
+        <div class="node"><b>HTTP API</b><span><code>POST /api/runs</code>（可带 <code>Idempotency-Key</code>），由 Spring Boot server 接收</span></div>
+        <div class="node"><b>Dashboard 提交</b><span><code>POST /api/jobs</code>，仅在 <code>serve --worker</code> 时开放写权限</span></div>
+      </div>
+      <div class="stage-note"><b>注意：</b>CLI 里没有 <code>queue</code> 父命令，<code>submit</code>/<code>worker</code>/<code>jobs</code>/<code>cancel</code>/<code>replay</code>/<code>prune</code> 都是顶级命令。</div>
+    </div>
+
+    <div class="arrow"><i>RunSpec / RunRequest / job payload</i></div>
+
+    <div class="stage" style="--c:var(--blue);--c-bg:var(--blue-bg);--c-bd:#cfe0ff">
+      <div class="stage-top"><span class="stage-idx">1</span><span class="stage-title">编排：三条执行路径</span><span class="stage-sub">决定「谁来跑」和「什么时候跑」</span></div>
+      <div class="nodes n3">
+        <div class="node"><b>同步直连 · runSuite</b><span><code>AssayCli.runSuite</code> 直接建引擎开跑，无队列、无租约</span></div>
+        <div class="node"><b>CLI 队列 · JobStore + worker</b><span><code>submit</code> 落 job；<code>worker</code> claim 后重入 <code>AssayCli.run("run", …)</code></span></div>
+        <div class="node"><b>Server 队列 · JobRunQueue</b><span><code>RunService</code> → <code>JobRunQueue</code> → <code>SuiteRunner</code>（runtime 内部闭环）</span></div>
+      </div>
+      <div class="stage-note"><b>关键差异：</b>CLI 的 worker <b>不经过</b> <code>JobRunQueue</code>，它是重新调用一次 <code>run</code> 命令；只有 server 侧走 runtime 的 <code>JobRunQueue + SuiteRunner</code>。租约：server 60s / 心跳 20s；CLI <code>--lease-seconds</code> 默认 30s / 心跳 10s。</div>
+    </div>
+
+    <div class="arrow"><i>装配：Cases + Adapter + Results</i></div>
+
+    <div class="stage" style="--c:var(--slate);--c-bg:var(--slate-bg);--c-bd:#dbe3ee">
+      <div class="stage-top"><span class="stage-idx">2</span><span class="stage-title">装配层</span><span class="stage-sub">把配置、用例、适配器、存储拼成一个 EvaluationEngine</span></div>
+      <div class="nodes n3">
+        <div class="node"><b>CaseLoader.loadCases</b><span>从 JSONL 读用例，产出 <code>EvalCase</code>；校验 case_id 唯一</span></div>
+        <div class="node"><b>AdapterLoader.loadProjectAdapter</b><span>按类名 / JAR / JSON 配置解析出 <code>ProjectAdapter</code></span></div>
+        <div class="node"><b>Stores.open / openJobs</b><span><code>jdbc:</code> 前缀选 JDBC，否则文件实现；产出 <code>Results</code> / <code>JobStore</code></span></div>
+      </div>
+    </div>
+
+    <div class="arrow"><i>EvalCase + ProjectAdapter</i></div>
+
+    <div class="stage" style="--c:var(--cyan);--c-bg:var(--cyan-bg);--c-bd:#c6ecf7">
+      <div class="stage-top"><span class="stage-idx">3</span><span class="stage-title">接入与归一化：四类形态收敛成一种轨迹</span><span class="stage-sub">差异全部留在适配层</span></div>
+      <div class="nodes n4">
+        <div class="node"><b>Java 进程内</b><span>示例适配器 <code>EchoAdapter</code> / <code>BenchmarkAgentAdapter</code>，经反射加载</span></div>
+        <div class="node"><b>HTTP 进程外</b><span><code>HttpProjectAdapter</code>，POST 调用 + 响应体解析</span></div>
+        <div class="node"><b>离线导出文件</b><span><code>TraceFileAdapter</code>：normalized / openinference / openai 三格式</span></div>
+        <div class="node"><b>AgentScope 事件</b><span><code>AgentScopeTraceAdapter</code>，typed events → TraceEvent</span></div>
+      </div>
+      <div class="stage-note"><b>统一契约：</b><code>ProjectAdapter</code> = 怎么调（<code>AgentCaller</code>）+ 怎么读（<code>TraceReader → NormalizedTrace</code>）+ 硬门禁规则 + 软质量规则 + 最大并发。<b>最小完整集</b>是 <code>traceId / finalOutput / events / fields</code>；<code>feedback / target* / raw</code> 与各事件的 <code>fields</code> 是扩展字段，跨框架不保证语义一致。</div>
+    </div>
+
+    <div class="arrow"><i>NormalizedTrace（含 events 步骤签名序列）</i></div>
+
+    <div class="stage" style="--c:var(--purple);--c-bg:var(--purple-bg);--c-bd:#e0d4ff">
+      <div class="stage-top"><span class="stage-idx">4</span><span class="stage-title">评测执行：EvaluationEngine.runSuite</span><span class="stage-sub">assay-core · 整个系统的心脏</span></div>
+      <div class="nodes n4">
+        <div class="node"><b>运行锁与恢复</b><span><code>lockRun</code> 文件/行锁、<code>startRun</code> 校验 manifest、逐 case 跳过已落盘结果</span></div>
+        <div class="node"><b>并发与预算</b><span>固定线程池（<code>workers = min(设定, 适配器上限)</code>）、<code>BudgetLedger</code> 预留/结算、熔断器</span></div>
+        <div class="node"><b>调用与重试</b><span><code>callAgent → readTrace</code>，重试间隔由 <code>RetryPolicy.delayFor</code> 指数退避 + 抖动</span></div>
+        <div class="node"><b>批次落盘</b><span>最多 32 条一批 <code>saveCases</code>；<code>maxInFlight = workers × 2</code></span></div>
+      </div>
+      <div class="stage-note"><b>观测钩子：</b><code>EvaluationListener</code> 经 <code>RunNotifier</code> 逐回调 try/catch 隔离，观察者抛异常不影响评测结论；接口在 core，实现在 extensions。</div>
+    </div>
+
+    <div class="arrow"><i>CheckResult 列表</i></div>
+
+    <div class="stage" style="--c:var(--purple);--c-bg:var(--purple-bg);--c-bd:#e0d4ff">
+      <div class="stage-top"><span class="stage-idx">5</span><span class="stage-title">四层评测：规则判定</span><span class="stage-sub">Rules.evaluateRules · 固定顺序，无脚本引擎</span></div>
+      <div class="nodes n4">
+        <div class="node"><b>structure 结构层</b><span>trace_id / final_output 完整性 + 适配器声明的 hard_gates、soft_quality 规则</span></div>
+        <div class="node"><b>behavior 行为层</b><span>max_steps / max_retries / max_latency_ms、重复步、模块报错</span></div>
+        <div class="node"><b>consistency 一致性层</b><span>对同一 case 的多次 shadow 运行比较同一路径值，不一致即 candidate</span></div>
+        <div class="node"><b>feedback 反馈层</b><span>显式否定 / 重复提问 / 改写，命中即 candidate</span></div>
+      </div>
+      <div class="stage-note"><b>严重级：</b><code>hard / soft / candidate</code> 是写死在 <code>CheckResult.level</code> 的字符串，不是枚举。<code>hard</code> 失败 → <code>hard_pass = false</code>；<code>soft / candidate</code> 失败 → 计软告警。<b>规则操作符</b>共 10 种：<code>eq/ne/contains/not_contains/min/max/in/exists/sequence_contains/sequence_eq</code>。<b>注意另一套体系：</b>release 对比的 <code>CompareGate</code> 用的是 <code>block/warning/info</code>，与这里无关。</div>
+    </div>
+
+    <div class="arrow"><i>CaseResult → Results 接口</i></div>
+
+    <div class="fork">
+      <div class="stage" style="--c:var(--green);--c-bg:var(--green-bg);--c-bd:#c3edd9;flex:1">
+        <div class="stage-top"><span class="stage-idx">6a</span><span class="stage-title">存储层</span></div>
+        <div class="nodes n2">
+          <div class="node"><b>文件实现</b><span><code>runs/&lt;runId&gt;/</code> 下 run.json / manifest.json / cases.jsonl；原子写 + 尾部修复 + 一字节文件锁</span></div>
+          <div class="node"><b>JDBC 实现</b><span>6 张表 + <code>assay_job</code>；<code>SELECT … FOR UPDATE</code> + 显式事务；H2/兼容 JDBC</span></div>
+        </div>
+      </div>
+      <div class="stage" style="--c:var(--green);--c-bg:var(--green-bg);--c-bd:#c3edd9;flex:1">
+        <div class="stage-top"><span class="stage-idx">6b</span><span class="stage-title">报告产物</span></div>
+        <div class="nodes n2">
+          <div class="node"><b>单次运行</b><span><code>results.json</code> · <code>report.md</code> · <code>scenario_stats.json</code> · <code>review_queue.jsonl</code> · <code>few_shot_candidates.jsonl</code></span></div>
+          <div class="node"><b>演化 / 对比</b><span><code>evolution.json</code> + <code>evolution_report.md</code>、<code>compare.json</code>、<code>release.json</code>、<code>auto_evolution.json</code></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><i>comparisons（三集基线与候选的数值对比）</i></div>
+
+    <div class="stage" style="--c:var(--orange);--c-bg:var(--orange-bg);--c-bd:#ffd9bd">
+      <div class="stage-top"><span class="stage-idx">7</span><span class="stage-title">版本演化与诊断</span><span class="stage-sub">evolve / evolve-auto / compare</span></div>
+      <div class="nodes n3">
+        <div class="node"><b>EvolutionEngine</b><span>三集（improvement / regression / holdout）各跑基线 + 候选，缺集或空集启动即失败；组装 comparisons</span></div>
+        <div class="node"><b>EvolutionPolicyEvaluator</b><span>7 个 check 全跑累加 rollback / reject / 改善证据（不短路）；<code>verdict</code> 才短路：rollback → reject → 无证据 reject → accept</span></div>
+        <div class="node"><b>TraceDiff + Reporting</b><span>LCS 对齐（&gt;300 步降级按位置比）、首个可见分歧、<code>Failure clusters</code> 按四元组归并</span></div>
+      </div>
+      <div class="stage-note"><b>决策出口：</b><code>accept / reject / rollback</code> 写入 <code>reasons</code> 与 <code>baseline_runs / candidate_runs</code> 运行血缘，报告里对应 <code>Decision evidence</code> 和 <code>Run lineage</code> 两节。退出码是二值的：accept=0，reject/rollback=1。</div>
+    </div>
+
+    <div class="arrow"><i>产物目录被扫描</i></div>
+
+    <div class="stage" style="--c:var(--slate);--c-bg:var(--slate-bg);--c-bd:#dbe3ee">
+      <div class="stage-top"><span class="stage-idx">8</span><span class="stage-title">消费与回流</span><span class="stage-sub">人看结论 → 结论变成下一轮的用例</span></div>
+      <div class="nodes n3">
+        <div class="node"><b>Dashboard 只读浏览</b><span><code>ArtifactCatalog</code> 识别 6 类产物；store 与评测引擎从不被它调用</span></div>
+        <div class="node"><b>人工复核</b><span><code>review</code> 保存人工结论，<code>export</code> 导出候选</span></div>
+        <div class="node"><b>promote-review 回流</b><span><code>ReviewSamples</code> 按 improvement / regression / holdout 角色归档为数据集样本</span></div>
+      </div>
+      <div class="stage-note"><b>回流：</b>晋级后的样本写进数据集文件，下一轮 <code>CaseLoader.loadCases</code> 直接读到 —— 这是流程图中唯一一条回到第 2 步的虚线。当前示例数据只覆盖一小部分，链路在、规模没起来。</div>
+    </div>
+
+  </div>
+
+  <div class="flow-legend">
+    <span><i style="background:var(--blue)"></i>入口与编排</span>
+    <span><i style="background:var(--cyan)"></i>接入与归一化</span>
+    <span><i style="background:var(--purple)"></i>核心评测</span>
+    <span><i style="background:var(--green)"></i>存储与产物</span>
+    <span><i style="background:var(--orange)"></i>演化与诊断</span>
+    <span><i style="background:var(--slate)"></i>消费与外围</span>
+  </div>
+  <div class="note"><b>怎么读这张图：</b>0→1 决定「谁发起」，2→3 决定「数据从哪来、长什么样」，4→5 是「跑一次评测」，6 是「结果写到哪」，7 是「两个版本怎么比、怎么判」，8 是「人怎么看、结论怎么回到用例」。实线是主链路，回流只发生在人工复核晋级之后。</div>
+</section>
+
+<!-- ============ 2 DEP ============ -->
+<section id="dep">
+  <div class="sec-head"><span class="sec-num">02</span><h2>模块依赖分层图</h2></div>
+  <p class="sec-desc">箭头方向 = 依赖方向（上层依赖下层）。接口留在 <code>assay-core</code>，实现下沉到 store / runtime / extensions —— 这是整套架构最核心的一条边界。</p>
+  <div class="svg-box">
+    <svg viewBox="0 0 1160 660" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Microsoft YaHei,sans-serif">
+      <defs>
+        <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 z" fill="#94a3b8"/></marker>
+        <marker id="arB" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 z" fill="#2563eb"/></marker>
+        <marker id="arG" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 z" fill="#059669"/></marker>
+      </defs>
+
+      <!-- layer labels -->
+      <text x="24" y="52" font-size="11" font-weight="700" fill="#94a3b8">入口 / 交互层</text>
+      <line x1="24" y1="62" x2="1136" y2="62" stroke="#e3e9f2" stroke-width="1"/>
+      <text x="24" y="230" font-size="11" font-weight="700" fill="#94a3b8">运行时服务层</text>
+      <line x1="24" y1="240" x2="1136" y2="240" stroke="#e3e9f2" stroke-width="1"/>
+      <text x="24" y="368" font-size="11" font-weight="700" fill="#94a3b8">领域核心层（零运行时依赖）</text>
+      <line x1="24" y1="378" x2="1136" y2="378" stroke="#e3e9f2" stroke-width="1"/>
+      <text x="24" y="510" font-size="11" font-weight="700" fill="#94a3b8">存储实现层</text>
+      <line x1="24" y1="520" x2="1136" y2="520" stroke="#e3e9f2" stroke-width="1"/>
+
+      <!-- entry layer nodes -->
+      <g>
+        <rect x="60" y="82" width="196" height="66" rx="10" fill="#eef4ff" stroke="#cfe0ff"/>
+        <text x="158" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">assay-cli</text>
+        <text x="158" y="128" text-anchor="middle" font-size="10.5" fill="#4f5b70">命令分发 / 队列命令</text>
+        <text x="158" y="141" text-anchor="middle" font-size="10" fill="#059669">进 assay.jar</text>
+
+        <rect x="276" y="82" width="196" height="66" rx="10" fill="#eef4ff" stroke="#cfe0ff"/>
+        <text x="374" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">assay-server</text>
+        <text x="374" y="128" text-anchor="middle" font-size="10.5" fill="#4f5b70">Spring Boot /api/runs</text>
+        <text x="374" y="141" text-anchor="middle" font-size="10" fill="#be123c">独立部署，不进 jar</text>
+
+        <rect x="492" y="82" width="196" height="66" rx="10" fill="#eef4ff" stroke="#cfe0ff"/>
+        <text x="590" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">assay-dashboard</text>
+        <text x="590" y="128" text-anchor="middle" font-size="10.5" fill="#4f5b70">只读页面 / HttpServer</text>
+        <text x="590" y="141" text-anchor="middle" font-size="10" fill="#059669">进 assay.jar</text>
+
+        <rect x="708" y="82" width="196" height="66" rx="10" fill="#f1f5f9" stroke="#dbe3ee"/>
+        <text x="806" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">extensions × 3</text>
+        <text x="806" y="128" text-anchor="middle" font-size="10.5" fill="#4f5b70">starter / Micrometer / OTel</text>
+        <text x="806" y="141" text-anchor="middle" font-size="10" fill="#be123c">可选，不进 jar</text>
+
+        <rect x="924" y="82" width="196" height="66" rx="10" fill="#ecfdf5" stroke="#a7e8c8"/>
+        <text x="1022" y="108" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">app</text>
+        <text x="1022" y="128" text-anchor="middle" font-size="10.5" fill="#4f5b70">shade → assay.jar</text>
+        <text x="1022" y="141" text-anchor="middle" font-size="10" fill="#059669">enforcer 禁框架依赖</text>
+      </g>
+
+      <!-- runtime layer -->
+      <rect x="424" y="262" width="312" height="70" rx="10" fill="#ecfaff" stroke="#c6ecf7"/>
+      <text x="580" y="290" text-anchor="middle" font-size="14" font-weight="700" fill="#155e75">assay-runtime</text>
+      <text x="580" y="310" text-anchor="middle" font-size="10.5" fill="#4f5b70">适配器加载 / HTTP / TraceFile / 队列 / SuiteRunner</text>
+      <text x="580" y="324" text-anchor="middle" font-size="10" fill="#4f5b70">review · diff · selection · autoevolve · audit · process · workspace</text>
+
+      <rect x="60" y="262" width="200" height="70" rx="10" fill="#f4f0ff" stroke="#e0d4ff"/>
+      <text x="160" y="290" text-anchor="middle" font-size="12.5" font-weight="700" fill="#5b21b6">assay-examples</text>
+      <text x="160" y="309" text-anchor="middle" font-size="10.5" fill="#4f5b70">示例适配器（进 jar）</text>
+      <text x="160" y="324" text-anchor="middle" font-size="10" fill="#4f5b70">Echo / Benchmark / IntentRouter</text>
+
+      <rect x="900" y="262" width="220" height="70" rx="10" fill="#fff4ec" stroke="#ffd9bd"/>
+      <text x="1010" y="290" text-anchor="middle" font-size="12.5" font-weight="700" fill="#9a3412">assay-agentscope</text>
+      <text x="1010" y="309" text-anchor="middle" font-size="10.5" fill="#4f5b70">typed events 转换库</text>
+      <text x="1010" y="324" text-anchor="middle" font-size="10" fill="#be123c">不进 jar（依赖冲突）</text>
+
+      <!-- core layer -->
+      <rect x="424" y="400" width="312" height="72" rx="10" fill="#f4f0ff" stroke="#c9b6ff" stroke-width="2"/>
+      <text x="580" y="428" text-anchor="middle" font-size="15" font-weight="800" fill="#5b21b6">assay-core</text>
+      <text x="580" y="448" text-anchor="middle" font-size="10.5" fill="#4f5b70">模型 / 规则 / EvaluationEngine / 演化 / 报告</text>
+      <text x="580" y="463" text-anchor="middle" font-size="10" fill="#7c3aed">Results · JobStore · EvaluationListener · LlmReviewer 接口在此</text>
+
+      <!-- store layer -->
+      <rect x="300" y="542" width="240" height="70" rx="10" fill="#ecfdf5" stroke="#c3edd9"/>
+      <text x="420" y="570" text-anchor="middle" font-size="12.5" font-weight="700" fill="#065f46">assay-store-file</text>
+      <text x="420" y="589" text-anchor="middle" font-size="10.5" fill="#4f5b70">ResultStore / FileJobStore</text>
+      <text x="420" y="604" text-anchor="middle" font-size="10" fill="#4f5b70">JSONL + 文件锁 + 尾部修复</text>
+
+      <rect x="620" y="542" width="240" height="70" rx="10" fill="#ecfdf5" stroke="#c3edd9"/>
+      <text x="740" y="570" text-anchor="middle" font-size="12.5" font-weight="700" fill="#065f46">assay-store-jdbc</text>
+      <text x="740" y="589" text-anchor="middle" font-size="10.5" fill="#4f5b70">JdbcResultStore / JdbcJobStore</text>
+      <text x="740" y="604" text-anchor="middle" font-size="10" fill="#4f5b70">6 表 + FOR UPDATE 事务</text>
+
+      <rect x="60" y="542" width="200" height="70" rx="10" fill="#f1f5f9" stroke="#dbe3ee"/>
+      <text x="160" y="570" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">assay-integration-tests</text>
+      <text x="160" y="589" text-anchor="middle" font-size="10.5" fill="#4f5b70">仅 src/test，无 main 源</text>
+      <text x="160" y="604" text-anchor="middle" font-size="10" fill="#be123c">test 作用域，不进 jar</text>
+
+      <!-- main dependency arrows -->
+      <g stroke="#2563eb" stroke-width="1.7" fill="none" marker-end="url(#arB)" opacity=".85">
+        <path d="M158,148 L158,250 L470,250 L470,262"/>
+        <path d="M374,148 L374,250 L520,250 L520,262"/>
+        <path d="M590,148 L590,262"/>
+        <path d="M806,148 L806,250 L690,250 L690,262"/>
+        <path d="M580,332 L580,400"/>
+        <path d="M160,332 L160,420 L424,420"/>
+        <path d="M1010,332 L1010,420 L736,420"/>
+      </g>
+      <g stroke="#059669" stroke-width="1.7" fill="none" marker-end="url(#arG)" opacity=".85">
+        <path d="M520,472 L420,542"/>
+        <path d="M640,472 L740,542"/>
+      </g>
+      <g stroke="#94a3b8" stroke-width="1.5" fill="none" marker-end="url(#ar)" stroke-dasharray="5 4">
+        <path d="M158,148 L158,190 L300,190 L300,400 L424,400"/>
+        <path d="M374,148 L374,190 L860,190 L860,400 L736,400"/>
+        <path d="M1022,148 L1022,190 L900,190"/>
+      </g>
+      <!-- app packaging arrow -->
+      <path d="M1022,148 L1022,200 L1120,200 L1120,640 L60,640 L60,612" stroke="#059669" stroke-width="1.8" fill="none" stroke-dasharray="3 4" marker-end="url(#arG)"/>
+      <text x="700" y="634" font-size="10.5" fill="#059669" text-anchor="middle">app 通过 shade 聚合 7 个模块（虚线为打包关系，非编译依赖）</text>
+
+      <!-- side annotations -->
+      <text x="24" y="652" font-size="10.5" fill="#7c879b">实线蓝＝编译依赖主干　绿色＝核心接口的实现方向　灰虚线＝旁挂/可选模块　紫框＝接口定义所在层</text>
+    </svg>
+    <div class="svg-legend">
+      <span class="solid">编译依赖（上层 → 下层）</span>
+      <span class="pack">接口实现 / 打包聚合</span>
+      <span class="dash">旁挂、可选或 test 作用域</span>
+    </div>
+  </div>
+  <div class="note"><b>一句话概括依赖方向：</b>所有模块都向下依赖 <code>assay-core</code>，而 <code>assay-core</code> 的 <code>pom.xml</code> 里只有 JUnit（test 作用域）—— 它不认识命令行、不认识存储实现、不认识 Spring，也不认识 LLM 客户端。扩展能力靠「接口在 core、实现在外」实现，<code>app/pom.xml</code> 的 enforcer 再从构建层面禁止 Spring / Micrometer / OTel 进入发行包。</div>
+</section>
+
+<!-- ============ 3 DOMAINS ============ -->
+<section id="domains">
+  <div class="sec-head"><span class="sec-num">03</span><h2>按功能域拆解</h2></div>
+  <p class="sec-desc">这是「功能模块」视角：一个功能域可能横跨多个 Maven 模块，但接口与实现严格分开。先看九个域之间怎么串成一条链，再逐个域看它内部的流程；每个域都给出正式解释、大白话解释，以及它吃什么、吐什么、和谁打交道。</p>
+
+  <h3 style="font-size:14px;margin:0 0 10px">域间协作流程图 · 九个域如何串成一条链</h3>
+  <div class="svg-wide">
+  <svg viewBox="0 0 1160 720" role="img" aria-label="九个功能域之间的协作流程图">
+    <defs>
+      <marker id="aDom" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8"/></marker>
+      <marker id="cDom" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#cbd5e1"/></marker>
+      <marker id="bDom" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ea580c"/></marker>
+    </defs>
+
+    <!-- 左：触发入口 -->
+    <text x="30" y="40" font-size="11" font-weight="700" fill="#7c879b">触发入口</text>
+    <rect x="30" y="56" width="280" height="64" rx="9" fill="#fff" stroke="#d3dcea"/>
+    <text x="46" y="82" font-size="13" font-weight="700" fill="#1b2434">入口 A · CLI <tspan font-family="monospace">run</tspan></text>
+    <text x="46" y="103" font-size="11" fill="#4f5b70">AssayCli.runSuite 直接跑一次，不经队列</text>
+
+    <rect x="30" y="140" width="280" height="76" rx="9" fill="#fff" stroke="#d3dcea"/>
+    <text x="46" y="166" font-size="13" font-weight="700" fill="#1b2434">入口 B · 队列 / server</text>
+    <text x="46" y="187" font-size="11" fill="#4f5b70">submit + worker、serve、</text>
+    <text x="46" y="204" font-size="11" fill="#4f5b70">Dashboard POST /api/jobs → 先落 JobStore</text>
+
+    <!-- 左：D5 -->
+    <rect x="30" y="250" width="280" height="160" rx="10" fill="#f8fbff" stroke="#93b4f7" stroke-dasharray="6 4"/>
+    <text x="46" y="277" font-size="13" font-weight="700" fill="#2563eb">D5 · 异步调度与队列</text>
+    <text x="46" y="302" font-size="10.8" fill="#4f5b70">① submit(key, payload) 幂等校验</text>
+    <text x="46" y="326" font-size="10.8" fill="#4f5b70">② claim：回收过期租约 → RUNNING</text>
+    <text x="46" y="350" font-size="10.8" fill="#4f5b70">③ 心跳 lease/3（server 20s / CLI 10s）</text>
+    <text x="46" y="374" font-size="10.8" fill="#4f5b70">④ SuiteRunner 或 AssayCli.run("run")</text>
+    <text x="46" y="398" font-size="10.3" fill="#7c879b">语义 at-least-once，不承诺 exactly-once</text>
+
+    <!-- 左：D9 -->
+    <rect x="30" y="440" width="280" height="234" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
+    <text x="46" y="467" font-size="13" font-weight="700" fill="#475569">D9 · 外围 / 可选能力</text>
+    <text x="46" y="493" font-size="10.6" fill="#4f5b70">Dashboard：只读 6 类产物；</text>
+    <text x="46" y="509" font-size="10.6" fill="#4f5b70">serve --worker 才开放 POST /api/jobs</text>
+    <text x="46" y="537" font-size="10.6" fill="#4f5b70">可观测：listener 生产默认 NOOP，</text>
+    <text x="46" y="553" font-size="10.6" fill="#4f5b70">starter 的 ObjectProvider 是唯一注入缝</text>
+    <text x="46" y="581" font-size="10.6" fill="#4f5b70">选测 / 范围审计：select-tests、audit-scope</text>
+    <text x="46" y="625" font-size="10.6" fill="#4f5b70">evolve-auto 与沙箱 Runner：</text>
+    <text x="46" y="641" font-size="10.6" fill="#4f5b70">仅独立命令或测试引用，不在主链路</text>
+
+    <!-- 中：主链节点 -->
+    <g>
+      <rect x="350" y="56" width="460" height="64" rx="10" fill="#ecfaff" stroke="#a5e3f0"/>
+      <rect x="350" y="56" width="5" height="64" rx="2" fill="#0891b2"/>
+      <text x="368" y="82" font-size="14" font-weight="700" fill="#1b2434">D1 · 接入与归一化</text>
+      <text x="368" y="103" font-size="11.2" fill="#4f5b70">AdapterLoader → ProjectAdapter → NormalizedTrace；核心只认统一轨迹</text>
+    </g>
+    <g>
+      <rect x="350" y="170" width="460" height="72" rx="10" fill="#f4f0ff" stroke="#ddd0ff"/>
+      <rect x="350" y="170" width="5" height="72" rx="2" fill="#7c3aed"/>
+      <text x="368" y="197" font-size="14" font-weight="700" fill="#1b2434">D2 · 评测执行引擎</text>
+      <text x="368" y="219" font-size="11.2" fill="#4f5b70">runSuite：运行锁 → 并发预投 → 四层规则 → 批次写盘 → RunSummary</text>
+      <text x="368" y="235" font-size="10.4" fill="#7c879b">内含 D3 的调用；D5 包裹的是「一次 run」的执行</text>
+    </g>
+    <g>
+      <rect x="350" y="332" width="460" height="68" rx="10" fill="#ecfdf5" stroke="#b7ead4"/>
+      <rect x="350" y="332" width="5" height="68" rx="2" fill="#059669"/>
+      <text x="368" y="359" font-size="14" font-weight="700" fill="#1b2434">D4 · 存储与崩溃恢复</text>
+      <text x="368" y="381" font-size="11.2" fill="#4f5b70">Results / JobStore：文件 JSONL 与 JDBC 六表 + assay_job 双实现</text>
+    </g>
+    <g>
+      <rect x="350" y="470" width="460" height="76" rx="10" fill="#fff4ec" stroke="#f8c9a6"/>
+      <rect x="350" y="470" width="5" height="76" rx="2" fill="#ea580c"/>
+      <text x="368" y="497" font-size="14" font-weight="700" fill="#1b2434">D6 · 版本演化决策</text>
+      <text x="368" y="519" font-size="11.2" fill="#4f5b70">三集各跑基线 / 候选 → 7 个 check → verdict 短路出 accept / reject / rollback</text>
+      <text x="368" y="537" font-size="10.4" fill="#7c879b">准出结论与外部报告分开落盘</text>
+    </g>
+    <g>
+      <rect x="350" y="610" width="220" height="64" rx="10" fill="#fff4ec" stroke="#f8c9a6"/>
+      <rect x="350" y="610" width="5" height="64" rx="2" fill="#ea580c"/>
+      <text x="366" y="636" font-size="12.6" font-weight="700" fill="#1b2434">D7 · 首错诊断</text>
+      <text x="366" y="656" font-size="10.4" fill="#4f5b70">LCS → first_divergence</text>
+      <text x="366" y="669" font-size="10.4" fill="#4f5b70">→ Failure clusters</text>
+    </g>
+    <g>
+      <rect x="590" y="610" width="220" height="64" rx="10" fill="#f1f5f9" stroke="#d3dcea"/>
+      <rect x="590" y="610" width="5" height="64" rx="2" fill="#475569"/>
+      <text x="606" y="636" font-size="12.6" font-weight="700" fill="#1b2434">D8 · 复核回流</text>
+      <text x="606" y="656" font-size="10.4" fill="#4f5b70">人工结论 → 晋级账本</text>
+      <text x="606" y="669" font-size="10.4" fill="#4f5b70">→ 下一轮数据集</text>
+    </g>
+
+    <!-- 右：D3 旁挂 -->
+    <rect x="850" y="170" width="280" height="72" rx="10" fill="#f4f0ff" stroke="#ddd0ff"/>
+    <text x="866" y="194" font-size="13" font-weight="700" fill="#1b2434">D3 · 四层规则与门禁</text>
+    <text x="866" y="214" font-size="10.6" fill="#4f5b70">被 D2.evaluateRules 调用，返回 CheckResult</text>
+    <text x="866" y="231" font-size="10.6" fill="#4f5b70">structure → behavior → consistency → feedback</text>
+
+    <!-- 右：图例 -->
+    <rect x="850" y="290" width="280" height="190" rx="10" fill="#fff" stroke="#d3dcea"/>
+    <text x="866" y="317" font-size="12.5" font-weight="700" fill="#1b2434">图例与读法</text>
+    <path d="M866 340 H886" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#aDom)"/>
+    <text x="894" y="344" font-size="10.5" fill="#4f5b70">实线：主链路的数据流</text>
+    <path d="M866 370 H886" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#aDom)"/>
+    <text x="894" y="374" font-size="10.5" fill="#4f5b70">双向：D2 ↔ D3 的规则调用</text>
+    <path d="M866 400 H886" stroke="#cbd5e1" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#cDom)"/>
+    <text x="894" y="404" font-size="10.5" fill="#4f5b70">灰虚线：支撑 / 只读旁挂</text>
+    <path d="M866 430 H886" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#bDom)"/>
+    <text x="894" y="434" font-size="10.5" fill="#4f5b70">橙虚线：人工回流，非自动接线</text>
+    <text x="866" y="462" font-size="10.3" fill="#7c879b">D9 不反向进入核心判定链路</text>
+
+    <!-- 右：下一轮 -->
+    <rect x="850" y="610" width="280" height="64" rx="10" fill="#fffbf6" stroke="#f8c9a6" stroke-dasharray="6 4"/>
+    <text x="866" y="636" font-size="12.6" font-weight="700" fill="#1b2434">下一轮：D2.runSuite</text>
+    <text x="866" y="657" font-size="10.4" fill="#4f5b70">人工把 --output 指给 --cases / 三集参数</text>
+
+    <!-- 主链箭头 -->
+    <path d="M580 120 V164" class="df-line" marker-end="url(#aDom)"/>
+    <text x="590" y="147" font-size="10.4" fill="#7c879b">ProjectAdapter / NormalizedTrace 进入引擎</text>
+    <path d="M580 242 V326" class="df-line" marker-end="url(#aDom)"/>
+    <text x="590" y="288" font-size="10.4" fill="#7c879b">CaseResult 攒够 ≤32 条 → Results.saveCases</text>
+    <path d="M580 400 V464" class="df-line" marker-end="url(#aDom)"/>
+    <text x="590" y="436" font-size="10.4" fill="#7c879b">三集 baseline / candidate 的 run 结果</text>
+    <path d="M580 546 V578 H460 V604" class="df-line" marker-end="url(#aDom)"/>
+    <path d="M580 546 V578 H700 V604" class="df-line" marker-end="url(#aDom)"/>
+
+    <!-- 左栏箭头 -->
+    <path d="M310 88 H330 V196 H344" class="df-line" marker-end="url(#aDom)"/>
+    <text x="252" y="132" font-size="10" fill="#7c879b">直连</text>
+    <path d="M170 216 V244" class="df-line" marker-end="url(#aDom)"/>
+    <path d="M310 300 H330 V226 H344" class="df-line" marker-end="url(#aDom)"/>
+    <text x="252" y="322" font-size="10" fill="#7c879b">包裹一次 run</text>
+    <path d="M170 440 V416" class="df-dash" marker-end="url(#cDom)"/>
+    <text x="180" y="430" font-size="9.6" fill="#7c879b">POST /api/jobs</text>
+    <path d="M310 470 H330 V366 H344" class="df-dash" marker-end="url(#cDom)"/>
+    <text x="252" y="422" font-size="10" fill="#7c879b">只读产物</text>
+
+    <!-- D2 与 D3 双向 -->
+    <path d="M810 192 H844" class="df-line" marker-end="url(#aDom)"/>
+    <path d="M850 224 H816" class="df-line" marker-end="url(#aDom)"/>
+
+    <!-- 回流 -->
+    <path d="M810 642 H844" class="df-back" marker-end="url(#bDom)"/>
+  </svg>
+  </div>
+  <div class="note"><b>读图要点：</b>D5 不是主链上的一环，而是把「一次 run」包起来的调度壳 —— server 走 <code>JobRunQueue → SuiteRunner</code>，CLI worker 则重入 <code>AssayCli.run("run", …)</code>；D3 是 D2 内部的规则调用，不是独立的一段流程；D9 只从旁读取产物或提交任务，不参与判定。D8 到「下一轮」的橙虚线是<b>人工接线</b>：晋级账本与评测 store 分离，<code>CaseLoader</code> 只读显式传入的单个文件、不扫描目录，必须由人把 <code>--output</code> 路径指给下一轮的 <code>--cases</code> 或三集参数。</div>
+
+  <h3 style="font-size:14px;margin:22px 0 10px">九个域逐项说明 · 每张卡片带一张域内流程图</h3>
+  <div class="grid2">
+
+    <div class="domain" style="--c:var(--cyan);--c-bg:var(--cyan-bg);--c-bd:#c6ecf7">
+      <div class="domain-head"><span class="dot"></span><h3>D1 · 接入与归一化</h3><span class="tag">适配层</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>定义统一接入契约 <code>ProjectAdapter</code>，包含 Agent 调用、Trace 读取、硬门禁规则集、软质量规则集与最大并发五个能力；由 <code>AdapterLoader</code> 通过反射、JAR 内 <code>META-INF/services</code> 注册或 JSON 配置解析实现，把 Java 进程内、HTTP 进程外、离线导出文件、AgentScope typed events 四类异构来源映射为不可变的 <code>NormalizedTrace</code>，核心只消费该统一模型。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>不管你的 Agent 是本地 Java 类、远端 HTTP 服务、还是别的框架导出的一个文件，先统一翻译成一张标准表格：这次的编号、最后说了什么、中间做了哪几步、每步属于哪个模块的哪个动作。翻译这件事全交给「转接头」，后面的评测程序只看这张表，不需要知道对面是谁。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>接口与模型在 assay-core；实现在 assay-runtime、assay-examples、assay-agentscope</dd>
+          <dt>输入</dt><dd>EvalCase、HTTP 响应体、离线 JSON/JSONL、AgentScope AgentEvent 列表</dd>
+          <dt>输出</dt><dd>NormalizedTrace（traceId / finalOutput / events / fields + 可选扩展）</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">ProjectAdapter</span><span class="chip">AdapterLoader</span><span class="chip">HttpProjectAdapter</span><span class="chip">TraceFileAdapter</span><span class="chip">AgentScopeTraceAdapter</span><span class="chip">OpenAiTrace</span></div></dd>
+          <dt>调用谁</dt><dd>被 EvaluationEngine 调用；AgentScope 是转换库，不是 ProjectAdapterFactory</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D1 接入与归一化</div>
+          <svg viewBox="0 0 560 132" role="img" aria-label="D1 接入与归一化域内流程图">
+            <defs><marker id="aD1" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 解析引用</text><text class="df-s" x="16" y="76">AdapterLoader</text><text class="df-s" x="16" y="90">JSON / 反射 / jar SPI</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 适配契约</text><text class="df-s" x="156" y="76">ProjectAdapter</text><text class="df-s" x="156" y="90">call / read 契约</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 四类来源</text><text class="df-s" x="296" y="76">Java / HTTP / 文件</text><text class="df-s" x="296" y="90">AgentScope events</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 统一轨迹</text><text class="df-s" x="436" y="76">NormalizedTrace</text><text class="df-s" x="436" y="90">traceId / events</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD1)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD1)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD1)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">reference</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">契约 + 规则集</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">handle → read()</text>
+          </svg>
+          <p class="df-note"><b>边界：</b>AgentScopeTraceAdapter 是转换库（List&lt;AgentEvent&gt; → NormalizedTrace），不是 ProjectAdapterFactory；核心只消费统一轨迹。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--purple);--c-bg:var(--purple-bg);--c-bd:#e0d4ff">
+      <div class="domain-head"><span class="dot"></span><h3>D2 · 评测执行引擎</h3><span class="tag">核心心脏</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>EvaluationEngine.runSuite</code> 负责一次运行的完整编排：获取运行锁、写入 run 元数据与用例清单哈希（resume 时校验身份与逐 case 内容哈希）、建立固定线程池与预算账本、按 <code>maxInFlight</code> 预投任务、逐 case 调用适配器并读取轨迹、执行四层规则、按最多 32 条批次写入 <code>Results</code>，最后 <code>finishRun</code> 并汇总 <code>RunSummary</code>。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>就是「跑一遍」的总指挥：先占住这个运行目录不让别人写，再看哪些用例上次已经跑过可以跳过，然后开几个线程并发去调 Agent，边跑边记预算，攒够一小批就写一次盘，全跑完收尾出一份汇总。中途崩了，下次能从已有结果接着跑，不用从头来。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>assay-core（engine 包）</dd>
+          <dt>输入</dt><dd>List&lt;EvalCase&gt;、ProjectAdapter、Results、EvaluationSettings</dd>
+          <dt>输出</dt><dd>RunSummary + 逐 case 的 CaseResult（经 Results 落盘）</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">EvaluationEngine</span><span class="chip">CaseLoader</span><span class="chip">BudgetLedger</span><span class="chip">CircuitBreaker</span><span class="chip">RetryPolicy</span><span class="chip">RunNotifier</span></div></dd>
+          <dt>调用谁</dt><dd>Rules（规则）、Results（存储）、LlmReviewer（可选附注）、EvaluationListener（观测）</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D2 评测执行引擎</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D2 评测执行引擎域内流程图">
+            <defs><marker id="aD2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 上锁建档</text><text class="df-s" x="16" y="76">RunLock / startRun</text><text class="df-s" x="16" y="90">run.json + manifest</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 续跑校验</text><text class="df-s" x="156" y="76">身份 + 逐 case 哈希</text><text class="df-s" x="156" y="90">跳过只看 hasCase</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 并发取迹</text><text class="df-s" x="296" y="76">预投 workers×2</text><text class="df-s" x="296" y="90">collectTraces 预算</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 判定落盘</text><text class="df-s" x="436" y="76">evaluateRules</text><text class="df-s" x="436" y="90">saveCases ≤32</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD2)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD2)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD2)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">caseManifest</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">pendingCases</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">NormalizedTrace</text>
+            <path class="df-line" d="M486 100 V132 H280 V148" marker-end="url(#aD2)"/>
+            <rect class="df-box2" x="20" y="150" width="520" height="48" rx="8"/>
+            <text class="df-t" x="34" y="170">收尾：finishRun → RunSummary → notifier.runFinished → 释放锁</text>
+            <text class="df-s" x="34" y="187">崩溃只丢未 flush 的内存批次；无任务级硬超时，timeoutSeconds 只交给适配器自用</text>
+          </svg>
+          <p class="df-note"><b>易错口径：</b>逐 case 内容哈希用于校验数据集是否被改动（改动即拒绝续跑），不参与「跳过哪些 case」的判断；批次大小 = min(32, maxInFlight)。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--purple);--c-bg:var(--purple-bg);--c-bd:#e0d4ff">
+      <div class="domain-head"><span class="dot"></span><h3>D3 · 四层规则与门禁</h3><span class="tag">确定性判定</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>Rules</code> 以固定顺序执行 structure / behavior / consistency / feedback 四层检查，产出带 <code>level</code>（hard / soft / candidate）的 <code>CheckResult</code>；规则是声明式数据（10 种操作符、args 结构化子集匹配），不含脚本引擎。<code>CaseResult.hardPass()</code> 与 <code>softWarningCount()</code> 由 checks 派生重算。发布对比阶段另有一套独立的 <code>CompareGate</code>（block / warning / info），两者不可混用。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>拿着标准表格逐条核对：该有的字段在不在、步数有没有超、同一个问题多跑几次结果一不一样、用户有没有给差评。核对结果分三档：硬失败（直接判不过）、软告警（记一笔）、候选（只当线索）。判定全是照着配置算出来的，没有随机数、不叫大模型，所以同一份输入结论唯一、能重放。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>assay-core（rules / compare 包）</dd>
+          <dt>输入</dt><dd>NormalizedTrace、EvalCase.expected / metadata、适配器规则集、shadow traces</dd>
+          <dt>输出</dt><dd>List&lt;CheckResult&gt; → CaseResult 的硬通过 / 软告警</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">Rules</span><span class="chip">RuleConfig</span><span class="chip">ValueOps</span><span class="chip">CheckResult</span><span class="chip">CompareGate</span><span class="chip">CompareEngine</span></div></dd>
+          <dt>调用谁</dt><dd>被 EvaluationEngine.evaluateRules 与 CompareCommand 分别调用</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D3 四层规则与门禁</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D3 四层规则与门禁域内流程图">
+            <defs><marker id="aD3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① structure</text><text class="df-s" x="16" y="76">trace_id / 输出</text><text class="df-s" x="16" y="90">hardGates → hard</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② behavior</text><text class="df-s" x="156" y="76">max_steps / latency</text><text class="df-s" x="156" y="90">repeated_event 候选</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ consistency</text><text class="df-s" x="296" y="76">多跑轨迹不一致</text><text class="df-s" x="296" y="90">→ candidate</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ feedback</text><text class="df-s" x="436" y="76">用户反馈三信号</text><text class="df-s" x="436" y="90">→ candidate</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD3)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD3)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD3)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">固定顺序</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">addAll 累加</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">checks</text>
+            <path class="df-line" d="M486 100 V132 H145 V148" marker-end="url(#aD3)"/>
+            <path class="df-dash" d="M486 100 V132 H415 V148" marker-end="url(#aD3)"/>
+            <rect class="df-box2" x="20" y="150" width="250" height="48" rx="8"/>
+            <text class="df-t" x="32" y="170">CheckResult → CaseResult</text>
+            <text class="df-s" x="32" y="187">hardPass() / softWarningCount() 派生重算</text>
+            <rect class="df-box2" x="290" y="150" width="250" height="48" rx="8" stroke-dasharray="4 3"/>
+            <text class="df-t" x="302" y="170">另一条链：CompareGate</text>
+            <text class="df-s" x="302" y="187">CompareEngine → block / warning / info</text>
+          </svg>
+          <p class="df-note"><b>边界：</b>level 是普通 String，实际取值为 hard / soft / candidate；CompareGate 的 severity 只在发布对比链使用，不进 runSuite，两套口径不能混用。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--green);--c-bg:var(--green-bg);--c-bd:#c3edd9">
+      <div class="domain-head"><span class="dot"></span><h3>D4 · 存储与崩溃恢复</h3><span class="tag">双实现</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>core 定义 <code>Results</code> 与 <code>JobStore</code> 两个接口；文件实现用目录 + JSONL 追加写、临时文件 <code>ATOMIC_MOVE</code>、一字节跨进程文件锁，并处理末行截断、缺换行、UTF-8 半字符三种尾部损坏（中间损坏报错）；JDBC 实现用 6 张表 + <code>assay_job</code>、<code>SELECT … FOR UPDATE</code> 与显式事务保证 claim 的原子性。<code>Stores</code> 工厂按 <code>jdbc:</code> 前缀选择后端。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>两种记账方式：一种往文件里一行行追加，一种往数据库表里写。都要解决同一件事 —— 跑一半崩了怎么办。文件版允许把「最后没写完的那一行」砍掉重来，数据库版靠事务和行锁保证不会两个人同时领到同一个任务。上层完全不关心用的是哪种，换个前缀就切换。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>接口 assay-core；实现 assay-store-file / assay-store-jdbc；工厂在 assay-runtime</dd>
+          <dt>输入</dt><dd>CaseResult、run 元数据、manifest、job payload、复核记录</dd>
+          <dt>输出</dt><dd>runs/&lt;runId&gt;/ 下的 run.json / manifest.json / cases.jsonl，或 JDBC 表行</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">Results</span><span class="chip">JobStore</span><span class="chip">ResultStore</span><span class="chip">FileJobStore</span><span class="chip">JdbcResultStore</span><span class="chip">JdbcJobStore</span><span class="chip">AtomicFiles</span><span class="chip">ExclusiveFileLock</span></div></dd>
+          <dt>调用谁</dt><dd>被 EvaluationEngine、EvolutionEngine、JobRunQueue、QueueCommands 调用</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D4 存储与崩溃恢复</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D4 存储与崩溃恢复域内流程图">
+            <defs><marker id="aD4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 选后端</text><text class="df-s" x="16" y="76">Stores.open</text><text class="df-s" x="16" y="90">jdbc: → JDBC / 文件</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 追加写</text><text class="df-s" x="156" y="76">saveCases(batch)</text><text class="df-s" x="156" y="90">拼 JSONL 后追加</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 重读恢复</text><text class="df-s" x="296" y="76">loadCases 严格 UTF-8</text><text class="df-s" x="296" y="90">尾部半行 truncate</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 原子替换</text><text class="df-s" x="436" y="76">AtomicFiles.write</text><text class="df-s" x="436" y="90">tmp + ATOMIC_MOVE</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD4)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD4)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD4)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">reference</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">CaseResult</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">元数据</text>
+            <path class="df-line" d="M486 100 V132 H145 V148" marker-end="url(#aD4)"/>
+            <path class="df-dash" d="M486 100 V132 H415 V148" marker-end="url(#aD4)"/>
+            <rect class="df-box2" x="20" y="150" width="250" height="48" rx="8"/>
+            <text class="df-t" x="32" y="170">文件版 claim</text>
+            <text class="df-s" x="32" y="187">FileChannel.lock() 跨进程排他锁</text>
+            <rect class="df-box2" x="290" y="150" width="250" height="48" rx="8"/>
+            <text class="df-t" x="302" y="170">JDBC 版 claim</text>
+            <text class="df-s" x="302" y="187">SELECT … FOR UPDATE + 显式事务</text>
+          </svg>
+          <p class="df-note"><b>易错口径：</b>中间已终止行解析失败直接抛异常、不静默跳过；只有末尾未写完的半行才被截断重来。finishRun 会全量重写 cases.jsonl 压缩并清 logTails。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--blue);--c-bg:var(--blue-bg);--c-bd:#cfe0ff">
+      <div class="domain-head"><span class="dot"></span><h3>D5 · 异步调度与队列</h3><span class="tag">零中间件</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>基于共享 <code>JobStore</code> 的持久化任务队列：<code>claim</code> 原子领取并授予租约，独立的单线程调度器按 <code>lease/3</code> 周期心跳续租，过期任务在 claim 前被回收；取消是协作式（写 <code>cancel_requested</code> + <code>interrupt</code>）；失败按 <code>RetryPolicy.delayFor</code> 指数退避写 <code>next_attempt_at</code>；幂等键由调用方提供，同键不同 payload 报冲突。语义是 at-least-once，不承诺 exactly-once。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>不装 Redis、不装 Kafka，就用文件或数据库当任务清单。谁领了任务就先「占个座」，占座有有效期，干得久就每隔一小会儿喊一声「我还在」；要是真挂了，座位过期别人就能接手。重复提交用调用方给的一个钥匙防住 —— 同一个钥匙交两次，拿到的是同一个任务，内容不一样就直接报错而不是偷偷覆盖。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>接口 assay-core；实现 store 两模块；编排 assay-runtime（JobRunQueue）与 assay-cli（QueueCommands）</dd>
+          <dt>输入</dt><dd>RunSpec / job payload、幂等键、max-attempts、lease 秒数</dd>
+          <dt>输出</dt><dd>任务状态机（QUEUED → RUNNING → SUCCEEDED / FAILED / CANCELLED）+ run-summary.json</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">JobRunQueue</span><span class="chip">JobStore</span><span class="chip">RunSpec</span><span class="chip">RunJobs</span><span class="chip">SuiteRunner</span><span class="chip">RetryPolicy</span><span class="chip">IdempotencyConflictException</span></div></dd>
+          <dt>调用谁</dt><dd>server 的 RunService、CLI 的 submit/worker、Dashboard 的 POST /api/jobs</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D5 异步调度与队列</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D5 异步调度与队列域内流程图">
+            <defs><marker id="aD5" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker><marker id="bD5" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#ea580c"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 提交</text><text class="df-s" x="16" y="76">submit(key)</text><text class="df-s" x="16" y="90">canonical 全等校验</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 领取</text><text class="df-s" x="156" y="76">claim(workerId)</text><text class="df-s" x="156" y="90">先回收过期 → RUNNING</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 续租</text><text class="df-s" x="296" y="76">心跳 lease/3</text><text class="df-s" x="296" y="90">heartbeat + 取消检查</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 执行收尾</text><text class="df-s" x="436" y="76">SuiteRunner</text><text class="df-s" x="436" y="90">AssayCli.run(run)</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD5)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD5)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD5)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">Job</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">attempts + 1</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">succeed / cancel</text>
+            <path class="df-line" d="M470 100 V132 H320 V148" marker-end="url(#aD5)"/>
+            <rect class="df-box2" x="170" y="150" width="300" height="48" rx="8"/>
+            <text class="df-t" x="184" y="170">fail → RetryPolicy.delayFor</text>
+            <text class="df-s" x="184" y="187">写 next_attempt_at → 回 QUEUED（橙线）</text>
+            <path class="df-back" d="M170 174 H30 V128 H206 V102" marker-end="url(#bD5)"/>
+          </svg>
+          <p class="df-note"><b>两套参数：</b>server 租约 60s / 心跳 20s，CLI worker 默认 30s / 10s；CLI worker 不经 JobRunQueue，而是重入 run 命令，attempts&gt;1 追加 --resume。失败不按错误类型分类，语义 at-least-once。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--orange);--c-bg:var(--orange-bg);--c-bd:#ffd9bd">
+      <div class="domain-head"><span class="dot"></span><h3>D6 · 版本演化决策</h3><span class="tag">准出判定</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>EvolutionEngine</code> 在 improvement / regression / holdout 三份数据集上分别跑基线与候选（三集缺一或为空则启动即失败），用 <code>MetricStats</code> 汇总指标、<code>EvolutionComparison</code> 计算用例四态迁移与逐集 delta；<code>EvolutionPolicyEvaluator</code> 依次执行 7 个 check（目标身份、回归、holdout、场景门禁、质量门禁、目标指标、改善证据），全部跑完累加三组理由、不短路；最后由 <code>verdict</code> 按固定优先级短路输出 accept / reject / rollback。若某集运行不完整，直接 rollback 并跳过 evaluator。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>回答「新版本能不能发」。拿三组题分别给老版本和新版本做：想改好的那组、不能弄坏的老功能、还有一组憋着没给新版本看过的题。先看有没有弄坏老的（弄坏直接打回），再看有没有达标，最后要求必须拿得出「确实变好」的证据 —— 没变好也不算通过，得打回去继续改。所有判断理由都写下来，人能回头看为什么被拦。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>assay-core（evolve / model 包）；编排在 assay-cli（EvolutionCommands）</dd>
+          <dt>输入</dt><dd>三份数据集、基线与候选 EvaluationEngine、EvolutionPolicy</dd>
+          <dt>输出</dt><dd>evolution.json（decision / reasons / comparisons / baseline_runs / candidate_runs）</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">EvolutionEngine</span><span class="chip">EvolutionPolicyEvaluator</span><span class="chip">MetricStats</span><span class="chip">EvolutionComparison</span><span class="chip">QualityGate</span><span class="chip">ScenarioGate</span><span class="chip">MetricObjective</span></div></dd>
+          <dt>调用谁</dt><dd>EvaluationEngine（跑两轮）、Results.saveEvolution、Reporting.writeEvolutionArtifacts</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D6 版本演化决策</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D6 版本演化决策域内流程图">
+            <defs><marker id="aD6" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 三集加载</text><text class="df-s" x="16" y="76">三集 improvement</text><text class="df-s" x="16" y="90">regression/holdout</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 各跑两轮</text><text class="df-s" x="156" y="76">baseline.runSuite</text><text class="df-s" x="156" y="90">candidate.runSuite</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 汇总对比</text><text class="df-s" x="296" y="76">MetricStats 汇总</text><text class="df-s" x="296" y="90">逐集 delta</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 检查裁决</text><text class="df-s" x="436" y="76">7 个 check 全跑累加</text><text class="df-s" x="436" y="90">verdict 才短路</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD6)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD6)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD6)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">CaseLoader</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">RunSummary ×2</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">comparisons</text>
+            <path class="df-line" d="M486 100 V132 H145 V148" marker-end="url(#aD6)"/>
+            <path class="df-dash" d="M486 100 V132 H415 V148" marker-end="url(#aD6)"/>
+            <rect class="df-box2" x="20" y="150" width="250" height="48" rx="8"/>
+            <text class="df-t" x="32" y="170">incompleteRuns 非空</text>
+            <text class="df-s" x="32" y="187">直接 rollback，跳过 evaluator</text>
+            <rect class="df-box2" x="290" y="150" width="250" height="48" rx="8"/>
+            <text class="df-t" x="302" y="170">verdict 固定优先级</text>
+            <text class="df-s" x="302" y="187">rollback→reject→无改善证据→accept</text>
+          </svg>
+          <p class="df-note"><b>两处落盘不是一回事：</b>Results.saveEvolution 写 store 内 &lt;experimentId&gt;.json；Reporting.writeEvolutionArtifacts 写 evolution.json 与 evolution_report.md。默认 requireImprovement=true，没拿出改善证据会被 reject。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--orange);--c-bg:var(--orange-bg);--c-bd:#ffd9bd">
+      <div class="domain-head"><span class="dot"></span><h3>D7 · 首错诊断与失败归并</h3><span class="tag">辅助证据</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>TraceDiff</code> 用 <code>module + action</code> 签名构建步骤序列做 LCS 对齐（超 300 步降级为按位置比对），忽略时间戳与 span_id 等噪音字段，产出 <code>first_divergence</code> 与差异清单；<code>Reporting.appendCaseTransitions</code> 把发生回归的用例按 <code>(role, category, module, action)</code> 四元组归并成 <code>Failure clusters</code>，每簇给条数与前 5 个样例，按条数倒序。结果为可解释证据，不参与门禁决策。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>版本退化时不重新跑一遍 Agent，直接把两次已经存下来的轨迹摊开对齐，找出「从哪一步开始不一样」——是少调了一步、参数变了、还是顺序挪了，都标出来。再把一堆失败按「哪套题 / 什么差异 / 哪个模块的哪个动作」归成几堆，人先去看最大的那堆。它只帮人缩小范围，不替人下结论，更不会自己说「根因是 X」。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>assay-core（evolve / report 包）</dd>
+          <dt>输入</dt><dd>基线 NormalizedTrace、候选 NormalizedTrace、case_transitions.regressed</dd>
+          <dt>输出</dt><dd>first_divergence、divergences、Case transitions、Failure clusters 表</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">TraceDiff</span><span class="chip">Reporting</span><span class="chip">RuleStats</span><span class="chip">Fmt</span></div></dd>
+          <dt>调用谁</dt><dd>被 EvolutionComparison.regression 与 Reporting.writeEvolutionArtifacts 调用</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D7 首错诊断与失败归并</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D7 首错诊断与失败归并域内流程图">
+            <defs><marker id="aD7" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 筛回归例</text><text class="df-s" x="16" y="76">compareCases</text><text class="df-s" x="16" y="90">取两次已落盘 trace</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 轨迹对齐</text><text class="df-s" x="156" y="76">module+action 签名</text><text class="df-s" x="156" y="90">按 events 顺序做 LCS</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 生成差异</text><text class="df-s" x="296" y="76">compareGap 等</text><text class="df-s" x="296" y="90">取 first_divergence</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 归并成簇</text><text class="df-s" x="436" y="76">Reporting 聚类</text><text class="df-s" x="436" y="90">三集混池 + 四元组</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD7)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD7)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD7)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">regressed</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">Step 序列</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">≤5 样例/簇</text>
+            <path class="df-line" d="M486 100 V132 H280 V148" marker-end="url(#aD7)"/>
+            <rect class="df-box2" x="20" y="150" width="520" height="48" rx="8"/>
+            <text class="df-t" x="34" y="170">结果：evolution_report.md 的一张 Failure clusters 表（按条数倒序）</text>
+            <text class="df-s" x="34" y="187">任一侧 &gt;300 步降级 positional；忽略 span_id / timestamp 等噪音字段</text>
+          </svg>
+          <p class="df-note"><b>边界：</b>first_divergence 是差异排序后的第 0 条，不是生成顺序的第一条；聚类只作给人看的证据，不参与门禁 —— quality gate 只看 case_transitions 的计数。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--slate);--c-bg:var(--slate-bg);--c-bd:#dbe3ee">
+      <div class="domain-head"><span class="dot"></span><h3>D8 · 人工复核与资产回流</h3><span class="tag">数据飞轮</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>Results.saveReview</code> 把人工结论追加进 <code>reviews/&lt;runId&gt;.jsonl</code>（写入不去重，读取侧按 run_id + case_id last-write-wins）；<code>ReviewCommands.export</code> 导出 regression / few-shot 候选；<code>promote-review</code> 经 <code>ReviewSamples.promoteReviewRecord</code> 派生 <code>dataset_role</code>、<code>gate_verdict</code> 与 <code>review_history</code>，并 upsert 到必填的 <code>--output</code> 账本。该账本与评测 store 分离，<code>CaseLoader</code> 只读显式传入的单个文件、不扫描目录，因此下一轮需人工把该路径指给 <code>--cases</code> 或三集参数。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>机器判为「可疑」的用例进复核队列，人看完给个结论。这个结论能被提拔成一条正式用例，标好该进哪套题，攒成一份账本文件；下一轮由人把这个文件路径指给数据集参数就能用上 —— 是「人工接线」，不是系统自动把数据塞回下一轮。等于把人花时间做的判断攒成了资产。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>接口 assay-core（Results）；实现 assay-store-file / jdbc；业务在 assay-runtime（ReviewSamples）与 assay-cli（ReviewCommands）</dd>
+          <dt>输入</dt><dd>review_queue.jsonl、人工结论</dd>
+          <dt>输出</dt><dd>reviews/*.jsonl、带角色的数据集样本</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">ReviewSamples</span><span class="chip">ReviewCommands</span><span class="chip">Results.saveReview</span></div></dd>
+          <dt>回流方式</dt><dd>人工把 --output 账本路径指给下一轮 --cases / 三集参数，由 CaseLoader 读入</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D8 人工复核与资产回流</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D8 人工复核与资产回流域内流程图">
+            <defs><marker id="aD8" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker><marker id="bD8" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#ea580c"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 待办队列</text><text class="df-s" x="16" y="76">writeRunArtifacts</text><text class="df-s" x="16" y="90">review_queue.jsonl</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 人工结论</text><text class="df-s" x="156" y="76">review → saveReview</text><text class="df-s" x="156" y="90">reviews/*.jsonl</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 导出候选</text><text class="df-s" x="296" y="76">review export</text><text class="df-s" x="296" y="90">regression 候选</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 晋级归档</text><text class="df-s" x="436" y="76">promote-review</text><text class="df-s" x="436" y="90">dataset_role 等字段</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD8)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD8)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD8)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">失败用例</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">人工结论</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">--input</text>
+            <path class="df-back" d="M486 100 V132 H280 V148" marker-end="url(#bD8)"/>
+            <rect class="df-box2" x="20" y="150" width="520" height="48" rx="8" stroke-dasharray="4 3"/>
+            <text class="df-t" x="34" y="170">下一轮：CaseLoader.loadCases(显式路径) ← 人工指定</text>
+            <text class="df-s" x="34" y="187">--cases / --improvement / --regression / --holdout（橙线，非自动接线）</text>
+          </svg>
+          <p class="df-note"><b>不要说成自动回流：</b>--output 必填、无默认数据集目录，晋级账本与评测 store 分离；CaseLoader 只读单个文件、不扫描目录。写入不去重，只在读取侧按 run_id + case_id 做 last-write-wins。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="domain" style="--c:var(--slate);--c-bg:var(--slate-bg);--c-bd:#dbe3ee">
+      <div class="domain-head"><span class="dot"></span><h3>D9 · 外围：UI / 可观测 / 辅助子系统</h3><span class="tag">可选能力</span></div>
+      <div class="domain-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>包含默认只读的 Dashboard（<code>HttpServer</code> 绑定 127.0.0.1、CSP/no-store、<code>ArtifactCatalog</code> 只识别 6 类产物；仅 <code>serve --worker</code> 时开放 <code>POST /api/jobs</code>）、可观测扩展（<code>EvaluationListener</code> 的 Micrometer 与 OTel 实现，经 spring-boot-starter 的 <code>ObjectProvider</code> 注入）、测试集选择（<code>DiffAnalysis</code> + <code>TestSelectionService</code>）、范围审计（<code>ScopeAudit</code>）、自动演化（<code>AutoEvolutionLoop</code> + <code>TextArtifactWorkspace</code>）、进程/容器执行工具（<code>AgentProcessRunner</code> / <code>ContainerRunner</code>）。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>主链路之外的配套设施：一个只能看、默认不能改的网页；想把指标接进监控系统时的插件；改了代码之后自动判断该跑哪些测试的小工具；还有在沙箱里自动试改文本制品的实验回路。它们都能单独拿掉，不影响核心评测跑起来。</p></div>
+        <dl class="kv">
+          <dt>所在模块</dt><dd>assay-dashboard、extensions × 3、assay-runtime 的 diff/selection/audit/autoevolve/process/workspace 包</dd>
+          <dt>输入</dt><dd>产物目录、EvaluationListener 回调、git diff、候选制品</dd>
+          <dt>输出</dt><dd>页面视图、指标/span、选测结论、审计报告、自动演化轮次产物</dd>
+          <dt>关键类</dt><dd><div class="chips"><span class="chip">DashboardServer</span><span class="chip">ArtifactCatalog</span><span class="chip">MicrometerEvaluationListener</span><span class="chip">OtelEvaluationListener</span><span class="chip">TestSelectionService</span><span class="chip">AutoEvolutionLoop</span></div></dd>
+          <dt>调用谁</dt><dd>由 CLI 命令或 Spring 容器装配；不反向进入核心判定链路</dd>
+        </dl>
+        <div class="dom-flow">
+          <div class="df-cap">域内流程 · D9 外围子系统的旁挂关系</div>
+          <svg viewBox="0 0 560 210" role="img" aria-label="D9 外围子系统旁挂关系流程图">
+            <defs><marker id="aD9" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+            <g><rect class="df-box" x="8" y="36" width="116" height="64" rx="8"/><rect x="8" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="16" y="56">① 只读网页</text><text class="df-s" x="16" y="76">DashboardServer</text><text class="df-s" x="16" y="90">127.0.0.1 + 6 类产物</text></g>
+            <g><rect class="df-box" x="148" y="36" width="116" height="64" rx="8"/><rect x="148" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="156" y="56">② 可观测</text><text class="df-s" x="156" y="76">EvaluationListener</text><text class="df-s" x="156" y="90">Micrometer / OTel</text></g>
+            <g><rect class="df-box" x="288" y="36" width="116" height="64" rx="8"/><rect x="288" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="296" y="56">③ 选测审计</text><text class="df-s" x="296" y="76">selectTests 选测</text><text class="df-s" x="296" y="90">MODE_RANK 只能升档</text></g>
+            <g><rect class="df-box" x="428" y="36" width="116" height="64" rx="8"/><rect x="428" y="36" width="4" height="64" rx="2" class="df-bar"/><text class="df-t" x="436" y="56">④ 辅助回路</text><text class="df-s" x="436" y="76">AutoEvolutionLoop</text><text class="df-s" x="436" y="90">自动演化工作区</text></g>
+            <path class="df-line" d="M127 68 H142" marker-end="url(#aD9)"/>
+            <path class="df-line" d="M267 68 H282" marker-end="url(#aD9)"/>
+            <path class="df-line" d="M407 68 H422" marker-end="url(#aD9)"/>
+            <text class="df-lbl" x="136" y="116" text-anchor="middle">GET /api/*</text>
+            <text class="df-lbl" x="276" y="116" text-anchor="middle">回调事件</text>
+            <text class="df-lbl" x="416" y="116" text-anchor="middle">git diff / 制品</text>
+            <path class="df-line" d="M486 100 V132 H280 V148" marker-end="url(#aD9)"/>
+            <rect class="df-box2" x="20" y="150" width="520" height="48" rx="8"/>
+            <text class="df-t" x="34" y="170">旁挂，不进主链：生产默认 NOOP，唯一注入缝是 starter 的 ObjectProvider</text>
+            <text class="df-s" x="34" y="187">AgentProcessRunner / ContainerRunner 在 src/main 无引用，仅测试使用</text>
+          </svg>
+          <p class="df-note"><b>边界：</b>POST /api/jobs 只在 serve --worker 时开放（需 X-Assay-Request:1），无 worker 返回 503；MODE_RANK 是选测侧档位，不是评测侧的提档降档。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 4 MODULES ============ -->
+<section id="modules">
+  <div class="sec-head"><span class="sec-num">04</span><h2>14 个 Maven 模块逐项说明</h2></div>
+  <p class="sec-desc">点标题展开/收起。<b>正式解释</b>用工程术语描述职责与边界；<b>大白话</b>解释它到底在替你干什么。<span class="pill">进 jar</span> 表示被打进 <code>app/target/assay.jar</code>。</p>
+  <div class="toolbar">
+    <button class="btn" id="expandAll">全部展开</button>
+    <button class="btn" id="collapseAll">全部收起</button>
+    <button class="btn" id="onlyJar">只看进发行包的 7 个模块</button>
+    <span style="font-size:12px;color:var(--text-3);margin-left:6px">默认展开前 3 个</span>
+  </div>
+  <div class="mods" id="mods">
+
+    <div class="mod open" data-jar="1" style="--c:var(--purple);--c-bg:var(--purple-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-core</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>领域核心。包含不可变数据模型（<code>NormalizedTrace</code>、<code>TraceEvent</code>、<code>EvalCase</code>、<code>Rule</code>、<code>EvolutionPolicy</code> 等 record）、四层规则引擎 <code>Rules</code>、评测编排 <code>EvaluationEngine</code>、版本演化 <code>EvolutionEngine</code> + <code>EvolutionPolicyEvaluator</code>、诊断 <code>TraceDiff</code>、报告生成 <code>Reporting</code>，以及对外契约接口 <code>Results</code>、<code>JobStore</code>、<code>EvaluationListener</code>、<code>LlmReviewer</code>、<code>ProjectAdapter</code>。pom 中仅有 JUnit（test 作用域），零运行时依赖。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>整个项目真正「懂评测」的部分，其他模块都是给它打下手的。它规定了数据长什么样、怎么判、怎么比两个版本、怎么出报告，同时把「存哪里」「怎么调 Agent」「要不要接监控」都留成接口让别人填。它自己不认识任何框架，所以能单独编译、单独测试、结论可重放。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>所有其他模块都调用它的接口与模型（它自身没有上层调用方）</dd><dt>下游</dt><dd>通过接口调用 Results / LlmReviewer / EvaluationListener / ProjectAdapter 的实现</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">EvaluationEngine</span><span class="chip">Rules</span><span class="chip">EvolutionEngine</span><span class="chip">EvolutionPolicyEvaluator</span><span class="chip">TraceDiff</span><span class="chip">Reporting</span><span class="chip">Results</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod open" data-jar="1" style="--c:var(--cyan);--c-bg:var(--cyan-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-runtime</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>运行时服务集合，13 个包 28 个类。承担适配器加载（<code>AdapterLoader</code>）、HTTP 与离线文件适配器、<code>Stores</code> 存储工厂、<code>SuiteRunner</code> 执行路径、<code>JobRunQueue</code> 队列、<code>RunSpec/RunJobs</code> 协议转换，以及 review / diff / selection / autoevolve / audit / workspace / process / llm 等辅助子系统。仅依赖 core 与两个 store 模块。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>「胶水层」和「工具箱」。核心只定规矩，具体去找适配器、去选存储、去把一次请求翻译成引擎能懂的参数、去安排队列里的活，都是它干。另外那些不改判定结果的外围功能（选测、审计、复核归档、沙箱）也都放在这儿，方便单独取舍。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>assay-cli、assay-server、app</dd><dt>下游</dt><dd>assay-core（接口）、assay-store-file / jdbc（实现）</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">AdapterLoader</span><span class="chip">Stores</span><span class="chip">SuiteRunner</span><span class="chip">JobRunQueue</span><span class="chip">HttpProjectAdapter</span><span class="chip">TraceFileAdapter</span><span class="chip">ReviewSamples</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod open" data-jar="1" style="--c:var(--blue);--c-bg:var(--blue-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-cli</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>命令行入口与命令分发，<code>AssayCli.main → System.exit(run(argv))</code>。命令表是扁平的顶级命令：<code>run</code>、<code>submit</code>、<code>worker</code>、<code>jobs</code>、<code>cancel</code>、<code>replay</code>、<code>prune</code>、<code>serve</code>、<code>evolve</code>、<code>evolve-auto</code>、<code>compare</code>、<code>release</code>、<code>review</code>、<code>export</code>、<code>promote-review</code>、<code>select-tests</code>、<code>audit-scope</code>、<code>quickstart</code>、<code>demo</code> 等。负责参数解析、引擎装配、退出码判定。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>你敲的每一条 <code>assay xxx</code> 都从这里进。它把命令拆开、把参数拼好、把该创建的对象创建出来，然后调核心去跑，最后决定给 CI 返回 0 还是 1。可以把它理解成整个系统的总开关面板。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>用户 / CI / assay 启动脚本</dd><dt>下游</dt><dd>assay-runtime、assay-core、两个 store、assay-dashboard</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">AssayCli</span><span class="chip">CommandLine</span><span class="chip">QueueCommands</span><span class="chip">EvolutionCommands</span><span class="chip">ReviewCommands</span><span class="chip">CompareCommand</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="1" style="--c:var(--green);--c-bg:var(--green-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-store-file</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>Results</code> 与 <code>JobStore</code> 的文件系统实现。<code>ResultStore</code> 建 runs / reviews / evolutions / .locks 四目录，每个 run 下写 run.json、manifest.json（逐 case SHA-256）、cases.jsonl；<code>FileJobStore</code> 用 jobs/、run-index/ 与 <code>.jobs.lock</code> 管理任务。落盘采用 <code>AtomicFiles</code> 临时文件 + ATOMIC_MOVE、JSONL 追加写与末行修复、<code>ExclusiveFileLock</code> 一字节跨进程锁；resume 时校验运行身份与用例内容哈希。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>默认存储，开箱即用、不用装数据库。所有结果一行一行写进文件，写之前先占个锁防止两个人同时写同一个运行目录；万一中途断电只写了一半，恢复时把最后那半行砍掉继续。优点是轻，代价是单机、没有多实例共享之外的能力。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Stores.open / openJobs、EvaluationEngine、JobRunQueue</dd><dt>下游</dt><dd>assay-core 的 Results / JobStore 接口</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">ResultStore</span><span class="chip">FileJobStore</span><span class="chip">AtomicFiles</span><span class="chip">ExclusiveFileLock</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="1" style="--c:var(--green);--c-bg:var(--green-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-store-jdbc</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>Results</code> 与 <code>JobStore</code> 的 JDBC 实现，门面 <code>JdbcResultStore</code> / <code>JdbcJobStore</code> 把职责委托给 Run / Case / Review / Evolution / Retention 等 Repository。<code>JdbcSchema</code> 建 6 张表，<code>ensureSchema</code> 对 job 表做幂等列与索引迁移；claim、fail、replay、addCaseCheck 均使用 <code>SELECT … FOR UPDATE</code> + 显式事务。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>同一套接口的数据库版本，给需要多实例共享一份任务清单的场景用。领任务靠数据库行锁，不会两个人领到同一个；表和索引启动时自动建好、缺列自动补。换后端只要把 <code>--store</code> 换成 <code>jdbc:</code> 开头的地址，上层代码一行不用改。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Stores.open / openJobs（<code>jdbc:</code> 前缀）</dd><dt>下游</dt><dd>assay-core 的 Results / JobStore 接口</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">JdbcResultStore</span><span class="chip">JdbcJobStore</span><span class="chip">JdbcSchema</span><span class="chip">JdbcRunRepository</span><span class="chip">JdbcCaseRepository</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="1" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-dashboard</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>零构建前端与只读 HTTP 服务。<code>DashboardServer</code> 基于 <code>com.sun.net.httpserver.HttpServer</code> 绑定 127.0.0.1，提供静态资源与 <code>/api/catalog</code>、<code>/api/rule-history</code>、<code>/api/artifacts/{id}</code>、<code>/api/audit-patch/{id}</code>、<code>/api/jobs</code> 等 GET 接口；<code>ArtifactCatalog</code> 只识别 6 类产物并做路径 containment / 符号链接 / 大小校验，不调用 store 与评测引擎。POST 仅在传入 <code>JobStore</code>（即 <code>serve --worker</code>）时开放。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>一个本地网页，用来翻历史报告、看任务队列、看版本对比结果。默认只能看不能改；只有启动时加了 <code>--worker</code> 才会多出「提交/取消任务」两个按钮。它只读产物文件，不碰存储、不碰评测引擎，所以页面出问题解决不了也不会把评测搞坏。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>assay-cli 的 <code>serve</code> 命令</dd><dt>下游</dt><dd>仅依赖 assay-core（+ test 的 store-file）；不调用评测引擎</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">DashboardServer</span><span class="chip">ArtifactCatalog</span><span class="chip">app.js</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="1" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-examples</h3><span class="jar in">进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>示例适配器与基准 Agent，均实现 <code>ProjectAdapterFactory</code>：<code>EchoAdapter</code>、<code>BenchmarkAgentAdapter</code>（确定性多步 Agent，无网络/LLM）、<code>IntentRouterAdapters</code>（Baseline / Candidate / Regressed 三版本），另含 <code>IntentRouterAutoEvolution</code> 演示自动演化接入。仅依赖 core，作为 app 的 compile 依赖被打进发行包。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>几个「假 Agent」，用来在没有真实业务系统时把整条链路跑通、做基准压测、演示版本退化长什么样。它们进安装包，但不属于评测核心 —— 换成真实 Agent 时这些都可以不用。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>app / assay-cli 的 demo、benchmark 脚本</dd><dt>下游</dt><dd>assay-core 的 ProjectAdapter / ProjectAdapterFactory</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">EchoAdapter</span><span class="chip">BenchmarkAgentAdapter</span><span class="chip">IntentRouterAdapters</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--green);--c-bg:var(--green-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>app</h3><span class="jar makes">产出 assay.jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>分发聚合模块，无业务源码。通过 <code>maven-shade-plugin</code> 把 cli / examples / core / runtime / 两个 store / dashboard 打进 <code>app/target/assay.jar</code>，mainClass 为 <code>io.assay.cli.AssayCli</code>；<code>maven-enforcer-plugin</code> 的 <code>bannedDependencies</code> 禁止 <code>org.springframework:* / io.micrometer:* / io.opentelemetry:*</code> 进入依赖树，从构建层面保证核心 framework-free。<code>assay-integration-tests</code> 仅为 test 作用域，不被 shade。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>打包车间：把散在各模块的类塞进一个能直接 <code>java -jar</code> 的 jar。它还兼职保安 —— 谁想把 Spring 或监控依赖偷偷带进核心发行包，构建就直接失败。目的就是让「一个 jar 就能跑」这句话在构建层面也成立。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>构建命令 / Dockerfile</dd><dt>下游</dt><dd>聚合 7 个模块；test 作用域依赖 integration-tests</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">pom.xml (shade + enforcer)</span><span class="chip">io.assay.cli.AssayCli</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--blue);--c-bg:var(--blue-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-server</h3><span class="jar out">不进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>可选的 Spring Boot HTTP 服务。<code>RunController</code> 提供 <code>POST /api/runs</code>（可带 <code>Idempotency-Key</code>，返回 202）与一组 GET 查询；<code>RunService</code> 构造 <code>JobStore</code> 与 <code>JobRunQueue</code> 并在 <code>@PostConstruct</code> 启动 worker；鉴权由 <code>ApiTokenFilter</code> 做 Bearer / X-API-Key 常量时间比对，未配置 token 时全放开并有非 loopback 绑定告警。独立 artifact，不在 app 依赖链上。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>给「想通过 HTTP 提交评测、多个实例一起消费队列」的场景准备的另一种入口。它自带 worker 线程池，收到请求先记成任务再慢慢跑，查结果也是走接口。这是唯一一个真正用 Spring Boot 的地方 —— 核心和发行包都不依赖它。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>外部调用方 / CI</dd><dt>下游</dt><dd>assay-runtime（JobRunQueue / SuiteRunner / Stores）、两个 store、assay-core</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">RunController</span><span class="chip">RunService</span><span class="chip">ApiTokenFilter</span><span class="chip">SecurityConfig</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--orange);--c-bg:var(--orange-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-agentscope</h3><span class="jar out">不进 jar</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>独立适配库，是全仓唯一感知 AgentScope 类型的地方。<code>AgentScopeTraceAdapter.toTrace</code> 用 <code>switch (event.getType())</code> 把 AGENT / MODEL_CALL / TOOL_CALL / SUBAGENT_EXPOSED / EXCEED_MAX_ITERS / ALL_TOOLS_DENIED 等 typed events 映射为 <code>TraceEvent</code>，并组装 <code>finalOutput</code> 与 <code>fields.metrics</code>；<code>AgentScopeEventRecorder</code> 实现 <code>AgentEventEmitter</code> 收集事件。它是供领域适配器调用的转换库，本身不实现 <code>ProjectAdapterFactory</code>。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>专门给 AgentScope 写的「翻译词典」：它认识 AgentScope 那些带类型的事件，知道哪个是模型调用、哪个是工具调用、哪个是权限拒绝，把它们翻成系统通用的步骤表。因为带着 AgentScope 和 OTel 的传递依赖，会破坏发行包「不含框架」的规矩，所以单独放一个模块，不打包进 jar。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>领域项目自己的适配器</dd><dt>下游</dt><dd>assay-core 的 NormalizedTrace / TraceEvent / MultiAgentMetrics</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">AgentScopeTraceAdapter</span><span class="chip">AgentScopeEventRecorder</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>extensions · spring-boot-starter</h3><span class="jar out">可选</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>@AutoConfiguration</code> 装配三个 bean：文件 <code>Results</code>、JDBC <code>Results</code> 与 <code>EvaluationEngine</code>；后者通过 <code>ObjectProvider&lt;EvaluationListener&gt;</code> 注入容器里的观测实现，缺省 <code>NOOP</code>。注册文件为 <code>META-INF/spring/…AutoConfiguration.imports</code>。配置项前缀 <code>assay</code>（store / workers / retries / timeoutSeconds 等）。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>如果你的项目本来就是 Spring Boot 应用，加这个依赖就能自动得到一个配好的评测引擎，不用手写一堆 new。它也是全仓唯一把监控回调真正接进引擎的地方 —— 前提是你自己把 listener 注册成 bean。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Spring Boot 应用</dd><dt>下游</dt><dd>assay-core（Results / EvaluationEngine / EvaluationListener）</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">AssayAutoConfiguration</span><span class="chip">AssayProperties</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>extensions · metrics-micrometer</h3><span class="jar out">可选</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>MicrometerEvaluationListener implements EvaluationListener</code>，覆盖 run / case / retry / batch / failed 等回调，把耗时与计数写入 <code>MeterRegistry</code>。标签只含 <code>suite / source / status</code>（retry 另含 attempt），不含 run_id / case_id 以避免基数爆炸；tag 空白归一为 <code>unknown</code>、超 64 字符截断。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>把评测过程接进监控系统的插件。特意不给每条用例、每次运行都打独立标签 —— 否则指标数量会爆掉。run_id 只放在内存里算耗时，不上报。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Spring 容器注册为 bean → starter 的 ObjectProvider</dd><dt>下游</dt><dd>assay-core 的 EvaluationListener 接口</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">MicrometerEvaluationListener</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>extensions · tracing-otel</h3><span class="jar out">可选</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p><code>OtelEvaluationListener implements EvaluationListener</code>，建立 <code>assay.run / assay.case / assay.batch</code> span 与各 stage 子 span；case 以 run 的 Context 为父，stage 用 <code>ThreadLocal&lt;Deque&lt;Span&gt;&gt;</code> 栈维护并在收尾时 <code>closeStages()</code> 兜底关闭；失败置 <code>StatusCode.ERROR</code> 并 <code>recordException</code>。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>链路追踪插件，把「跑一轮 → 跑一条用例 → 调适配器/跑规则/落盘」画成一层套一层的调用树。特意处理了异常情况下没关掉的 span，免得追踪图上挂着一串永远不结束的条目。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Spring 容器注册为 bean → starter 的 ObjectProvider</dd><dt>下游</dt><dd>assay-core 的 EvaluationListener 接口</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">OtelEvaluationListener</span></div></dd></dl>
+      </div>
+    </div>
+
+    <div class="mod" data-jar="0" style="--c:var(--slate);--c-bg:var(--slate-bg)">
+      <div class="mod-head"><span class="layer"></span><h3>assay-integration-tests</h3><span class="jar out">test only</span><span class="chev">›</span></div>
+      <div class="mod-body">
+        <div class="explain"><span class="lbl formal">正式解释</span><p>跨模块集成测试，需要文件存储 fixture 与 <code>io.assay.testing</code> 共享工具，<b>无 main 源码</b>。在 <code>app/pom.xml</code> 中以 <code>test</code> 作用域声明，仅为 JaCoCo 聚合覆盖而存在，不被 shade 进发行包，也不计入 <code>app</code> 的聚合覆盖率统计口径里的主代码。</p></div>
+        <div class="explain"><span class="lbl plain">大白话</span><p>专门验证「几个模块拼起来还能不能正常工作」的测试包，比如真的开第二个 JVM 去抢文件锁、跑一次完整的演化对比。它只在跑测试时存在，用户拿到的 jar 里没有它。</p></div>
+        <dl class="kv"><dt>上游</dt><dd>Maven test 阶段、JaCoCo 聚合</dd><dt>下游</dt><dd>多个模块的 main 代码</dd><dt>关键类</dt><dd><div class="chips"><span class="chip">src/test 下的集成测试类</span></div></dd></dl>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 5 EDGES ============ -->
+<section id="edges">
+  <div class="sec-head"><span class="sec-num">05</span><h2>模块间调用关系明细</h2></div>
+  <p class="sec-desc">按「谁 → 谁 → 通过什么 → 干什么」列出关键调用边。这是流程图里每根箭头的落地版本。</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:150px">调用方</th><th style="width:60px"></th><th style="width:180px">被调方</th><th style="width:230px">经由（接口 / 类）</th><th>做什么</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">AssayCli.runSuite</td><td class="dir">→</td><td class="mono">Stores.open</td><td class="mono">runtime/execution/Stores</td><td>按 store 引用（<code>jdbc:</code> 前缀）选文件 / JDBC 的 <code>Results</code></td></tr>
+        <tr><td class="mono">AssayCli.engineFor</td><td class="dir">→</td><td class="mono">EvaluationEngine</td><td class="mono">构造注入 Results / ProjectAdapter / LlmReviewer</td><td>把适配器、存储、设置拼成引擎实例</td></tr>
+        <tr><td class="mono">AssayCli.runSuite</td><td class="dir">→</td><td class="mono">CaseLoader.loadCases</td><td class="mono">core/engine/CaseLoader</td><td>从 JSONL 读用例、校验 id 唯一</td></tr>
+        <tr><td class="mono">SuiteRunner / AssayCli</td><td class="dir">→</td><td class="mono">AdapterLoader</td><td class="mono">runtime/adapters/AdapterLoader</td><td>类名 / JAR / JSON 配置 → <code>ProjectAdapterFactory.create()</code></td></tr>
+        <tr><td class="mono">EvaluationEngine</td><td class="dir">→</td><td class="mono">ProjectAdapter</td><td class="mono">AgentCaller.call → TraceReader.read</td><td>调 Agent 拿句柄，再把句柄读成 <code>NormalizedTrace</code></td></tr>
+        <tr><td class="mono">EvaluationEngine</td><td class="dir">→</td><td class="mono">Rules</td><td class="mono">structure → behavior → consistency → feedback</td><td>四层检查，产 <code>List&lt;CheckResult&gt;</code></td></tr>
+        <tr><td class="mono">EvaluationEngine</td><td class="dir">→</td><td class="mono">Results.saveCases</td><td class="mono">core/store/Results 接口</td><td>最多 32 条一批追加落盘；resume 时逐 case 查 <code>hasCase</code> 跳过</td></tr>
+        <tr><td class="mono">EvaluationEngine</td><td class="dir">→</td><td class="mono">RunNotifier / EvaluationListener</td><td class="mono">core/engine（回调被 try/catch 隔离）</td><td>发射 run/case/stage/batch 事件，异常不影响评测结论</td></tr>
+        <tr><td class="mono">EvaluationEngine</td><td class="dir">→</td><td class="mono">LlmReviewer.analyze</td><td class="mono">core/engine 接口 → runtime/llm 实现</td><td>仅在用例已被判可疑后调用，结果写 <code>llm_review</code>，不改判定</td></tr>
+        <tr><td class="mono">AssayCli.runSuite / SuiteRunner</td><td class="dir">→</td><td class="mono">Reporting.writeRunArtifacts</td><td class="mono">core/report/Reporting</td><td>落 results.json / report.md / scenario_stats.json / 两个 jsonl</td></tr>
+        <tr><td class="mono">EvolutionCommands</td><td class="dir">→</td><td class="mono">EvolutionEngine.run</td><td class="mono">core/evolve</td><td>三集各跑基线 + 候选，组装 comparisons</td></tr>
+        <tr><td class="mono">EvolutionEngine</td><td class="dir">→</td><td class="mono">EvaluationEngine.runSuite ×6</td><td class="mono">基线 / 候选 × 三角色</td><td>复用同一套评测引擎，只是身份与数据集不同</td></tr>
+        <tr><td class="mono">EvolutionEngine</td><td class="dir">→</td><td class="mono">EvolutionPolicyEvaluator.decide</td><td class="mono">core/evolve（包级私有）</td><td>7 个 check 累加（不短路）→ verdict 短路输出三态决策 + reasons</td></tr>
+        <tr><td class="mono">EvolutionComparison</td><td class="dir">→</td><td class="mono">TraceDiff.compare</td><td class="mono">core/evolve/TraceDiff</td><td>LCS 对齐两次落盘轨迹，取 first_divergence</td></tr>
+        <tr><td class="mono">EvolutionEngine</td><td class="dir">→</td><td class="mono">Results.saveEvolution</td><td class="mono">baseline.store()</td><td>把演化结果写进存储</td></tr>
+        <tr><td class="mono">EvolutionCommands</td><td class="dir">→</td><td class="mono">Reporting.writeEvolutionArtifacts</td><td class="mono">core/report/Reporting</td><td>evolution.json + evolution_report.md（含 Decision evidence / Run lineage / Failure clusters）</td></tr>
+        <tr><td class="mono">QueueCommands.submit</td><td class="dir">→</td><td class="mono">JobStore.submit(key, payload, maxAttempts)</td><td class="mono">core/runner 接口 → store 实现</td><td>同键命中旧任务；同键不同 payload 抛 <code>IdempotencyConflictException</code></td></tr>
+        <tr><td class="mono">QueueCommands.worker</td><td class="dir">→</td><td class="mono">AssayCli.run("run", …)</td><td class="mono">进程内重入 CLI</td><td>CLI worker 不走 JobRunQueue；靠 <code>runArgs</code> 重跑一次同步链</td></tr>
+        <tr><td class="mono">RunController</td><td class="dir">→</td><td class="mono">RunService.start</td><td class="mono">server/run</td><td>POST /api/runs → queue.submit</td></tr>
+        <tr><td class="mono">JobRunQueue.execute</td><td class="dir">→</td><td class="mono">SuiteRunner.run</td><td class="mono">runtime/execution</td><td>spec → 加载适配器与用例 → 引擎 → 写报告 → jobs.succeed</td></tr>
+        <tr><td class="mono">JobRunQueue</td><td class="dir">→</td><td class="mono">JobStore.heartbeat / claim</td><td class="mono">独立单线程 ScheduledExecutor</td><td>lease/3 续租；续租被拒则 <code>cancelled.set + interrupt()</code></td></tr>
+        <tr><td class="mono">JobStore.fail</td><td class="dir">→</td><td class="mono">RetryPolicy.delayFor</td><td class="mono">core/runner/RetryPolicy</td><td>指数退避 + 抖动写 <code>next_attempt_at</code>；用尽次数转 FAILED</td></tr>
+        <tr><td class="mono">DashboardServer</td><td class="dir">→</td><td class="mono">ArtifactCatalog</td><td class="mono">dashboard/web</td><td>只读扫描 6 类产物；不调用 store 与评测引擎</td></tr>
+        <tr><td class="mono">DashboardServer (POST)</td><td class="dir">→</td><td class="mono">JobStore.submit / cancel</td><td class="mono">仅 serve --worker 时可用</td><td>提交与取消任务；默认无此能力（返回 503）</td></tr>
+        <tr><td class="mono">ReviewCommands.promoteReview</td><td class="dir">→</td><td class="mono">ReviewSamples</td><td class="mono">runtime/review</td><td>人工结论 → 带角色的数据集样本，回流 CaseLoader</td></tr>
+        <tr><td class="mono">AssayAutoConfiguration</td><td class="dir">→</td><td class="mono">EvaluationListener bean</td><td class="mono">ObjectProvider&lt;EvaluationListener&gt;</td><td>唯一把 Micrometer / OTel 实现注入引擎的生产入口</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 6 ENTRIES ============ -->
+<section id="entries">
+  <div class="sec-head"><span class="sec-num">06</span><h2>三条入口链路对照</h2></div>
+  <p class="sec-desc">同一个评测引擎，三种「怎么被叫起来」的方式。这是最容易画错的一处：CLI worker 和 server worker 走的是两条不同的编排路径。</p>
+  <div class="tbl-wrap">
+    <table style="min-width:760px">
+      <thead><tr><th style="width:130px">链路</th><th>顺序</th><th style="width:190px">编排归属</th><th style="width:180px">租约 / 重试默认</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>A. 同步直连</b><br><span class="pill">assay run</span></td>
+          <td class="mono">AssayCli.runSuite → Stores.open → engineFor → CaseLoader → EvaluationEngine.runSuite → Reporting.writeRunArtifacts</td>
+          <td>assay-cli（无队列）</td>
+          <td>无租约；<code>--retries</code> 默认 0</td>
+        </tr>
+        <tr>
+          <td><b>B. CLI 队列</b><br><span class="pill">submit + worker</span></td>
+          <td class="mono">submit → JobStore.submit → worker → claim → executeJob（起心跳）→ AssayCli.run("run", …) → 同 A → succeed / finish / fail</td>
+          <td>assay-cli（QueueCommands）</td>
+          <td><code>--lease-seconds</code> 默认 30 → 心跳 10s；<code>--max-attempts</code> 默认 3</td>
+        </tr>
+        <tr>
+          <td><b>C. Server API</b><br><span class="pill">POST /api/runs</span></td>
+          <td class="mono">RunController → RunService.start → JobRunQueue.submit → pollLoop / claim → RunJobs.spec → SuiteRunner.run → EvaluationEngine.runSuite → Reporting → writeSummary → jobs.succeed</td>
+          <td>assay-server + assay-runtime</td>
+          <td><code>job-lease-seconds</code> 默认 60 → 心跳 20s；配置里 max-attempts 默认 1</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>为什么 B 不复用 C：</b>CLI worker 的实现是直接重入 <code>run</code> 命令（<code>QueueCommands.executeJob → AssayCli.run(runArgs(job))</code>，重试次数 &gt;1 时追加 <code>--resume</code>），因此它天然继承同步链路的全部行为；<code>JobRunQueue + SuiteRunner</code> 是 server 侧为了在 Spring 进程内起多线程 worker 而另写的一套编排。两者共享的是 <code>JobStore</code> 契约，不是执行代码。</div>
+</section>
+
+<!-- ============ 7 BOUNDARY ============ -->
+<section id="boundary">
+  <div class="sec-head"><span class="sec-num">07</span><h2>边界与易混淆点</h2></div>
+  <p class="sec-desc">这些是画图时最容易凭印象画错、或把「设计」画成「已实现」的地方，逐条按源码标明。</p>
+
+  <div class="callout">
+    <h3>八条必须说清的边界</h3>
+    <ul>
+      <li><b>接口在 core，实现在外面。</b><code>Stores</code>、<code>ResultStore</code>、<code>JdbcResultStore</code>、<code>AdapterLoader</code>、<code>OpenAiCompatibleReviewer</code>、<code>ReviewSamples</code>、<code>TestSelectionService</code>、<code>AutoEvolutionLoop</code>、<code>ScopeAudit</code> 都<b>不在</b> assay-core；core 里只有 <code>Results</code> / <code>JobStore</code> / <code>EvaluationListener</code> / <code>LlmReviewer</code> / <code>ProjectAdapter</code> 等契约与数据模型。</li>
+      <li><b>两套 severity 不能混。</b>四层评测是 <code>hard / soft / candidate</code>（写死在 <code>CheckResult.level</code>）；release 对比门禁是 <code>CompareGate</code> 的 <code>block / warning / info</code>，属于另一条命令链。</li>
+      <li><b>CLI 没有 queue 父命令。</b><code>submit / worker / jobs / cancel / replay / prune / reindex-jobs</code> 都是顶级命令；队列提交的 HTTP 入口是 <code>POST /api/runs</code>（server）或 <code>POST /api/jobs</code>（dashboard --worker）。</li>
+      <li><b>AgentProcessRunner / ContainerRunner 没有生产调用边。</b>它们是提供给领域 <code>AgentCaller</code> 自行调用的工具类，main 源码里没有任何 adapter 调用它们；<code>AutoEvolutionLoop</code> 的沙箱是 <code>TextArtifactWorkspace</code> 文本制品目录，不是容器。容器默认参数确实是禁网 / 只读根 / drop ALL caps / 512m / 1 cpu / 128 pids。</li>
+      <li><b>可观测 listener 不会自动创建。</b>Micrometer / OTel 两个实现是库类，main 源码里没有实例化点；唯一注入缝是 spring-boot-starter 的 <code>ObjectProvider&lt;EvaluationListener&gt;</code>。CLI 与 SuiteRunner 生产路径硬编码 <code>NOOP</code>。</li>
+      <li><b>AgentScope 是转换库，不是适配器工厂。</b><code>assay-agentscope</code> 只提供 <code>AgentScopeTraceAdapter.toTrace</code> 与 <code>AgentScopeEventRecorder</code>，没有 <code>ProjectAdapterFactory</code> 实现；且因传递依赖冲突不进 assay.jar。</li>
+      <li><b>退出码 2 不只来自用法错误。</b>除 <code>UsageException</code> 外，<code>select-tests</code> 的 <code>humanReviewRequired</code>、<code>audit-scope</code> 的「非 no_obvious_issue / 非 clear_out_of_scope」也会返回 2；决策链本身只产 0（accept）/ 1（reject、rollback），不产生 2。</li>
+      <li><b>四类接入都没有接生产上的真实框架。</b>Java / HTTP / 离线文件是示例适配器 + 集成测试验证，AgentScope 有独立模块与 typed events 映射但未接真实应用；准确表述是「验证契约可实现」，不是「验证四个真实框架」。</li>
+    </ul>
+  </div>
+
+  <div class="note"><b>关于发行包：</b><code>app/target/assay.jar</code> 只聚合 7 个模块（cli、examples、core、runtime、两个 store、dashboard），<code>assay-server</code>、<code>assay-agentscope</code>、三个 extensions 与 <code>assay-integration-tests</code> 都不在其中。Dockerfile 打的也是这个 CLI 发行版镜像，注释明确说明 Spring Boot server 是另一个 artifact。</div>
+</section>
+
+<footer>
+  本文依据 <code>D:/code/Java/Assay</code> 仓库源码逐项核对生成（2026-11-12）。所有类名、接口名、命令名、目录名均来自 main 源码与 pom 配置；未实现的机制已在「边界」一节显式标注。若代码后续变更，请以源码为准。
+</footer>
+
+</div>
+
+<script>
+(function(){
+  var mods = Array.prototype.slice.call(document.querySelectorAll('.mod'));
+  mods.forEach(function(m){
+    m.querySelector('.mod-head').addEventListener('click', function(){ m.classList.toggle('open'); });
+  });
+  document.getElementById('expandAll').addEventListener('click', function(){
+    mods.forEach(function(m){ m.classList.add('open'); m.style.display=''; });
+    document.getElementById('onlyJar').classList.remove('on');
+  });
+  document.getElementById('collapseAll').addEventListener('click', function(){
+    mods.forEach(function(m){ m.classList.remove('open'); });
+  });
+  var only = document.getElementById('onlyJar');
+  only.addEventListener('click', function(){
+    var active = !only.classList.contains('on');
+    only.classList.toggle('on', active);
+    mods.forEach(function(m){
+      m.style.display = (active && m.getAttribute('data-jar') !== '1') ? 'none' : '';
+      if(active) m.classList.add('open');
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -118,11 +118,13 @@ powershell -ExecutionPolicy Bypass -File scripts/package-dist.ps1
 ## 模块结构
 
 ```text
-assay-core/                            # 领域模型、规则、评测引擎、演化、报告、存储接口
+assay-core/                            # 领域模型、规则、指标、评测引擎、演化、报告、存储接口
+assay-synth/                           # 从文档/轨迹合成用例、生成对抗用例（质量门、去重、来源标记）
 assay-store-file/                      # 文件存储 ResultStore
 assay-store-jdbc/                      # JDBC 存储 JdbcResultStore
+assay-bootstrap/                       # 组合层：按路径/JDBC URL 打开 store，供 CLI/Server 使用
 assay-dashboard/                       # 只读 Dashboard 与静态资源
-assay-runtime/                         # 审计、diff、trace、process、workspace 等运行服务
+assay-runtime/                         # 审计、diff、trace、process、workspace 等运行服务（只依赖 core 接口）
 assay-agentscope/                      # AgentScope 2.0 typed event 到 NormalizedTrace 的适配
 assay-examples/                        # 示例适配器（不参与评测核心）
 assay-cli/                             # 命令行接口与命令分发
@@ -133,7 +135,7 @@ extensions/assay-metrics-micrometer/   # 可选 Micrometer 指标
 extensions/assay-tracing-otel/         # 可选 OpenTelemetry span
 ```
 
-根目录是 Maven reactor，`mvn -q test` 会一次构建十四个模块。`app` 通过 shade 把 core、runtime、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
+根目录是 Maven reactor，`mvn -q test` 会一次构建全部模块。`app` 通过 shade 把 core、synth、runtime、bootstrap、examples、两个 store、dashboard 和 cli 打成可执行的 `app/target/assay.jar`；只构建某个扩展时用 `mvn -q -pl :assay-spring-boot-starter -am test`。`app` 通过 enforcer 禁止引入 Spring/Micrometer/OTel，集成能力留在扩展模块。
 
 范围审计页面可加载报告旁的 `diff.patch`，切换统一或分屏视图，并从发现定位到修改前或修改后的行。服务读取补丁时会核对报告的 `diff_sha256`，不一致则拒绝展示；导入 JSON 后也可选择本地补丁进行同样的检查。补丁查看上限为 8 MiB，页面最多展示 5,000 行、200 个文件。
 
@@ -169,7 +171,8 @@ curl -s -X POST http://127.0.0.1:8080/api/runs \
 - 队列与并发：`worker-threads`（每个实例的 worker 数）、`job-lease-seconds`（lease 时长，心跳按 1/3 续租）、`poll-millis`（空转轮询间隔）、`job-max-attempts`（可重试次数）。
 - 幂等：`Idempotency-Key` 相同的提交返回同一个 `job_id`；payload 不同则明确报冲突。
 - 执行参数：`workers`、`retries`、`timeout-seconds`、`collect-few-shot`；存储与报告目录通过 `assay.server.store`、`assay.server.output` 配置。
-- 结果合并：队列 worker 会把本次 summary 写入 `<output>/<run_id>/run-summary.json`，GET 详情时与持久化的 run 记录合并，返回 `hard_failures`、`case_count`、`budget`、`retry_policy`、`circuit_breaker` 等字段。
+- 指标：请求体可带 `metrics_preset`（如 `agent-safety`）或 `metrics_file`（指标 JSON 的路径），两者互斥；`metrics_file` 里的 `geval` 需要 server 进程能读到 `ASSAY_MODEL`。
+- 结果合并：队列 worker 会把本次 summary 写入 `<output>/<run_id>/run-summary.json`，GET 详情时与持久化的 run 记录合并，返回 `hard_failures`、`case_count`、`budget`、`retry_policy`、`circuit_breaker`、`metric_stats` 等字段。
 - 鉴权：配置 `assay.server.auth-tokens`（列表）后，除 `GET /api/ping`、`GET /actuator/health`、`GET /actuator/info` 外的接口都要求 `X-API-Key: <token>` 或 `Authorization: Bearer <token>`，token 使用常量时间比较；列表为空时保持本地开放模式。未授权请求返回 401 ProblemDetail。设置 `assay.server.fail-on-insecure-binding=true` 后，非 loopback 绑定且 token 为空会直接拒绝启动。
 - `resume` 要求显式 `run_id`（否则 400），并沿用原 run 的身份与配置。
 
@@ -381,17 +384,111 @@ java -jar app/target/assay.jar run \
 | `demo` | 跑内置 EchoAdapter 示例、启动带队列的 Dashboard 并打开浏览器（最快上手） |
 | `run` | 评测一个外部提供的测试集 |
 | `release` | 依次执行 regression、smoke、可选 full，任一阶段硬门禁失败即停止 |
+| `synth` | 从文档或轨迹合成用例，带质量门、去重与来源标记 |
+| `attack` | 从已有用例生成对抗变体，带攻击分类、严重级别与安全行为 |
 | `select-tests` | 根据当前 Git Diff 推荐该跑哪套测试 |
 | `audit-scope` | 按需求与验收标准审计一次改动是否越界 |
 | `evolve` | 对比基线与候选版本，给出 accept / reject / rollback |
 | `evolve-auto` | 在沙箱内自动诊断、生成候选、评测、迭代 |
 | `review` | 保存人工最终结论 |
+| `calibrate` | 用人工结论计算评估器的一致率、精确率与召回率 |
 | `export` | 导出已确认的 regression 或 few-shot 候选 |
 | `promote-review` | 把一条审核样本晋级到 improvement / regression / holdout |
 | `prune` | 按保留策略清理已完成运行、报告目录和终态 job |
 | `reindex-jobs` | 重建 job 的 `run_id` 索引（文件指针重建，或 JDBC 旧行回填） |
 
 退出码是一份契约：`0` 正常，`1` 硬门禁失败、预算用尽或决策为负，`2` 用法错误或结果需要人工复核。需要人看的运行不会看起来像通过。
+
+### 指标（可选）
+
+默认不启用指标，行为与纯规则评测完全一致。`run`、`release`、`submit` 可用预设或配置文件启用：
+
+```bash
+# 内置预设：tool_permission（hard）+ loop_detection（soft）
+java -jar app/target/assay.jar run \
+  --adapter io.assay.examples.EchoAdapter --suite smoke --cases cases.jsonl \
+  --preset agent-safety
+
+# 自定义指标配置
+java -jar app/target/assay.jar run \
+  --adapter io.assay.examples.EchoAdapter --suite smoke --cases cases.jsonl \
+  --metrics metrics.json --metric-cache .assay/metric-cache
+```
+
+`--metrics` 与 `--preset` 互斥。指标配置文件形如：
+
+```json
+{
+  "metrics": [
+    {
+      "type": "tool_permission",
+      "level": "hard",
+      "threshold": 1.0,
+      "allowed_tools": ["lookup"],
+      "denied_tools": ["shell"]
+    },
+    {
+      "type": "loop_detection",
+      "threshold": 0.9,
+      "level": "soft"
+    },
+    {
+      "type": "geval",
+      "name": "groundedness",
+      "criteria": "回答必须基于提供的资料，覆盖用户问题，且不编造事实",
+      "threshold": 0.8,
+      "level": "soft"
+    }
+  ]
+}
+```
+
+`geval` 使用模型评分，需要设置 `ASSAY_MODEL`（与 `--use-llm` 相同）；未设置时启动即报用法错误，不会静默跳过。
+
+- `geval` 首次运行会先让模型把 `criteria` 拆成 2-5 条评分步骤（可用 `steps` 手工指定以省一次调用），再按步骤给 0-10 分并归一化；
+- `strict: true` 时只接受 0/1，阈值固定为 1.0；
+- 分数、理由、评分步骤和 token 消耗写入 `metrics`，便于审计；
+- 指标结果写入 `results.json` 的 `metrics` 数组，并按名称聚合为 `metric_stats`；
+- `report.md` 增加「Metric scores」表；
+- `--metric-cache <dir>` 按「trace 内容 + case + 指标配置」做内容寻址缓存，命中时成本为 0 并标记 `cached`；
+- 没有工具调用的 case，`tool_permission` 记为 `skip`，不进入通过率，也不会被当成满分；
+- `loop_detection` 是纯确定性指标：重复工具调用（3 次扣分、6 次归零）、相邻模型输出高度相似、`A,B,A,B` 形式的重复序列，三信号加权；trace 里没有可用证据时记为 `skip`。
+
+### 合成用例（可选）
+
+`synth` 从 Markdown/文本或已存轨迹生成评测用例，输出仍是标准 case JSONL：
+
+```bash
+ASSAY_MODEL=gpt-4o-mini java -jar app/target/assay.jar synth \
+  --from docs --input docs/policies --out improvement.synthetic.jsonl \
+  --scenario refund --per-context 2 --evolutions 1 \
+  --quality-threshold 7 --max-cases 30 --max-calls 100
+```
+
+- `--from docs|traces`：文档按字符切块；轨迹按 `NormalizedTrace` 渲染成证据；
+- 每条候选先由模型按「自包含、目标清晰、答案有依据」打 0-10 分，低于阈值会带反馈重写，重试耗尽后**丢弃并计数**，不会保留低分 case；
+- 生成结果做 3-gram 去重，重复项计入 `duplicates`；
+- 输出用例带 `metadata.source=synthetic`、`source_file`、`quality`、`evolutions`、`seed`，便于在演化报告中按来源分层；
+- 合成/对抗用例只应放进 improvement set；`evolve` 会强制检查，出现在 regression/holdout 直接 rollback；
+- `--max-cases`、`--max-calls`、`--max-tokens` 是硬上限，达到后返回 `budget_exhausted`；
+- `--base-url` + `--model` 可临时指向本地或网关的 OpenAI-compatible 端点（API key 仍读 `ASSAY_API_KEY`），不设置时使用 `ASSAY_MODEL` 环境配置。
+
+### 对抗用例（可选）
+
+`attack` 把已有用例改写成安全评测输入，输出仍是标准 case JSONL：
+
+```bash
+ASSAY_MODEL=gpt-4o-mini java -jar app/target/assay.jar attack \
+  --input improvement.jsonl --out adversarial.jsonl \
+  --categories prompt_injection,jailbreak,pii_extraction \
+  --variants 1 --max-cases 50
+```
+
+- 分类：`prompt_injection`、`jailbreak`、`role_play`、`encoding`、`pii_extraction`、`tool_misuse`、`data_exfiltration`、`misinformation`、`over_refusal`；
+- 每条用例包含 `expected.safe_behavior`，以及 `metadata.attack_category`、`severity`、`origin_case_id`、`origin_scenario`；
+- 与合成用例一样做 3-gram 去重，并受 `--max-cases`/`--max-calls`/`--max-tokens` 硬限制；
+- 生成的是**评测输入**，不是攻击工具；建议与 `tool_permission`、安全类 G-Eval 指标一起使用；
+- 与 `synth` 一样支持 `--base-url` / `--model` 指向测试桩或本地网关。
 
 ### 评测预算（Token / 成本）
 
@@ -422,7 +519,8 @@ java -jar app/target/assay.jar run \
 - 预扣是估算，实际值可能高于预留并产生 `overrun`；预算用于控制实验规模，不是供应商账单。
 - `--resume` 会把已落盘用例的消耗计入同一预算，避免恢复后重新获得完整额度。
 - `budget_exhausted` 表示样本不完整，不应直接拿来做版本对比或通过率结论；`compare` 会以 `run_completeness` 阻断，`evolve` 直接给出 `rollback`。
-- 当前预算覆盖被测 Agent 的 adapter 调用；`--use-llm` 的评测复核调用暂不单独计入。
+- 预算覆盖被测 Agent 的 adapter 调用与指标 judge 调用（G-Eval）；judge 的 token 按实际用量事后入账，达到上限后不再提交新用例；
+- judge 未上报成本时记为“未知”并计入 `metric_unreported_cost_calls`，不会当成 0；`--use-llm` 的复核建议调用仍不计入预算。
 
 ### 重试与熔断
 
@@ -439,6 +537,7 @@ java -jar app/target/assay.jar run \
 - 退避从 1s 起步、16s 封顶，默认加入 0.2 对称抖动。
 - 连续失败达到阈值后，adapter / LLM 复核各自进入 `OPEN`；冷却结束后只放行一个 `HALF_OPEN` 探针。
 - 熔断是进程内轻量状态机，不引入 Sentinel 等运行时依赖。
+- 运行 metadata 记录 `timeout_budget_seconds`：`每次尝试超时 × (retries + 1) + 期望退避总和`，用于判断一个 case 的最坏耗时，而不是把单次超时误当成总预算。
 - 运行 summary 会记录 `retry_policy` 与 `circuit_breaker` 状态。
 
 ### 保留与清理
@@ -488,6 +587,18 @@ java -jar app/target/assay.jar evolve-auto \
 
 Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把适配器写成顶层类。
 
+### 控制台明细（可选）
+
+默认只打印一行 summary，保持脚本友好。需要人读时可以打开按用例的控制台报告：
+
+```bash
+java -jar app/target/assay.jar run ... --display failing --max-display-cases 10
+```
+
+- `--display none|failing|passing|all`，默认 `none`；
+- 每个用例显示指标分数/阈值/理由、失败检查、截断后的最终输出；
+- 报告末尾仍会打印 `report.md` 路径；完整数据以 `results.json` 为准。
+
 ## 产物
 
 每次 `run` 生成：
@@ -497,6 +608,15 @@ Windows PowerShell 里嵌套类的 `$` 需要反引号转义；不确定时把�
 - `scenario_stats.json` —— 按场景和 `targetType:targetId` 统计样本量、通过率和 95% 置信区间（Wilson 区间，避免小样本被读成精确值）。
 - `review_queue.jsonl` —— 等待人工确认的报告。
 - `few_shot_candidates.jsonl` —— 通过全部门禁和质量检查的成功路径候选。
+
+落盘与评审前会做凭据脱敏：
+
+- `authorization`、`api_key`、`access_token`、`password`、`private_key` 等键统一替换为 `***`；
+- 字符串里的 `Bearer <token>` 和 `sk-...` 形态也会被掩码；
+- 常见个人信息也会掩码：邮箱、中国大陆手机号（`1[3-9]` 开头 11 位）、18 位居民身份证号；纯数字订单号不会被误判为身份证；
+- 规则与指标仍在原始 trace 上计算，只有落盘结果、控制台报告、few-shot 候选和发给 LLM reviewer 的内容使用脱敏副本；
+- 用例的 `payload`、`expected`、`metadata` 在落盘和评审前同样脱敏，避免输入里的凭据进入报告；
+- `run.json` 的 metadata 记录 `dataset_hash`（与用例顺序无关），用于确认两次运行使用的是同一数据集；`resume` 时该字段不参与身份比较，改动用例仍由逐用例 manifest 校验。
 
 每次 `evolve` 额外生成 `evolution.json` 和 `evolution_report.md`；`evolution.json` 的 `comparisons.*.case_transitions` 保存逐用例状态迁移和首错证据，`rule_deltas` 保存规则通过率变化；每次 `evolve-auto` 额外生成 `auto_evolution.json` 和 `auto_evolution_report.md`；`audit-scope` 生成 `scope_audit.json`、`report.md` 和完整的 `diff.patch`。
 
@@ -679,6 +799,21 @@ mvn -q -pl :assay-spring-boot-starter -am test
 
 测试通过只证明已运行用例通过，不证明没有越界修改——报告会把测试未执行、覆盖缺口和证据不足分别列出。
 
+## 评估器校准
+
+`review` 保存人工结论后，`calibrate` 可以把“人认为好不好”和“自动判定好不好”对齐：
+
+```bash
+java -jar app/target/assay.jar calibrate \
+  --store .assay/store --output .assay/calibration.md
+```
+
+- 默认按硬门禁（`hard_pass`）判定；`--metric groundedness` 改为按指定指标状态判定；
+- 人工结论映射：`confirmed_badcase` 视为 bad，`accepted` / `false_positive` 视为 good，`needs_follow_up` 暂不纳入；
+- 输出混淆矩阵、precision、recall、F1 和 agreement，以及无法识别/不适用的人工结论数量；
+- 指标为 `skip`/`error` 的用例不进入矩阵，避免把“没测到”当成“测得好”；
+- 报告是校准信号，不是统计保证——小样本应结合人工复核继续观察。
+
 ## 版本演化
 
 `evolve` 同时验证基线版本和候选版本。三个数据集职责固定，内容与业务口径由领域项目提供：
@@ -687,7 +822,17 @@ mvn -q -pl :assay-spring-boot-starter -am test
 - `regression` —— 已经确认、不能复发的历史能力。
 - `holdout` —— 候选生成过程没有使用的留出样本。
 
-策略文件可以约束 regression、holdout 和数值目标。目标可直接使用 `hard_pass`、`soft_warning_count`、`latency_ms`、`steps`、`llm_calls`、`input_tokens`、`output_tokens`、`total_tokens` 和 `cost_usd`，也可以从标准结果路径读取业务字段；支持 `mean`、`sum`、`min`、`max`、`p50`、`p95`、`p99` 聚合，以及最大允许退化和最低改善幅度。`maximum` 是候选自身的绝对上限，与基线无关。
+策略文件可以约束 regression、holdout 和数值目标。目标可直接使用 `hard_pass`、`soft_warning_count`、`latency_ms`、`steps`、`llm_calls`、`input_tokens`、`output_tokens`、`total_tokens` 和 `cost_usd`，也可以从标准结果路径读取业务字段；指标分数用 `metric:<name>` 引用（例如 `metric:groundedness`），只统计 `pass`/`fail` 的分数，`skip`/`error` 视为缺失。支持 `mean`、`sum`、`min`、`max`、`p50`、`p95`、`p99` 聚合，以及最大允许退化和最低改善幅度。`maximum` 是候选自身的绝对上限，与基线无关。
+
+演化策略还负责守住数据边界：`synthetic` / `adversarial` 用例只允许出现在 improvement，出现在 regression 或 holdout 会直接 `rollback`；`synthetic_ratio_cap` 限制 improvement 中合成用例占比；`require_provenance` 要求合成用例带 `source_file` 或 `origin_case_id`。例如：
+
+```json
+{
+  "synthetic_ratio_cap": 0.3,
+  "require_provenance": true,
+  "objectives": [{ "name": "groundedness", "metric": "metric:groundedness", "minimum_improvement": 0.02 }]
+}
+```
 
 `quality_gates` 补充绝对门禁：按角色设置最低硬通过率、最大回归条数、最大关键回归条数和最小样本数。它不替代 `objectives` 的相对退化判断，而是回答“这个候选本身是否可接受”。例如：
 
@@ -743,6 +888,19 @@ java -jar app/target/assay.jar evolve \
 ### 文本型自动演化
 
 自动演化适配器实现 `AutoEvolutionAdapterFactory`，提供基线文本产物、诊断器、候选生成器和"按产物构建运行适配器"的函数。
+
+候选生成器可以换成 **GEPA / COPRO**：`evolve.PromptOptimizer` 把诊断、证据用例、可疑模块、约束和当前产物一起交给模型，要求返回若干完整替换版本，并在候选之间做 3-gram 去重。它只负责生成候选，accept/reject 仍由演化策略决定。
+
+```java
+LlmJudge judge = OpenAiCompatibleJudge.fromEnvironment();
+AutoEvolutionAdapter adapter = new AutoEvolutionAdapter(
+        "router-auto", baselineArtifact, "1", "skill", "router",
+        myDiagnoser,
+        PromptOptimizer.gepa(judge),        // 或 PromptOptimizer.copro(judge)
+        MyAdapter::build);
+```
+
+GEPA 默认每轮 2 个候选，COPRO 默认 4 个；两者的区别在候选宽度与相似度过滤，不在判定权。每次模型调用的 token 会写进候选 `metadata`，但 `--max-evolver-calls` 只统计生成器调用次数，不等同于被测 Agent 的供应商账单。
 
 ```bash
 java -jar app/target/assay.jar evolve-auto \
@@ -800,7 +958,7 @@ mvn -q test
 质量门禁：
 
 - `mvn -q verify` 还会执行 JaCoCo 报告、SpotBugs（`Max` effort / `Medium` threshold）和 Checkstyle；任一违规都会让构建失败。规则与抑制范围分别记录在 `config/spotbugs/exclude.xml` 和 `config/checkstyle/checkstyle.xml`。
-- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.1% 行 / 66.0% 分支**（`assay-core` 约 86.4% 行）。`assay-agentscope` 不进入该聚合——它的 AgentScope/OpenTelemetry 传递依赖与 `app` 的 framework-free 边界冲突——因此由模块级 JaCoCo 单独门禁：当前约 **77.3% 行**，CI 同样以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
+- 聚合覆盖率由 `app` 模块的 `report-aggregate` 输出到 `app/target/site/jacoco-aggregate/jacoco.csv`；当前约为 **82.1% 行 / 66.1% 分支**（`assay-core` 约 86.6% 行）。`assay-agentscope` 不进入该聚合——它的 AgentScope/OpenTelemetry 传递依赖与 `app` 的 framework-free 边界冲突——因此由模块级 JaCoCo 单独门禁：当前约 **77.3% 行**，CI 同样以 70% 行覆盖率为下限，并上传 JaCoCo、SpotBugs 与 Checkstyle 报告。
 
 覆盖范围：
 

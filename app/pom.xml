@@ -85,6 +85,9 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
+          <!-- Rebuild the thin jar every time so a previous shaded jar can never be fed back
+               into the shade plugin as the project artifact (stale dashboard assets). -->
+          <forceCreation>true</forceCreation>
           <archive>
             <manifest>
               <mainClass>io.assay.cli.AssayCli</mainClass>
