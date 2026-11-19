@@ -86,48 +86,89 @@ public final class ArtifactCatalog {
         String suiteFilter = suite == null || suite.isBlank() ? "" : query(suite, "suite", 128);
         int max = Math.max(1, Math.min(100, limit));
         List<Map<String, Object>> points = new ArrayList<>();
-        if (Files.isDirectory(root)) {
-            List<Path> files = new ArrayList<>();
-            try (Stream<Path> walk = Files.walk(root, 16)) {
-                walk.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
-                        && "run".equals(KINDS.get(path.getFileName().toString()))).forEach(files::add);
+        for (Summary summary : runSummaries(suiteFilter)) {
+            Map<String, Object> row = asMap(summary.ruleStats().get(ruleName));
+            if (row.isEmpty()) {
+                continue;
             }
-            for (Path file : files) {
-                Summary summary;
-                try {
-                    summary = summary(file);
-                } catch (IOException | RuntimeException error) {
-                    continue;
-                }
-                String payloadSuite = String.valueOf(summary.fields().getOrDefault("suite", ""));
-                if (!suiteFilter.isEmpty() && !suiteFilter.equals(payloadSuite)) {
-                    continue;
-                }
-                Map<String, Object> row = asMap(summary.ruleStats().get(ruleName));
-                if (row.isEmpty()) {
-                    continue;
-                }
-                Map<String, Object> point = new LinkedHashMap<>();
-                point.put("id", summary.id());
-                point.put("run_id", summary.fields().getOrDefault("run_id", summary.relative()));
-                point.put("suite", payloadSuite);
-                point.put("source", summary.fields().getOrDefault("source", ""));
-                point.put("modified_at", summary.modified().toInstant().toString());
-                point.put("case_count", summary.fields().getOrDefault("case_count", 0));
-                point.put("level", row.get("level"));
-                point.put("evaluated", row.get("evaluated"));
-                point.put("passed", row.get("passed"));
-                point.put("pass_rate", row.get("pass_rate"));
-                point.put("missing", row.get("missing"));
-                points.add(point);
+            Map<String, Object> point = basePoint(summary, suiteFilter);
+            point.put("level", row.get("level"));
+            point.put("evaluated", row.get("evaluated"));
+            point.put("passed", row.get("passed"));
+            point.put("pass_rate", row.get("pass_rate"));
+            point.put("missing", row.get("missing"));
+            points.add(point);
+        }
+        return history("rule", ruleName, suiteFilter, points, max);
+    }
+
+    /** Returns the latest points for one metric, optionally filtered to a suite. */
+    public Map<String, Object> metricHistory(String metric, String suite, int limit) throws IOException {
+        String metricName = query(metric, "metric", 128);
+        String suiteFilter = suite == null || suite.isBlank() ? "" : query(suite, "suite", 128);
+        int max = Math.max(1, Math.min(100, limit));
+        List<Map<String, Object>> points = new ArrayList<>();
+        for (Summary summary : runSummaries(suiteFilter)) {
+            Map<String, Object> row = asMap(summary.metricStats().get(metricName));
+            if (row.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> point = basePoint(summary, suiteFilter);
+            for (String field : List.of(
+                    "level", "evaluated", "passed", "pass_rate", "mean_score",
+                    "skipped", "errors", "not_evaluated", "cached")) {
+                point.put(field, row.get(field));
+            }
+            points.add(point);
+        }
+        return history("metric", metricName, suiteFilter, points, max);
+    }
+
+    private List<Summary> runSummaries(String suiteFilter) throws IOException {
+        List<Summary> summaries = new ArrayList<>();
+        if (!Files.isDirectory(root)) {
+            return summaries;
+        }
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(root, 16)) {
+            walk.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                    && "run".equals(KINDS.get(path.getFileName().toString()))).forEach(files::add);
+        }
+        for (Path file : files) {
+            Summary summary;
+            try {
+                summary = summary(file);
+            } catch (IOException | RuntimeException error) {
+                continue;
+            }
+            String payloadSuite = String.valueOf(summary.fields().getOrDefault("suite", ""));
+            if (suiteFilter.isEmpty() || suiteFilter.equals(payloadSuite)) {
+                summaries.add(summary);
             }
         }
+        return summaries;
+    }
+
+    private static Map<String, Object> basePoint(Summary summary, String suiteFilter) {
+        Map<String, Object> point = new LinkedHashMap<>();
+        point.put("id", summary.id());
+        point.put("run_id", summary.fields().getOrDefault("run_id", summary.relative()));
+        point.put("suite", summary.fields().getOrDefault("suite", suiteFilter));
+        point.put("source", summary.fields().getOrDefault("source", ""));
+        point.put("modified_at", summary.modified().toInstant().toString());
+        point.put("case_count", summary.fields().getOrDefault("case_count", 0));
+        return point;
+    }
+
+    private static Map<String, Object> history(
+            String label, String name, String suiteFilter, List<Map<String, Object>> input, int max) {
+        List<Map<String, Object>> points = new ArrayList<>(input);
         points.sort(Comparator.comparing((Map<String, Object> point) -> String.valueOf(point.get("modified_at"))));
         int matched = points.size();
         if (points.size() > max) {
             points = new ArrayList<>(points.subList(points.size() - max, points.size()));
         }
-        return Map.of("rule", ruleName, "suite", suiteFilter, "matched", matched, "points", points);
+        return Map.of(label, name, "suite", suiteFilter, "matched", matched, "points", points);
     }
 
     private Summary summary(Path file) throws IOException {
@@ -177,7 +218,8 @@ public final class ArtifactCatalog {
                 modified,
                 size,
                 fields,
-                "compare".equals(kind) ? asMap(candidate.get("rule_stats")) : asMap(payload.get("rule_stats")));
+                "compare".equals(kind) ? asMap(candidate.get("rule_stats")) : asMap(payload.get("rule_stats")),
+                "compare".equals(kind) ? asMap(candidate.get("metric_stats")) : asMap(payload.get("metric_stats")));
         if (summaries.size() >= MAX_CACHED_SUMMARIES) {
             summaries.clear();
         }
@@ -192,7 +234,8 @@ public final class ArtifactCatalog {
             FileTime modified,
             long size,
             Map<String, Object> fields,
-            Map<String, Object> ruleStats) {
+            Map<String, Object> ruleStats,
+            Map<String, Object> metricStats) {
     }
 
     private static String query(String value, String field, int maxLength) {

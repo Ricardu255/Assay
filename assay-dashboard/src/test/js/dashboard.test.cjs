@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ui = require("../../main/resources/io/assay/web/dashboard-core.js");
+const model = require("../../main/resources/io/assay/web/dashboard-model.js");
+const charts = require("../../main/resources/io/assay/web/charts.js");
 
 test("JSONL checks aliases, duplicate IDs, line numbers and optional expectations", () => {
   assert.equal(ui.validateCases(ui.exampleCases).count, 1);
@@ -205,6 +207,20 @@ test("Rule stats sort the worst pass rate first and preserve missing data", () =
   assert.deepEqual(ui.ruleStats({}), []);
 });
 
+test("Metric stats sort the worst pass rate first and keep skip/error counts", () => {
+  const rows = ui.metricStats({ metric_stats: {
+    quality: { level: "soft", evaluated: 4, passed: 2, pass_rate: 0.5, mean_score: 0.7, skipped: 1, errors: 0 },
+    safety: { level: "hard", evaluated: 2, passed: 0, pass_rate: 0, mean_score: 0.2, skipped: 0, errors: 1 },
+    never: { level: "soft", evaluated: 0, passed: 0, pass_rate: null, mean_score: null, skipped: 2, errors: 0 }
+  } });
+  assert.deepEqual(rows.map((row) => row.name), ["safety", "quality", "never"]);
+  assert.equal(rows[0].meanScore, 0.2);
+  assert.equal(rows[0].errors, 1);
+  assert.equal(rows[2].passRate, null);
+  assert.equal(rows[2].skipped, 2);
+  assert.deepEqual(ui.metricStats({}), []);
+});
+
 test("Sequence steps normalize events, arguments, and nested groups", () => {
   const steps = ui.sequenceSteps([
     { module: "Router", action: "route" },
@@ -233,6 +249,167 @@ test("Setup defaults point at the reactor artifact and source layout", () => {
   const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
   assert.match(source, /jar: "app\/target\/assay\.jar"/);
   assert.match(source, /app\/src\/main\/java\/io\/assay\/examples\/EchoAdapter\.java/);
+});
+
+test("Dashboard wires the view model, charts and primary navigation", () => {
+  const source = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/app.js"), "utf8");
+  assert.match(source, /AssayModel\.runView/);
+  assert.match(source, /AssayModel\.compareView/);
+  assert.match(source, /AssayCharts\.donut/);
+  assert.match(source, /AssayCharts\.barChart/);
+  assert.match(source, /AssayCharts\.lineChart/);
+  assert.match(source, /data-setup-queue/);
+  assert.match(source, /data-setup-submit-http/);
+  assert.match(source, /\/api\/setup\/jobs/);
+  assert.match(source, /data-case-jump/);
+  const html = fs.readFileSync(require.resolve("../../main/resources/io/assay/web/index.html"), "utf8");
+  assert.match(html, /charts\.js/);
+  assert.match(html, /dashboard-model\.js/);
+  assert.match(html, /charts\.css/);
+});
+
+test("Run view model aggregates case status, scenarios and failure reasons", () => {
+  const view = model.runView({
+    run_id: "r1", suite: "smoke", case_count: 3,
+    results: [
+      { case: { case_id: "C1", scenario: "direct" }, hard_pass: true, soft_warning_count: 0,
+        trace: { events: [{}, {}] }, checks: [{ name: "route", level: "hard", passed: true }] },
+      { case: { case_id: "C2", scenario: "direct" }, hard_pass: true, soft_warning_count: 2,
+        trace: { events: [{}] }, checks: [{ name: "tone", level: "soft", passed: false }] },
+      { case: { case_id: "C3", scenario: "routing" }, hard_pass: false, soft_warning_count: 1,
+        trace: { events: [] }, checks: [{ name: "route", level: "hard", passed: false },
+          { name: "tone", level: "soft", passed: false }] }
+    ]
+  });
+  assert.equal(view.status, "failed");
+  assert.equal(view.caseCount, 3);
+  assert.equal(view.hardFailures, 1);
+  assert.equal(view.softWarnings, 3);
+  assert.equal(view.passRate, 2 / 3);
+  assert.equal(view.passedCases.length, 1);
+  assert.equal(view.warnedCases.length, 1);
+  assert.equal(view.failedCases.length, 1);
+  assert.deepEqual(view.scenarios.map((row) => [row.name, row.total, row.passed, row.failed]),
+    [["routing", 1, 0, 1], ["direct", 2, 2, 0]]);
+  assert.deepEqual(view.failureReasons.map((row) => [row.name, row.level, row.count]),
+    [["route", "hard", 1], ["tone", "soft", 1]]);
+  assert.equal(view.topFailures[0].id, "C3");
+  assert.deepEqual(view.topFailures[0].reasons, ["route", "tone"]);
+  assert.equal(view.verdict.status, "failed");
+});
+
+test("Run view model falls back to summary counts when results are absent", () => {
+  const view = model.runView({ run_id: "r2", status: "passed", case_count: 10, hard_failures: 0, soft_warnings: 0 });
+  assert.equal(view.status, "passed");
+  assert.equal(view.caseCount, 10);
+  assert.equal(view.hardFailures, 0);
+  assert.equal(view.passRate, 1);
+  assert.deepEqual(view.topFailures, []);
+  assert.equal(view.verdict.title, "本次运行通过");
+});
+
+test("Overview view model separates passed, warned and failed runs", () => {
+  const items = [
+    { kind: "run", suite: "A", status: "passed", case_count: 10, hard_failures: 2, soft_warnings: 1 },
+    { kind: "run", suite: "B", status: "passed", case_count: 5, hard_failures: 0, soft_warnings: 0 },
+    { kind: "compare", status: "block", case_count: 99, hard_failures: 99 }
+  ];
+  const view = model.overviewView(items);
+  assert.equal(view.runs, 2);
+  assert.equal(view.totalCases, 15);
+  assert.equal(view.hardFailures, 2);
+  assert.equal(view.softWarnings, 1);
+  assert.equal(view.passRate, 13 / 15);
+  assert.deepEqual(view.runStatus, { passed: 1, warning: 1, failed: 0 });
+  assert.equal(view.health.length, 2);
+  assert.equal(view.trend.buckets.length, 7);
+});
+
+test("Compare view model extracts transitions, scenario slices and critical regressions", () => {
+  const view = model.compareView({
+    gate: { status: "BLOCK", violations: [{ rule: "max_regressions", message: "too many" }] },
+    baseline: { run_id: "b", case_count: 4, hard_pass_rate: 1 },
+    candidate: { run_id: "c", case_count: 4, hard_pass_rate: 0.75 },
+    deltas: { hard_pass_rate: -0.25 },
+    transitions: { regressed_count: 1, recovered_count: 0, persistent_failure_count: 0, stable_pass_count: 3 },
+    scenarios: { routing: { case_count: 2, baseline_hard_pass_rate: 1, candidate_hard_pass_rate: 0.5,
+      hard_pass_rate_delta: -0.5, regressions: 1, critical_regressions: 1 } },
+    rules: { route: { baseline: { pass_rate: 1 }, candidate: { pass_rate: 0.5 }, pass_rate_delta: -0.5 } },
+    regressions: [{ case_id: "C1", critical: true }]
+  });
+  assert.equal(view.status, "block");
+  assert.equal(view.kpis.candidatePassRate, 0.75);
+  assert.equal(view.kpis.regressed, 1);
+  assert.equal(view.kpis.criticalRegressions, 1);
+  assert.deepEqual(view.transitionSegments.map((segment) => [segment.label, segment.value]),
+    [["回归", 1], ["稳定通过", 3]]);
+  assert.equal(view.scenarios[0].name, "routing");
+  assert.equal(view.rules[0].name, "route");
+});
+
+test("Auto view model aggregates decisions and best candidate pass rates", () => {
+  const view = model.autoView({
+    status: "no_acceptable_candidate",
+    current_version: 1,
+    usage: { evolver_calls: 2 },
+    rounds: [
+      { round: 1, candidates: [
+        { evaluation: { decision: "rollback", comparisons: { improvement: {
+          baseline: { hard_pass_rate: 0 }, candidate: { hard_pass_rate: 1 } } } } },
+        { evaluation: { decision: "reject", comparisons: { improvement: {
+          baseline: { hard_pass_rate: 0 }, candidate: { hard_pass_rate: 0.5 } } } } }
+      ] },
+      { round: 2, candidates: [
+        { evaluation: { decision: "accept", comparisons: { improvement: {
+          baseline: { hard_pass_rate: 0.5 }, candidate: { hard_pass_rate: 1 } } } } }
+      ] }
+    ]
+  });
+  assert.equal(view.rounds, 2);
+  assert.equal(view.candidates, 3);
+  assert.deepEqual(view.decisions, { accept: 1, reject: 1, rollback: 1 });
+  assert.deepEqual(view.roundDecisions.map((row) => [row.label, row.counts.accept,
+    row.counts.reject, row.counts.rollback]), [["第 1 轮", 0, 1, 1], ["第 2 轮", 1, 0, 0]]);
+  assert.deepEqual(view.roundPassRates.map((row) => [row.label, row.baseline, row.candidate]),
+    [["第 1 轮", 0, 1], ["第 2 轮", 0.5, 1]]);
+  assert.equal(view.usage.evolver_calls, 2);
+});
+
+test("Release view model computes pass rates and preserves unrun stages", () => {
+  const view = model.releaseView({ release_id: "r", status: "failed", stages: [
+    { suite: "regression", status: "passed", case_count: 10, hard_failures: 0 },
+    { suite: "smoke", status: "failed", case_count: 5, hard_failures: 2 },
+    { suite: "full", status: "not_run", case_count: 0, hard_failures: 0 }
+  ] });
+  assert.equal(view.releaseId, "r");
+  assert.equal(view.stages.length, 3);
+  assert.deepEqual(view.stages.map((stage) => [stage.suite, stage.caseCount,
+    stage.hardFailures, stage.passed, stage.passRate]), [
+    ["regression", 10, 0, 10, 1],
+    ["smoke", 5, 2, 3, 3 / 5],
+    ["full", 0, 0, 0, null]
+  ]);
+  assert.equal(view.stages[2].index, 2);
+});
+
+test("Charts escape labels, render empty states and keep accessible labels", () => {
+  assert.match(charts.barChart({ items: [{ label: "<script>", value: 0.5 }], max: 1, format: "percent", label: "pass" }), /&lt;script&gt;/);
+  assert.match(charts.barChart({ items: [], empty: "没有数据" }), /没有数据/);
+  const donut = charts.donut({ segments: [{ label: "通过", value: 3, color: "green" },
+    { label: "失败", value: 1, color: "red" }], centerValue: "75%", centerLabel: "通过率" });
+  assert.match(donut, /role="img"/);
+  assert.match(donut, /75%/);
+  assert.match(donut, /通过/);
+  const line = charts.lineChart({ points: [{ label: "10-01", value: 0.5 },
+    { label: "10-02", value: null }, { label: "10-03", value: 1 }], format: "percent" });
+  assert.match(line, /10-01/);
+  assert.match(line, /10-03/);
+  assert.match(line, /50.0%/);
+  const stacked = charts.stackedBar({ segments: [{ label: "回归", value: 2 }, { label: "稳定", value: 8 }] });
+  assert.match(stacked, /stacked-track/);
+  assert.match(stacked, /20.00%/);
+  assert.match(charts.groupedBar({ groups: [{ label: "A", values: [{ label: "基线", value: 0.5 },
+    { label: "候选", value: 1 }] }], max: 1, format: "percent" }), /50.0%/);
 });
 
 test("Theme follows the system, persists explicit choices and survives unavailable storage", () => {

@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,15 +33,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * submission and cancellation POSTs.
  */
 public final class DashboardServer implements AutoCloseable {
-    private static final Map<String, String> STATIC_RESOURCES = Map.of(
-            "/", "index.html",
-            "/index.html", "index.html",
-            "/app.js", "app.js",
-            "/dashboard-core.js", "dashboard-core.js",
-            "/style.css", "style.css",
-            "/paper.css", "paper.css",
-            "/theme.js", "theme.js",
-            "/theme.css", "theme.css");
+    private static final Map<String, String> STATIC_RESOURCES = Map.ofEntries(
+            Map.entry("/", "index.html"),
+            Map.entry("/index.html", "index.html"),
+            Map.entry("/app.js", "app.js"),
+            Map.entry("/dashboard-core.js", "dashboard-core.js"),
+            Map.entry("/dashboard-model.js", "dashboard-model.js"),
+            Map.entry("/charts.js", "charts.js"),
+            Map.entry("/style.css", "style.css"),
+            Map.entry("/paper.css", "paper.css"),
+            Map.entry("/charts.css", "charts.css"),
+            Map.entry("/theme.js", "theme.js"),
+            Map.entry("/theme.css", "theme.css"));
     private final HttpServer server;
     private final ArtifactCatalog catalog;
     private final JobStore jobs;
@@ -104,7 +108,9 @@ public final class DashboardServer implements AutoCloseable {
                 return;
             }
             try {
-                if ("/api/jobs".equals(path)) {
+                if ("/api/queue".equals(path)) {
+                    sendJson(exchange, 200, Map.of("enabled", jobs != null));
+                } else if ("/api/jobs".equals(path)) {
                     if (jobs == null) {
                         sendJson(exchange, 503, Map.of(
                                 "error", "queue disabled; start serve with --worker"));
@@ -117,6 +123,10 @@ public final class DashboardServer implements AutoCloseable {
                     Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
                     int limit = query.containsKey("limit") ? Integer.parseInt(query.get("limit")) : 20;
                     sendJson(exchange, 200, catalog.ruleHistory(query.get("rule"), query.get("suite"), limit));
+                } else if ("/api/metric-history".equals(path)) {
+                    Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
+                    int limit = query.containsKey("limit") ? Integer.parseInt(query.get("limit")) : 20;
+                    sendJson(exchange, 200, catalog.metricHistory(query.get("metric"), query.get("suite"), limit));
                 } else if (path.startsWith("/api/artifacts/")) {
                     sendJson(exchange, 200, catalog.read(path.substring("/api/artifacts/".length())));
                 } else if (path.startsWith("/api/audit-patch/")) {
@@ -147,7 +157,7 @@ public final class DashboardServer implements AutoCloseable {
     }
 
     private void handlePost(HttpExchange exchange, String path) throws IOException {
-        if (!"/api/jobs".equals(path) && !path.startsWith("/api/jobs/")) {
+        if (!"/api/jobs".equals(path) && !path.startsWith("/api/jobs/") && !"/api/setup/jobs".equals(path)) {
             exchange.getResponseHeaders().set("Allow", "GET");
             sendJson(exchange, 405, Map.of("error", "unsupported method"));
             return;
@@ -166,6 +176,12 @@ public final class DashboardServer implements AutoCloseable {
             return;
         }
         try {
+            if ("/api/setup/jobs".equals(path)) {
+                Map<String, Object> request = Json.parseObject(readBody(exchange));
+                Job job = jobs.submit(setupPayload(request), maxAttempts(request));
+                sendJson(exchange, 201, jobView(job));
+                return;
+            }
             if ("/api/jobs".equals(path)) {
                 Map<String, Object> request = Json.parseObject(readBody(exchange));
                 int attempts = maxAttempts(request);
@@ -191,8 +207,72 @@ public final class DashboardServer implements AutoCloseable {
             sendJson(exchange, 400, Map.of(
                     "error", error.getMessage() == null ? "invalid request" : error.getMessage()));
         } catch (IOException | RuntimeException error) {
-            sendJson(exchange, 500, Map.of("error", "could not update job queue"));
+            sendJson(exchange, 500, Map.of(
+                    "error", "could not update job queue: " + String.valueOf(error.getMessage())));
         }
+    }
+
+    /**
+     * Persists an inline HTTP adapter config and JSONL cases, then queues the run.
+     *
+     * <p>The dashboard stays read-only by default; this endpoint is only reachable when the server
+     * was started with {@code --worker}, and writes only inside the configured report root.
+     */
+    private Map<String, Object> setupPayload(Map<String, Object> request) throws IOException {
+        Object rawConfig = request.get("config");
+        if (!(rawConfig instanceof Map<?, ?> config)) {
+            throw new IllegalArgumentException("config must be a JSON object");
+        }
+        if (!"http".equals(String.valueOf(config.get("type")))) {
+            throw new IllegalArgumentException("config.type must be http");
+        }
+        requiredValue(config, "endpoint");
+        requiredValue(config, "output_path");
+        Object gates = config.get("hard_gates");
+        if (!(gates instanceof List<?> list) || list.isEmpty()) {
+            throw new IllegalArgumentException("config.hard_gates must be a non-empty array");
+        }
+        String cases = request.get("cases") == null ? "" : String.valueOf(request.get("cases"));
+        if (cases.isBlank()) {
+            throw new IllegalArgumentException("cases is required");
+        }
+        int line = 0;
+        for (String row : cases.split("\\R")) {
+            line++;
+            if (row.isBlank()) {
+                continue;
+            }
+            try {
+                Map<String, Object> parsed = Json.parseObject(row);
+                if (parsed.get("id") == null && parsed.get("case_id") == null) {
+                    throw new IllegalArgumentException("needs id or case_id");
+                }
+            } catch (RuntimeException error) {
+                throw new IllegalArgumentException("invalid case at line " + line + ": " + error.getMessage());
+            }
+        }
+        Files.createDirectories(catalog.root());
+        Path directory = Files.createTempDirectory(catalog.root(), ".dashboard-setup-");
+        Path configFile = directory.resolve("agent.http.json");
+        Path casesFile = directory.resolve("cases.jsonl");
+        Files.writeString(configFile, Json.write(config));
+        Files.writeString(casesFile, cases.endsWith("\n") ? cases : cases + "\n");
+        Map<String, Object> job = new LinkedHashMap<>();
+        job.put("adapter", configFile.toString());
+        job.put("suite", request.getOrDefault("suite", "ui"));
+        job.put("cases", casesFile.toString());
+        job.put("output", request.getOrDefault("output", catalog.root().toString()));
+        job.put("workers", request.getOrDefault("workers", 1));
+        job.put("max_attempts", request.getOrDefault("max_attempts", 3));
+        return jobPayload(job);
+    }
+
+    private static String requiredValue(Map<?, ?> values, String key) {
+        Object value = values.get(key);
+        if (value == null || String.valueOf(value).isBlank()) {
+            throw new IllegalArgumentException(key + " is required");
+        }
+        return String.valueOf(value).trim();
     }
 
     private Map<String, Object> jobPayload(Map<String, Object> request) {

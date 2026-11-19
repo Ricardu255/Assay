@@ -1,10 +1,11 @@
 "use strict";
 
 const sections = [
-  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["queue", "任务队列", "▶"], ["run", "运行记录", "▤"],
-  ["compare", "版本对比", "⇋"], ["evolution", "版本演化", "⇄"],
-  ["auto", "自动演化", "⟳"], ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
+  ["overview", "总览", "▦"], ["setup", "开始评测", "+"], ["run", "运行记录", "▤"], ["compare", "版本对比", "⇋"],
+  ["queue", "任务队列", "▶"], ["evolution", "版本演化", "⇄"], ["auto", "自动演化", "⟳"],
+  ["audit", "范围审计", "◇"], ["release", "发布验证", "✓"]
 ];
+const primarySections = new Set(["overview", "setup", "run", "compare"]);
 const sectionHints = {
   run: "每次评测的用例、Trace、规则和原始证据。",
   compare: "同一批用例，比较两次已存运行的发布门禁。",
@@ -29,14 +30,15 @@ const labels = {
   pass: "通过", block: "阻断", info: "提示", estimated: "估算", critical: "关键", normal: "常规"
 };
 const state = { remote: [], imports: [], warnings: [], section: "overview", query: "", stack: [], request: 0,
-  tab: "cases", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
+  tab: "overview", caseFilter: "all", caseQuery: "", casePage: 0, caseIndex: 0, traceFilter: "all" };
 const queueForm = { adapter: "io.assay.examples.EchoAdapter", suite: "ui-demo",
   cases: "examples/cases.example.jsonl", output: ".assay/runs", workers: "1", maxAttempts: "3" };
 let queueTimer = null;
 const setup = { mode: "example", shell: "powershell", jar: "app/target/assay.jar", adapter: "io.assay.examples.EchoAdapter",
   endpoint: "", outputPath: "output", tokenEnv: "", operator: "contains", expectedPath: "keyword",
   adapterClass: "", cases: "examples/cases.example.jsonl", suite: "smoke", output: ".assay/runs",
-  validation: AssayUI.validateCases(AssayUI.exampleCases), filename: "内置示例", fileRequest: 0 };
+  casesText: AssayUI.exampleCases, validation: AssayUI.validateCases(AssayUI.exampleCases),
+  filename: "内置示例", fileRequest: 0 };
 function preference(key, fallback) {
   try { return JSON.parse(localStorage.getItem(`assay.${key}`)) ?? fallback; } catch { return fallback; }
 }
@@ -103,10 +105,21 @@ async function refresh() {
   }
 }
 
-function renderNavigation() {
-  $("navigation").innerHTML = sections.map(([kind, title, icon]) => `<button class="nav-button ${state.section === kind ? "active" : ""}" data-section="${kind}" title="${title}" ${state.section === kind ? 'aria-current="page"' : ""}>
+function navButton([kind, title, icon]) {
+  return `<button class="nav-button ${state.section === kind ? "active" : ""}" data-section="${kind}" title="${title}" ${state.section === kind ? 'aria-current="page"' : ""}>
     <span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-name">${title}</span>
-    ${["overview", "setup", "queue"].includes(kind) ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`).join("");
+    ${["overview", "setup", "queue"].includes(kind) ? "" : `<span class="nav-count">${items().filter((item) => item.kind === kind).length}</span>`}</button>`;
+}
+
+function renderNavigation() {
+  const primary = sections.filter(([kind]) => primarySections.has(kind));
+  const advanced = sections.filter(([kind]) => !primarySections.has(kind));
+  const advancedActive = advanced.some(([kind]) => state.section === kind);
+  $("navigation").innerHTML = `${primary.map(navButton).join("")}
+    <details class="nav-more">
+      <summary class="nav-button nav-more-toggle ${advancedActive ? "active" : ""}" title="更多功能"><span class="nav-icon" aria-hidden="true">⋯</span><span class="nav-name">更多</span></summary>
+      <div class="nav-more-menu">${advanced.map(navButton).join("")}</div>
+    </details>`;
   $("section-label").textContent = kindName(state.section);
 }
 
@@ -157,26 +170,6 @@ function artifactTable(records, limit = Infinity) {
       <td class="muted number">${escape(date(item.modified_at))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
-function trendSvg(trend) {
-  const buckets = trend.buckets;
-  const valid = buckets.map((bucket, index) => ({ bucket, index })).filter(({ bucket }) => bucket.passRate !== null);
-  if (!valid.length) return `<p class="muted">最近 ${trend.days} 天没有运行记录。</p>`;
-  const width = 360, height = 132, padX = 10, padTop = 10, padBottom = 24;
-  const chartHeight = height - padTop - padBottom;
-  const x = (index) => padX + (buckets.length <= 1 ? (width - 2 * padX) / 2 : index * (width - 2 * padX) / (buckets.length - 1));
-  const y = (rate) => padTop + (1 - rate) * chartHeight;
-  const line = valid.map(({ bucket, index }, position) => `${position ? "L" : "M"}${x(index).toFixed(1)} ${y(bucket.passRate).toFixed(1)}`).join(" ");
-  const area = valid.length > 1
-    ? `${line} L${x(valid.at(-1).index).toFixed(1)} ${padTop + chartHeight} L${x(valid[0].index).toFixed(1)} ${padTop + chartHeight} Z`
-    : "";
-  const grid = [0, 0.5, 1].map((rate) => `<line x1="${padX}" y1="${y(rate)}" x2="${width - padX}" y2="${y(rate)}" class="trend-grid"/>`).join("");
-  const dots = valid.map(({ bucket, index }) => `<circle cx="${x(index)}" cy="${y(bucket.passRate)}" r="3.5" class="trend-dot"><title>${escape(bucket.label)}：${percent(bucket.passRate)}（${bucket.runs} 次运行）</title></circle>`).join("");
-  const labels = buckets.map((bucket, index) => `<text x="${x(index)}" y="${height - 4}" text-anchor="middle" class="trend-label">${escape(bucket.label)}</text>`).join("");
-  return `<svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="最近 ${trend.days} 天硬门禁通过率">${grid}${area ? `<path d="${area}" class="trend-area"/>` : ""}<path d="${line}" class="trend-line"/>${dots}${labels}</svg>
-    <div class="trend-summary"><span><strong>${integer(trend.totals.runs)}</strong> 次运行</span><span><strong>${integer(trend.totals.caseCount)}</strong> 条用例</span><span><strong>${integer(trend.totals.hardFailures)}</strong> 条硬失败</span></div>
-    <details class="trend-data"><summary>查看每日数据</summary><div class="table-wrap"><table><thead><tr><th>日期</th><th>运行</th><th>用例</th><th>通过率</th><th>失败运行</th></tr></thead><tbody>${buckets.map((bucket) => `<tr><td>${escape(bucket.label)}</td><td class="number">${integer(bucket.runs)}</td><td class="number">${integer(bucket.caseCount)}</td><td class="number">${percent(bucket.passRate)}</td><td class="number">${integer(bucket.failedRuns)}</td></tr>`).join("")}</tbody></table></div></details>`;
-}
-
 function suiteHealthTable(rows) {
   if (!rows.length) return `<div class="panel-body"><p class="muted">还没有运行记录。</p></div>`;
   return `<div class="table-wrap"><table class="suite-health-table"><thead><tr><th>测试集</th><th>最近运行</th><th>状态</th><th>通过率</th><th>硬失败</th><th>软告警</th><th>较上次</th></tr></thead><tbody>
@@ -203,41 +196,39 @@ function onboardingCard(open) {
 }
 
 function overview() {
-  const runs = items().filter((item) => item.kind === "run");
-  const total = runs.reduce((sum, item) => sum + count(item.case_count), 0);
-  const failures = runs.reduce((sum, item) => sum + count(item.hard_failures), 0);
-  const soft = runs.reduce((sum, item) => sum + count(item.soft_warnings), 0);
-  const passedRuns = runs.filter((item) => item.status === "passed" && !count(item.soft_warnings)).length;
-  const warnedRuns = runs.filter((item) => item.status === "passed" && count(item.soft_warnings)).length;
-  const failedRuns = runs.filter((item) => item.status === "failed" || item.status === "budget_exhausted").length;
-  const denominator = Math.max(1, runs.length);
+  const data = AssayModel.overviewView(items());
   const recent = filteredItems().slice(0, 8);
-  const trend = AssayUI.runTrend(items(), 7);
-  const health = AssayUI.suiteHealth(items(), 8);
   const onboarding = onboardingCard(items().length === 0);
-  return `${onboarding}${heading("评测工作台", "查看每一次运行，追溯失败证据，对比候选版本的实际变化。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
-    <div class="stats">${stat("评测运行", integer(runs.length), "包含基线与候选的独立运行")}
-      ${stat("硬门禁通过率", total ? percent((total - failures) / total) : "—", `${integer(total)} 条已记录用例`, "positive")}
-      ${stat("硬失败用例", integer(failures), "需要优先关注的执行或门禁失败", failures ? "negative" : "")}
-      ${stat("复核信号", integer(soft), "软告警与人工复核候选信号", soft ? "warning-text" : "")}</div>
+  const statusSegments = [
+    { label: "全部通过", value: data.runStatus.passed, color: "var(--chart-good)" },
+    { label: "通过但有软告警", value: data.runStatus.warning, color: "var(--chart-warning)" },
+    { label: "硬门禁失败 / 预算用尽", value: data.runStatus.failed, color: "var(--chart-bad)" }
+  ].filter((segment) => segment.value > 0);
+  const healthItems = data.health.map((row) => ({
+    label: row.suite,
+    value: row.passRate,
+    color: AssayCharts.rateColor(row.passRate)
+  }));
+  const trendPoints = data.trend.buckets.map((bucket) => ({ label: bucket.label, value: bucket.passRate }));
+  return `${onboarding}${heading("评测工作台", "先看结论，再看证据；从一次评测到版本对比，都在同一条路径上。", "EVALUATION WORKSPACE", '<button class="button primary" data-section="setup">开始评测 →</button>')}${warnings()}
+    <div class="stats">${stat("评测运行", integer(data.runs), "包含基线与候选的独立运行")}
+      ${stat("硬门禁通过率", percent(data.passRate), `${integer(data.totalCases)} 条已记录用例`, "positive")}
+      ${stat("硬失败用例", integer(data.hardFailures), "需要优先关注的执行或门禁失败", data.hardFailures ? "negative" : "")}
+      ${stat("复核信号", integer(data.softWarnings), "软告警与人工复核候选信号", data.softWarnings ? "warning-text" : "")}</div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>运行状态</h2><span class="muted">按运行计数</span></div><div class="panel-body">${AssayCharts.donut({ segments: statusSegments, centerValue: integer(data.runs), centerLabel: "次运行", label: "运行状态分布", empty: "还没有运行记录。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>测试集健康</h2><span class="muted">通过率按用例加权</span></div><div class="panel-body">${AssayCharts.barChart({ items: healthItems, max: 1, format: "percent", label: "测试集硬门禁通过率", empty: "还没有可统计的测试集。" })}</div></section>
+    </div>
+    <section class="panel section-gap"><div class="panel-head"><h2>最近 ${data.trend.days} 天</h2><span class="muted">硬门禁通过率 · 按用例加权</span></div><div class="panel-body">${AssayCharts.lineChart({ points: trendPoints, min: 0, max: 1, format: "percent", label: `最近 ${data.trend.days} 天硬门禁通过率`, empty: `最近 ${data.trend.days} 天没有运行记录。` })}<div class="trend-summary"><span><strong>${integer(data.trend.totals.runs)}</strong> 次运行</span><span><strong>${integer(data.trend.totals.caseCount)}</strong> 条用例</span><span><strong>${integer(data.trend.totals.hardFailures)}</strong> 条硬失败</span></div></div></section>
     <div class="grid"><section class="panel"><div class="panel-head"><h2>最近记录</h2><span class="count-chip">${items().length} 份报告</span></div>${recent.length ? artifactTable(recent) : empty()}</section>
-      <section class="panel"><div class="panel-head"><h2>运行结果分布</h2><span class="muted">按运行计数</span></div><div class="panel-body">
-        <div class="stat-value">${total ? percent((total - failures) / total) : "—"}<span class="muted"> 硬门禁通过</span></div>
-        <svg class="status-chart" viewBox="0 0 300 12" preserveAspectRatio="none" role="img" aria-label="通过 ${passedRuns}，软告警 ${warnedRuns}，失败 ${failedRuns}">
-          <rect width="300" height="12" fill="var(--line)"/><rect width="${300 * passedRuns / denominator}" height="12" fill="var(--chart-good)"/>
-          <rect x="${300 * passedRuns / denominator}" width="${300 * warnedRuns / denominator}" height="12" fill="var(--chart-warning)"/>
-          <rect x="${300 * (passedRuns + warnedRuns) / denominator}" width="${300 * failedRuns / denominator}" height="12" fill="var(--chart-bad)"/></svg>
-        ${[["seg-pass", "全部通过", passedRuns], ["seg-warning", "通过但有软告警", warnedRuns], ["seg-fail", "硬门禁失败 / 预算用尽", failedRuns]].map(([color, title, value]) => `<div class="legend-row"><span class="legend-label"><span class="legend-dot ${color}"></span>${title}</span><strong class="number">${value}</strong></div>`).join("")}
-        <p class="mini-note">按扫描到的运行汇总。不同版本与数据集的运行分别计数。</p></div></section></div>
-    <section class="panel section-gap"><div class="panel-head"><h2>最近 ${trend.days} 天</h2><span class="muted">硬门禁通过率 · 按用例加权</span></div><div class="panel-body">${trendSvg(trend)}</div></section>
-    <section class="panel section-gap"><div class="panel-head"><h2>按测试集健康</h2><span class="muted">最近运行优先 · 通过率按用例加权</span></div>${suiteHealthTable(health)}</section>
-    <div class="artifact-counts">${sections.slice(3).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
+      <section class="panel"><div class="panel-head"><h2>按测试集健康</h2><span class="muted">最近运行优先</span></div>${suiteHealthTable(data.health)}</section></div>
+    <div class="artifact-counts">${sections.slice(4).map(([kind, title]) => `<button class="kind-tile" data-section="${kind}">${title}<strong>${items().filter((item) => item.kind === kind).length} <span class="muted">份报告</span></strong></button>`).join("")}</div>`;
 }
 
 function setupPage() {
   const field = (key, title, note = "") => `<label class="form-field">${title}<input data-setup="${key}" value="${escape(setup[key])}" autocomplete="off">${note ? `<small>${note}</small>` : ""}</label>`;
   const http = setup.mode === "http";
-  return `${heading("开始一次评测", "填写 HTTP 接口 → 下载配置 → 选择测试集 → 复制命令运行。无需编写 Java 适配器。")}
+  return `${heading("开始一次评测", "选择接入方式 → 检查测试集 → 生成配置。已有队列时可直接提交，否则复制命令运行。", "START AN EVALUATION", '<div class="detail-actions"><button class="button secondary" data-setup-run-example>运行内置示例</button><button class="button primary" data-setup-queue>去任务队列 →</button></div>')}
     <div class="setup-grid"><section class="panel"><div class="panel-head"><h2>1 · 选择适配器</h2></div><div class="panel-body form-grid">
       <label class="form-field full">接入方式<select id="setup-mode"><option value="example" ${setup.mode === "example" ? "selected" : ""}>内置 Echo 示例（无需 API Key）</option><option value="http" ${http ? "selected" : ""}>HTTP 接口（推荐，无需写代码）</option><option value="custom" ${setup.mode === "custom" ? "selected" : ""}>Java 类 / JAR 适配器（高级）</option></select></label>
       ${http ? `${field("endpoint", "Agent 接口地址", "同步 POST JSON 接口；请求体直接使用用例的 input。")}${field("outputPath", "回答在响应中的字段", "如 output、data.answer、choices.0.message.content。")}
@@ -257,14 +248,17 @@ function setupPage() {
       <label class="form-field">终端<select data-setup="shell"><option value="powershell" ${setup.shell === "powershell" ? "selected" : ""}>Windows PowerShell</option><option value="bash" ${setup.shell === "bash" ? "selected" : ""}>Bash / Zsh</option></select></label>
       ${field("output", "报告输出目录")}<details class="full"><summary>高级：JAR 路径与手写配置</summary>${field("jar", "框架 JAR 路径")}<p class="mini-note">HTTP 配置可手动增加 hard_gates / soft_quality 规则；fields 保存完整 JSON 响应，可用 fields.route 等路径检查业务字段。events_path 可接入真实内部步骤。</p></details>
       <div id="setup-commands" class="full"></div>
+    <p class="mini-note full">如果本界面由 <code>serve --worker</code> 启动，可以直接点「去任务队列」提交；否则按上面的命令在终端运行。</p>
     </div></section><section class="panel section-gap"><div class="panel-head"><h2>4 · 查看报告</h2></div><div class="panel-body"><p class="subtitle">在项目根目录的终端运行命令。源码版启动器需要 JDK 17+ 和 Maven，会自动构建。完成后会打印 report.md 的位置；若当前界面查看的是同一输出目录，点击顶部刷新即可。否则运行查看命令打开界面。</p><button class="button secondary section-gap" data-section="run">查看运行记录 →</button></div></section>`;
 }
 
 function updateSetup() {
   if (setup.mode === "http") {
     const generated = AssayUI.httpConfig(setup);
+    const casesReady = setup.validation && !setup.validation.errors.length;
     $("setup-http").innerHTML = generated.errors.length ? `<ul class="validation-errors">${generated.errors.map((error) => `<li>${escape(error)}</li>`).join("")}</ul>` :
-      `<button class="button primary" data-setup-download="config" ${setup.adapter.endsWith(".json") ? "" : "disabled"}>下载 HTTP 配置</button><details class="section-gap"><summary>预览配置（不含密钥）</summary><pre>${json(generated.config)}</pre></details>
+      `<div class="form-actions">${casesReady ? '<button class="button primary" data-setup-submit-http>直接提交到队列</button>' : ""}<button class="button secondary" data-setup-download="config" ${setup.adapter.endsWith(".json") ? "" : "disabled"}>下载 HTTP 配置</button></div>
+      <p class="mini-note">直接提交需要 <code>serve --worker</code>；也可以下载配置后在终端运行。</p><details class="section-gap"><summary>预览配置（不含密钥）</summary><pre>${json(generated.config)}</pre></details>
       ${setup.tokenEnv ? `<p class="mini-note">运行前，在同一个终端执行下方命令，将占位文字替换为实际密钥。配置与评测命令只保存变量名。</p><pre>${escape(setup.shell === "bash" ? `export ${setup.tokenEnv}='替换为你的密钥'` : `$env:${setup.tokenEnv}='替换为你的密钥'`)}</pre>` : ""}`;
   }
   const check = setup.validation;
@@ -491,7 +485,7 @@ async function restoreLocation() {
         } else break;
       }
       if (current().item.kind === "run") {
-        if (["cases", "scenarios", "rules", "multi", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
+        if (["overview", "cases", "scenarios", "rules", "metrics", "multi", "raw"].includes(params.get("tab"))) state.tab = params.get("tab");
         if (["all", "passed", "warning", "failed"].includes(params.get("filter"))) state.caseFilter = params.get("filter");
         state.caseQuery = (params.get("caseQuery") || "").slice(0, 1000);
         const selected = array(current().payload.results).findIndex((result) => object(result.case).case_id === params.get("case"));
@@ -628,33 +622,103 @@ function ruleStatsTable(payload) {
     ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td>${rateCell(row.passRate, rateTone(row.passRate))}</td><td class="number ${row.missing ? "warning-text" : "muted"}">${integer(row.missing)}</td><td><button class="link-button" data-rule-history="${escape(row.name)}">查看趋势</button></td></tr>`).join("")}</tbody></table></div>`;
 }
 
-function runVerdict(payload, results, failures, soft) {
-  const multi = object(payload.multi_agent);
-  const firstFailure = results.find((result) => result.hard_pass !== true);
-  const status = failures ? "failed" : soft ? "warning" : "passed";
-  const summary = failures
-    ? `${integer(failures)} 条用例硬失败，${integer(soft)} 条软告警。`
-    : soft
-      ? `全部硬门禁通过，但有 ${integer(soft)} 条软告警需要复核。`
-      : "全部硬门禁通过，没有软告警。";
-  const points = [];
-  if (firstFailure) {
-    points.push(`首个失败用例：${escape(object(firstFailure.case).case_id || "—")}`);
+function metricStatsTable(payload) {
+  const rows = AssayUI.metricStats(payload);
+  if (!rows.length) return `<div class="panel-body"><p class="muted">本次运行没有指标结果。使用 --preset 或 --metrics 启用指标。</p></div>`;
+  const score = (value) => value === null ? "—" : Number(value).toFixed(3);
+  return `<div class="table-wrap"><table class="rule-stats-table"><thead><tr><th>指标</th><th>层级</th><th>评测数</th><th>通过</th><th>通过率</th><th>平均分</th><th>跳过</th><th>错误</th><th>历史</th></tr></thead><tbody>
+    ${rows.map((row) => `<tr><td><strong>${escape(row.name)}</strong></td><td>${badge(row.level)}</td><td class="number">${integer(row.evaluated)}</td><td class="number">${integer(row.passed)}</td><td>${rateCell(row.passRate, rateTone(row.passRate))}</td><td class="number">${score(row.meanScore)}</td><td class="number ${row.skipped ? "warning-text" : "muted"}">${integer(row.skipped)}</td><td class="number ${row.errors ? "negative" : "muted"}">${integer(row.errors)}</td><td><button class="link-button" data-metric-history="${escape(row.name)}">查看趋势</button></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function metricHistoryPanel(data) {
+  const points = array(data.points);
+  if (!points.length) {
+    return `<div class="rule-history-empty"><strong>没有历史数据</strong><p class="muted">旧 run 可能没有 metric_stats，或这个 suite 还没有启用指标的 run。</p></div>`;
   }
-  if (count(multi.denied_tools)) {
-    points.push(`${integer(multi.denied_tools)} 次工具被全部拒绝`);
+  const valid = points.map((point, index) => ({ point, index }))
+    .filter(({ point }) => number(point.pass_rate) !== null);
+  const width = 520, height = 178, padX = 16, padTop = 14, padBottom = 30;
+  const chartHeight = height - padTop - padBottom;
+  const x = (index) => padX + (points.length <= 1 ? (width - 2 * padX) / 2 : index * (width - 2 * padX) / (points.length - 1));
+  const y = (rate) => padTop + (1 - rate) * chartHeight;
+  const line = valid.map(({ point, index }, position) => `${position ? "L" : "M"}${x(index).toFixed(1)} ${y(number(point.pass_rate)).toFixed(1)}`).join(" ");
+  const dots = valid.map(({ point, index }) => `<circle cx="${x(index)}" cy="${y(number(point.pass_rate))}" r="3.5" class="trend-dot"><title>${escape(date(point.modified_at))}：${percent(point.pass_rate)}，均分 ${decimal(point.mean_score)}</title></circle>`).join("");
+  const labelEvery = Math.max(1, Math.ceil(points.length / 7));
+  const labels = points.map((point, index) => index % labelEvery === 0 || index === points.length - 1
+    ? `<text x="${x(index)}" y="${height - 6}" text-anchor="middle" class="trend-label">${escape(date(point.modified_at).slice(0, 5))}</text>`
+    : "").join("");
+  return `<div class="rule-history-head"><strong>${escape(data.metric)}</strong><span class="muted">最近 ${points.length} 次 · ${escape(data.suite || "全部 suite")}</span></div>
+    <svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(data.metric)} 最近通过率">${[0, 0.5, 1].map((rate) => `<line x1="${padX}" y1="${y(rate)}" x2="${width - padX}" y2="${y(rate)}" class="trend-grid"/>`).join("")}<path d="${line}" class="trend-line"/>${dots}${labels}</svg>
+    <div class="table-wrap"><table><thead><tr><th>Run</th><th>时间</th><th>通过率</th><th>平均分</th><th>评测数</th><th>跳过</th></tr></thead><tbody>
+      ${points.map((point) => `<tr><td><button class="record-name" data-artifact="${escape(point.id)}">${escape(point.run_id)}</button></td><td class="muted number">${escape(date(point.modified_at))}</td><td class="number">${percent(point.pass_rate)}</td><td class="number">${decimal(point.mean_score)}</td><td class="number">${integer(point.evaluated)}</td><td class="number">${integer(point.skipped)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+async function loadMetricHistory(metric) {
+  const panel = $("metric-history-panel");
+  if (!panel) return;
+  const context = current();
+  const suite = String(object(context?.payload).suite || "");
+  panel.innerHTML = `<div class="rule-history-loading"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-chart"></div><div class="skeleton skeleton-row"></div></div>`;
+  try {
+    const data = await request(`/api/metric-history?metric=${encodeURIComponent(metric)}&suite=${encodeURIComponent(suite)}&limit=20`);
+    if (current() !== context || !$("metric-history-panel")) return;
+    $("metric-history-panel").innerHTML = metricHistoryPanel(data);
+  } catch (error) {
+    if (current() === context && $("metric-history-panel")) {
+      $("metric-history-panel").innerHTML = `<div class="rule-history-error"><p class="error-box">读取失败：${escape(error.message)}</p><button class="button secondary" data-metric-history="${escape(metric)}">重试</button></div>`;
+    }
   }
-  if (count(multi.handoffs)) {
-    points.push(`${integer(multi.handoffs)} 次 subagent 交接`);
-  }
-  if (count(multi.max_repeated_step) > 1) {
-    points.push(`最长连续重复步骤：${integer(multi.max_repeated_step)}`);
-  }
+}
+
+function runVerdict(view) {
+  const status = view.verdict.status;
+  const sourceStatus = String(view.payload.status || "").toLowerCase();
+  const budgetExhausted = sourceStatus === "budget_exhausted";
+  const multi = object(view.payload.multi_agent);
+  const points = [...view.verdict.points];
+  if (count(multi.denied_tools)) points.push(`${integer(multi.denied_tools)} 次工具被全部拒绝`);
+  if (count(multi.handoffs)) points.push(`${integer(multi.handoffs)} 次 subagent 交接`);
+  if (count(multi.max_repeated_step) > 1) points.push(`最长连续重复步骤：${integer(multi.max_repeated_step)}`);
   return `<section class="panel run-verdict ${status}">
-    <div class="run-verdict-head">${badge(status)}<h2>${status === "failed" ? "本次运行未通过" : status === "warning" ? "通过，但有复核信号" : "本次运行通过"}</h2></div>
-    <p>${escape(summary)}</p>
-    ${points.length ? `<ul class="run-verdict-points">${points.map((point) => `<li>${point}</li>`).join("")}</ul>` : ""}
+    <div class="run-verdict-head">${badge(status)}<h2>${escape(budgetExhausted ? "运行预算用尽" : view.verdict.title)}</h2></div>
+    <p>${escape(budgetExhausted ? "运行预算用尽，部分用例被跳过；提高预算后重新运行。" : view.verdict.summary)}</p>
+    ${points.length ? `<ul class="run-verdict-points">${points.map((point) => `<li>${escape(point)}</li>`).join("")}</ul>` : ""}
   </section>`;
+}
+
+function runSummary(view) {
+  const statusSegments = [
+    { label: "通过", value: view.passedCases.length, color: "var(--chart-good)" },
+    { label: "软告警", value: view.warnedCases.length, color: "var(--chart-warning)" },
+    { label: "硬失败", value: view.failedCases.length, color: "var(--chart-bad)" }
+  ].filter((segment) => segment.value > 0);
+  const ruleItems = view.rules.slice(0, 8).map((row) => ({
+    label: row.name,
+    value: row.passRate,
+    color: AssayCharts.rateColor(row.passRate)
+  }));
+  const scenarioItems = view.scenarios.slice(0, 8).map((row) => ({
+    label: row.name,
+    value: row.rate,
+    color: AssayCharts.rateColor(row.rate)
+  }));
+  const reasonItems = view.failureReasons.slice(0, 8).map((row) => ({
+    label: `${row.name}（${row.level === "hard" ? "硬门禁" : row.level === "soft" ? "软质量" : row.level}）`,
+    value: row.count,
+    color: row.level === "hard" ? "var(--chart-bad)" : "var(--chart-warning)"
+  }));
+  return `<div class="chart-grid">
+    <section class="panel"><div class="panel-head"><h2>用例状态</h2><span class="muted">${integer(view.caseCount)} 条用例</span></div><div class="panel-body">${AssayCharts.donut({ segments: statusSegments, centerValue: percent(view.passRate), centerLabel: "硬门禁通过", label: "用例状态分布", empty: "没有用例结果。" })}</div></section>
+    <section class="panel"><div class="panel-head"><h2>规则通过率</h2><span class="muted">低通过率优先</span></div><div class="panel-body">${AssayCharts.barChart({ items: ruleItems, max: 1, format: "percent", label: "规则通过率", empty: "本次运行没有规则统计。" })}</div></section>
+    <section class="panel"><div class="panel-head"><h2>场景通过率</h2><span class="muted">硬门禁 · 按用例加权</span></div><div class="panel-body">${AssayCharts.barChart({ items: scenarioItems, max: 1, format: "percent", label: "场景通过率", empty: "没有场景数据。" })}</div></section>
+    <section class="panel"><div class="panel-head"><h2>失败原因</h2><span class="muted">按失败规则计数</span></div><div class="panel-body">${AssayCharts.barChart({ items: reasonItems, format: "number", label: "失败原因分布", empty: "没有失败用例。" })}</div></section>
+  </div>${topFailuresPanel(view)}`;
+}
+
+function topFailuresPanel(view) {
+  if (!view.topFailures.length) return "";
+  return `<section class="panel section-gap"><div class="panel-head"><h2>需要优先处理的用例</h2><span class="count-chip">${view.failedCases.length} 条硬失败</span></div><div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>失败规则</th><th>步骤</th><th>操作</th></tr></thead><tbody>${view.topFailures.map((item) => `<tr><td><strong>${escape(item.id)}</strong><div class="record-path">${escape(item.scenario)}</div></td><td>${item.reasons.length ? item.reasons.map((reason) => `<span class="badge hard">${escape(reason)}</span>`).join(" ") : '<span class="muted">执行失败</span>'}</td><td class="number">${integer(item.steps)}</td><td><button class="link-button" data-case-jump="${item.index}">查看 Trace →</button></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
 function multiAgentPanel(payload) {
@@ -682,21 +746,25 @@ function multiAgentPanel(payload) {
 }
 
 function renderRun(context) {
-  const payload = context.payload, results = array(payload.results);
-  const failures = results.filter((result) => result.hard_pass !== true).length;
-  const soft = results.reduce((sum, result) => sum + count(result.soft_warning_count), 0);
+  const payload = context.payload;
+  const view = AssayModel.runView(payload);
+  const results = array(payload.results);
   const multi = object(payload.multi_agent);
-  if (!Object.keys(multi).length && state.tab === "multi") state.tab = "cases";
-  const tabs = [["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["rules", "规则统计"]];
+  if (!Object.keys(multi).length && state.tab === "multi") state.tab = "overview";
+  const tabs = [["overview", "概览"], ["cases", "用例与 Trace"], ["scenarios", "场景分布"], ["rules", "规则统计"]];
+  if (view.metrics.length) tabs.push(["metrics", "指标"]);
   if (Object.keys(multi).length) tabs.push(["multi", "多智能体"]);
   tabs.push(["raw", "原始数据"]);
-  const header = `${detailHeader(context)}${runVerdict(payload, results, failures, soft)}<div class="stats">${stat("用例数量", integer(results.length), payload.suite || "当前数据集")}${stat("硬门禁通过率", results.length ? percent((results.length - failures) / results.length) : "—", `${results.length - failures} 条通过`, "positive")}${stat("硬失败", integer(failures), "规则或执行失败", failures ? "negative" : "")}${stat("复核信号", integer(soft), "软告警与复核候选", soft ? "warning-text" : "")}</div>
+  if (!tabs.some(([tab]) => tab === state.tab)) state.tab = "overview";
+  const header = `${detailHeader(context)}${runVerdict(view)}<div class="stats">${stat("用例数量", integer(view.caseCount), payload.suite || "当前数据集")}${stat("硬门禁通过率", percent(view.passRate), `${integer(view.caseCount - view.hardFailures)} 条通过`, "positive")}${stat("硬失败", integer(view.hardFailures), "规则或执行失败", view.hardFailures ? "negative" : "")}${stat("复核信号", integer(view.softWarnings), "软告警与复核候选", view.softWarnings ? "warning-text" : "")}</div>
     <div class="tabs" role="tablist" aria-label="运行详情">${tabs.map(([tab, title]) => `<button id="tab-${tab}" role="tab" aria-controls="run-panel" aria-selected="${state.tab === tab}" tabindex="${state.tab === tab ? 0 : -1}" class="tab ${state.tab === tab ? "active" : ""}" data-tab="${tab}">${title}</button>`).join("")}</div>`;
   const panel = `id="run-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-${state.tab}"`;
+  if (state.tab === "overview") return `${header}<div ${panel}>${runSummary(view)}</div>`;
   if (state.tab === "raw") return `${header}<div ${panel}><pre class="raw-data">${json(payload)}</pre></div>`;
   if (state.tab === "multi") return `${header}<div ${panel}>${multiAgentPanel(payload)}</div>`;
   if (state.tab === "scenarios") return `${header}<section class="panel" ${panel}><div class="panel-head"><h2>场景通过率</h2><span class="muted">Wilson 95% 区间 · 小样本区间更宽</span></div>${scenarioTable(results)}</section>`;
   if (state.tab === "rules") return `${header}<section class="panel rule-stats-panel" ${panel}><div class="panel-head"><h2>规则通过率</h2><span class="muted">按规则名聚合 · 低通过率优先</span></div><div class="rule-stats-layout"><div class="rule-stats-main">${ruleStatsTable(payload)}</div><div id="rule-history-panel" class="rule-history-panel" aria-live="polite"><div class="rule-history-empty"><strong>规则历史</strong><p class="muted">选择左侧「查看趋势」，查看同一 suite 最近 20 次运行。</p></div></div></div></section>`;
+  if (state.tab === "metrics") return `${header}<section class="panel rule-stats-panel" ${panel}><div class="panel-head"><h2>指标得分</h2><span class="muted">按指标名聚合 · 低通过率优先</span></div><div class="rule-stats-layout"><div class="rule-stats-main">${metricStatsTable(payload)}</div><div id="metric-history-panel" class="rule-history-panel" aria-live="polite"><div class="rule-history-empty"><strong>指标历史</strong><p class="muted">选择左侧「查看趋势」，查看同一 suite 最近 20 次运行。</p></div></div></div></section>`;
   return `${header}<div ${panel}><div class="case-view-tools"><p class="muted">用例列表支持 ↑ ↓、Home / End 和 PageUp / PageDown。</p><button class="button secondary" data-toggle-trace aria-expanded="${!traceCollapsed}" aria-controls="trace-detail">${traceCollapsed ? "展开 Trace" : "折叠 Trace"}</button></div><div class="case-workspace"><div class="case-layout ${traceCollapsed ? "trace-collapsed" : ""}"><section class="panel" id="case-list"><div class="panel-head"><h2>用例明细</h2><span class="muted">选择一条查看证据</span></div><div class="case-tools">
     <input type="search" id="case-search" placeholder="搜索用例或场景" aria-label="搜索用例或场景" value="${escape(state.caseQuery)}"><select id="case-filter" aria-label="筛选用例状态">${[["all", "全部状态"], ["failed", "仅硬失败"], ["warning", "仅软告警"], ["passed", "全部通过"]].map(([value, title]) => `<option value="${value}" ${state.caseFilter === value ? "selected" : ""}>${title}</option>`).join("")}</select></div>
     <div class="table-wrap"><table><thead><tr><th>用例 / 场景</th><th>结果</th><th>步骤</th><th>告警</th></tr></thead><tbody id="case-rows"></tbody></table></div><div class="case-count" id="case-count"></div></section><div id="case-resizer" class="split-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="case-list trace-detail" aria-label="调整用例与 Trace 宽度，左右键调节，双击或 Enter 平分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div><section class="panel" id="trace-detail" ${traceCollapsed ? "hidden" : ""}></section></div></div></div>`;
@@ -716,8 +784,29 @@ function compareRow(label, baseline, candidate, deltaValue, format, deltaFormat 
   return `<tr><td>${escape(label)}</td><td class="number">${baseline}</td><td class="number">${candidate}</td><td class="number">${number(deltaValue) === null ? "—" : deltaFormat(deltaValue)}</td></tr>`;
 }
 
+function compareVerdict(view) {
+  const status = view.status;
+  const statusClass = status === "block" ? "failed" : status === "warning" ? "warning" : "passed";
+  const title = status === "block" ? "候选被门禁拦下" : status === "warning" ? "候选有风险，需要复核" : status === "pass" ? "候选通过门禁" : "门禁结论未知";
+  const summary = status === "block"
+    ? `${integer(view.kpis.regressed)} 条退化用例，其中关键 ${integer(view.kpis.criticalRegressions)} 条；候选通过率 ${percent(view.kpis.candidatePassRate)}。`
+    : status === "warning"
+      ? `候选通过率 ${percent(view.kpis.candidatePassRate)}，有 ${integer(view.kpis.regressed)} 条退化用例需要复核。`
+      : `候选通过率 ${percent(view.kpis.candidatePassRate)}，没有发现阻断性退化。`;
+  const violations = array(view.gate.violations);
+  return `<section class="panel run-verdict ${statusClass}">
+    <div class="run-verdict-head">${badge(status)}<h2>${escape(title)}</h2></div>
+    <p>${escape(summary)}</p>
+    ${violations.length ? `<ul class="run-verdict-points">${violations.slice(0, 5).map((raw) => {
+      const row = object(raw);
+      return `<li>${escape(row.rule || "门禁")}：${escape(row.message || "未满足阈值")}</li>`;
+    }).join("")}</ul>` : ""}
+  </section>`;
+}
+
 function renderCompare(context) {
   const payload = context.payload;
+  const view = AssayModel.compareView(payload);
   const gate = object(payload.gate);
   const baseline = object(payload.baseline);
   const candidate = object(payload.candidate);
@@ -753,6 +842,13 @@ function renderCompare(context) {
     const item = object(row);
     return `<tr><td><strong>${escape(name)}</strong></td><td class="number">${integer(item.case_count)}</td><td class="number">${percent(item.baseline_hard_pass_rate)}</td><td class="number">${percent(item.candidate_hard_pass_rate)}</td><td class="number ${number(item.hard_pass_rate_delta) < 0 ? "negative" : "positive"}">${delta(item.hard_pass_rate_delta, true)}</td><td class="number">${integer(item.regressions)}</td><td class="number">${integer(item.critical_regressions)}</td></tr>`;
   }).join("");
+  const scenarioGroups = view.scenarios.map((row) => ({
+    label: row.name,
+    values: [
+      { label: "基线", value: row.baseline, color: "var(--silver)" },
+      { label: "候选", value: row.candidate, color: "var(--teal)" }
+    ]
+  }));
 
   const regressionRows = regressions.map((raw) => {
     const row = object(raw);
@@ -782,12 +878,16 @@ function renderCompare(context) {
     ? `<section class="panel section-gap"><div class="panel-head"><h2>估算指标</h2><span class="muted">Trace 未上报 Token / 成本</span></div><div class="panel-body"><p class="muted">带 <strong>~</strong> 的值由文本长度和价格表估算，仅用于演示，不是账单数据；默认不参与门禁。</p><p>平均 Token：${estimatedValue(candidateEstimate, "mean_total_tokens", (value) => decimal(value))} · 平均成本：${estimatedValue(candidateEstimate, "mean_cost_usd", usd)} · 价格模型：${escape(candidateEstimate.price_model || "default")}</p></div></section>`
     : "";
 
-  return `${detailHeader(context)}
+  return `${detailHeader(context)}${compareVerdict(view)}
     <div class="stats">
       ${stat("候选通过率", percent(candidate.hard_pass_rate), `基线 ${percent(baseline.hard_pass_rate)}`, number(deltas.hard_pass_rate) < 0 ? "negative" : "positive")}
       ${stat("退化用例", integer(transitions.regressed_count), "基线通过、候选用例失败", count(transitions.regressed_count) ? "negative" : "")}
       ${stat("关键退化", integer(array(transitions.regressed).filter((row) => object(row).critical).length), "关键任务", array(transitions.regressed).some((row) => object(row).critical) ? "negative" : "")}
       ${stat("用例数", integer(candidate.case_count), `数据集 ${payload.dataset || "—"}`)}
+    </div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>用例状态迁移</h2><span class="muted">基线 → 候选</span></div><div class="panel-body">${AssayCharts.stackedBar({ segments: view.transitionSegments, format: "number", label: "用例状态迁移", empty: "没有用例级迁移数据。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>场景通过率对比</h2><span class="muted">基线 vs 候选</span></div><div class="panel-body">${AssayCharts.groupedBar({ groups: scenarioGroups, max: 1, format: "percent", label: "场景通过率对比", legend: [{ label: "基线", color: "var(--silver)" }, { label: "候选", color: "var(--teal)" }], empty: "没有场景切片数据。" })}</div></section>
     </div>
     <section class="panel section-gap"><div class="panel-head"><h2>门禁结论</h2>${badge(status)}</div><div class="panel-body">${findingRows}</div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>指标对比</h2><span class="muted">${escape(baseline.run_id || "baseline")} → ${escape(candidate.run_id || "candidate")}</span></div><div class="table-wrap"><table><thead><tr><th>指标</th><th>基线</th><th>候选</th><th>变化</th></tr></thead><tbody>${metricRows.join("")}</tbody></table></div></section>
@@ -798,6 +898,13 @@ function renderCompare(context) {
     <details class="warnings section-gap"><summary>原始 JSON</summary><pre class="raw-data">${json(payload)}</pre></details>`;
 }
 
+function evolutionVerdict(decision, payload) {
+  const statusClass = decision === "accept" ? "passed" : decision === "rollback" ? "failed" : "warning";
+  const title = labels[decision] || "演化结论未知";
+  const reasons = array(payload.reasons).map(AssayUI.reasonText).join("；") || "没有记录判定依据。";
+  return `<section class="panel run-verdict ${statusClass}"><div class="run-verdict-head">${badge(decision)}<h2>${escape(title)}</h2></div><p>${escape(reasons)}</p></section>`;
+}
+
 function renderEvolution(context) {
   const payload = context.payload, candidate = object(payload.candidate), comparisons = object(payload.comparisons);
   const improvement = object(comparisons.improvement);
@@ -806,6 +913,25 @@ function renderEvolution(context) {
   const qualityGates = array(object(payload.policy).quality_gates);
   const regressions = AssayUI.regressions(payload);
   const criticalRegressions = regressions.filter((item) => item.critical).length;
+  const decision = String(payload.decision || "unknown").toLowerCase();
+  const roleGroups = roles.map((role) => {
+    const row = object(comparisons[role]);
+    return {
+      label: labels[role] || role,
+      values: [
+        { label: "基线", value: number(object(row.baseline).hard_pass_rate), color: "var(--silver)" },
+        { label: "候选", value: number(object(row.candidate).hard_pass_rate), color: "var(--teal)" }
+      ]
+    };
+  });
+  const regressionItems = roles.map((role) => {
+    const transitions = object(object(comparisons[role]).case_transitions);
+    return {
+      label: labels[role] || role,
+      value: number(transitions.regressed_count) || 0,
+      color: count(transitions.regressed_count) ? "var(--chart-bad)" : "var(--chart-good)"
+    };
+  });
   const ruleRows = roles.flatMap((role) => Object.entries(object(object(comparisons[role]).rule_deltas))
     .map(([name, row]) => ({ role, name, row: object(row) })));
   const latencySamples = (metrics) => {
@@ -830,7 +956,11 @@ function renderEvolution(context) {
     const delta = number(row.pass_rate_delta);
     return delta === null || delta !== 0;
   });
-  return `${detailHeader(context)}<div class="stats">${stat("候选版本", candidate.candidate_version || "—", `${candidate.target_type || "目标"} · ${candidate.target_id || "未标注"}`)}${stat("改善集通过率变化", delta(improvement.hard_pass_rate_delta, true), "候选减去基线", count(improvement.hard_pass_rate_delta) >= 0 ? "positive" : "negative")}${stat("改善集告警变化", delta(improvement.soft_warning_delta), "负值表示告警减少", count(improvement.soft_warning_delta) <= 0 ? "positive" : "warning-text")}${stat("回归用例", integer(regressions.length), criticalRegressions ? `其中关键 ${criticalRegressions} 条` : "基线通过、候选失败", regressions.length ? "negative" : "")}</div>
+  return `${detailHeader(context)}${evolutionVerdict(decision, payload)}<div class="stats">${stat("候选版本", candidate.candidate_version || "—", `${candidate.target_type || "目标"} · ${candidate.target_id || "未标注"}`)}${stat("改善集通过率变化", delta(improvement.hard_pass_rate_delta, true), "候选减去基线", count(improvement.hard_pass_rate_delta) >= 0 ? "positive" : "negative")}${stat("改善集告警变化", delta(improvement.soft_warning_delta), "负值表示告警减少", count(improvement.soft_warning_delta) <= 0 ? "positive" : "warning-text")}${stat("回归用例", integer(regressions.length), criticalRegressions ? `其中关键 ${criticalRegressions} 条` : "基线通过、候选失败", regressions.length ? "negative" : "")}</div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>三组数据通过率</h2><span class="muted">基线 vs 候选</span></div><div class="panel-body">${AssayCharts.groupedBar({ groups: roleGroups, max: 1, format: "percent", label: "三组数据通过率", legend: [{ label: "基线", color: "var(--silver)" }, { label: "候选", color: "var(--teal)" }], empty: "没有可对比的数据集。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>回归用例数</h2><span class="muted">按数据集</span></div><div class="panel-body">${AssayCharts.barChart({ items: regressionItems, format: "number", label: "各数据集回归用例数", empty: "没有回归数据。" })}</div></section>
+    </div>
     <div class="comparison-grid"><section class="panel"><div class="panel-head"><h2>数据集对比</h2><span class="muted">基线 ${escape(candidate.baseline_version || "—")} → 候选 ${escape(candidate.candidate_version || "—")}</span></div>
       <div class="table-wrap"><table><thead><tr><th>数据集</th><th>基线通过率</th><th>候选通过率</th><th>变化</th><th>平均延迟变化</th><th>P95 延迟变化</th></tr></thead><tbody>${roles.map((role) => {
         const row = object(comparisons[role]);
@@ -880,8 +1010,36 @@ function caseTransitionPanels(payload) {
 }
 
 function renderAuto(context) {
-  const payload = context.payload, rounds = array(payload.rounds), usage = object(payload.usage);
-  return `${detailHeader(context)}<div class="stats">${stat("当前版本", payload.current_version || "—", "沙箱内的候选版本")}${stat("已记录轮次", integer(rounds.length), "展开候选查看完整演化对比")}${stat("诊断 / 生成调用", integer(usage.evolver_calls), "按演化器调用计数")}${stat("循环状态", labels[payload.status] || payload.status || "—", "结果保留在工作区")}</div>
+  const payload = context.payload, rounds = array(payload.rounds);
+  const view = AssayModel.autoView(payload);
+  const decisionColors = {
+    accept: "var(--chart-good)", reject: "var(--chart-bad)", rollback: "var(--chart-warning)"
+  };
+  const roundDecisionGroups = view.roundDecisions.map((row) => ({
+    label: row.label,
+    values: ["accept", "reject", "rollback"].map((name) => ({
+      label: labels[name], value: row.counts[name], color: decisionColors[name]
+    }))
+  }));
+  const decisionSegments = ["accept", "reject", "rollback"]
+    .map((name) => ({ label: labels[name], value: view.decisions[name], color: decisionColors[name] }))
+    .filter((segment) => segment.value > 0);
+  const totalCandidates = view.candidates;
+  const roundPassGroups = view.roundPassRates.map((row) => ({
+    label: row.label,
+    values: [
+      { label: "基线", value: row.baseline, color: "var(--silver)" },
+      { label: "最佳候选", value: row.candidate, color: "var(--teal)" }
+    ]
+  }));
+  const trendPoints = view.roundPassRates.map((row) => ({ label: row.label, value: row.candidate }));
+  return `${detailHeader(context)}<div class="stats">${stat("当前版本", payload.current_version || "—", "沙箱内的候选版本")}${stat("已记录轮次", integer(rounds.length), "展开候选查看完整演化对比")}${stat("诊断 / 生成调用", integer(view.usage.evolver_calls), "按演化器调用计数")}${stat("循环状态", labels[payload.status] || payload.status || "—", "结果保留在工作区")}</div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>候选决策</h2><span class="muted">所有轮次</span></div><div class="panel-body">${AssayCharts.donut({ segments: decisionSegments, centerValue: totalCandidates, centerLabel: "个候选", label: "候选决策分布", empty: "还没有候选决策。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>每轮决策</h2><span class="muted">接受 / 拒绝 / 回退</span></div><div class="panel-body">${AssayCharts.groupedBar({ groups: roundDecisionGroups, format: "number", label: "每轮候选决策", legend: ["accept", "reject", "rollback"].map((name) => ({ label: labels[name], color: decisionColors[name] })), empty: "还没有完成的轮次。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>每轮最佳候选通过率</h2><span class="muted">改善集 · 基线 vs 候选</span></div><div class="panel-body">${AssayCharts.groupedBar({ groups: roundPassGroups, max: 1, format: "percent", label: "每轮最佳候选通过率", legend: [{ label: "基线", color: "var(--silver)" }, { label: "最佳候选", color: "var(--teal)" }], empty: "没有可比较的候选。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>轮次趋势</h2><span class="muted">最佳候选硬门禁通过率</span></div><div class="panel-body">${AssayCharts.lineChart({ points: trendPoints, min: 0, max: 1, format: "percent", label: "每轮最佳候选通过率", empty: "还没有轮次数据。" })}</div></section>
+    </div>
     ${payload.error ? `<div class="error-box">${escape(payload.error)}</div>` : ""}
     ${rounds.map((round, roundIndex) => `<section class="panel round"><div class="panel-head"><h2>第 ${escape(round.round || roundIndex + 1)} 轮</h2><span class="count-chip">${array(round.candidates).length} 个候选</span></div><div class="panel-body"><p class="round-note">${escape(object(round.diagnosis).summary || "没有诊断说明")}</p>
       ${array(round.candidates).length ? `<div class="table-wrap"><table><thead><tr><th>候选</th><th>版本</th><th>决策</th><th>查看</th></tr></thead><tbody>${array(round.candidates).map((entry, candidateIndex) => `<tr><td>${escape(object(entry.candidate).candidate_id)}<div class="record-path">${escape(object(entry.candidate).summary)}</div></td><td>${escape(object(entry.candidate).candidate_version)}</td><td>${badge(object(entry.evaluation).decision)}</td><td><button class="link-button" data-round="${roundIndex}" data-proposal="${candidateIndex}">对比详情 →</button></td></tr>`).join("")}</tbody></table></div>` : '<p class="muted">本轮未生成候选。</p>'}</div></section>`).join("") || empty("没有已完成的轮次", "可在下方查看预算、检查点与循环的原始状态。")}
@@ -890,7 +1048,29 @@ function renderAuto(context) {
 
 function renderAudit(context) {
   const payload = context.payload, findings = array(payload.findings), tests = object(payload.tests);
+  const statusCounts = new Map(), riskCounts = new Map();
+  for (const finding of findings) {
+    const status = String(finding.status || "unknown");
+    const risk = String(finding.risk || "unknown");
+    statusCounts.set(status, (statusCounts.get(status) || 0) + 1);
+    riskCounts.set(risk, (riskCounts.get(risk) || 0) + 1);
+  }
+  const statusColor = (status) => status === "clear_out_of_scope" ? "var(--chart-bad)"
+    : status === "suspected_out_of_scope" ? "var(--chart-warning)"
+      : status === "no_obvious_issue" ? "var(--chart-good)" : "var(--silver)";
+  const riskColor = (risk) => risk === "high" ? "var(--chart-bad)"
+    : risk === "medium" ? "var(--chart-warning)" : "var(--chart-good)";
+  const statusItems = [...statusCounts].map(([status, value]) => ({
+    label: labels[status] || status, value, color: statusColor(status)
+  })).sort((left, right) => right.value - left.value);
+  const riskItems = [...riskCounts].map(([risk, value]) => ({
+    label: labels[risk] || risk, value, color: riskColor(risk)
+  })).sort((left, right) => right.value - left.value);
   return `${detailHeader(context)}<div class="stats">${stat("变更文件", integer(array(payload.changed_files).length), "本次审计覆盖的文件")}${stat("审计发现", integer(findings.length), "按规则与模型证据整理")}${stat("新增 / 删除", `${integer(payload.additions)} / ${integer(payload.deletions)}`, "Git Diff 行数")}${stat("相关测试", labels[tests.status] || tests.status || "未运行", "测试结论与范围结论分别展示")}</div>
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>发现状态分布</h2><span class="muted">按结论计数</span></div><div class="panel-body">${AssayCharts.barChart({ items: statusItems, format: "number", label: "审计发现状态分布", empty: "没有审计发现。" })}</div></section>
+      <section class="panel"><div class="panel-head"><h2>风险分布</h2><span class="muted">按风险等级计数</span></div><div class="panel-body">${AssayCharts.barChart({ items: riskItems, format: "number", label: "审计发现风险分布", empty: "没有风险数据。" })}</div></section>
+    </div>
     <section class="panel"><div class="panel-head"><h2>任务与验收标准</h2></div><div class="panel-body"><p>${escape(payload.requirement || "未提供任务说明")}</p><ul class="evidence">${array(payload.acceptance_criteria).map((item) => `<li>${escape(item)}</li>`).join("")}</ul></div></section>
     <section class="panel section-gap"><div class="panel-head"><h2>范围发现</h2><span class="muted">保留文件、行号与 Diff 侧别</span></div>${findings.map((finding, index) => `<article class="finding"><div class="finding-top">${badge(finding.status)}${badge(finding.risk)}<code>${escape(finding.path)}:${escape(finding.line ?? "?")} (${escape(finding.line_side || "target")})</code>${Number.isInteger(finding.line) && finding.line > 0 ? `<button class="link-button" data-finding="${index}">定位代码行 →</button>` : ""}</div><p>${escape(finding.reason)}</p>${details("证据", finding.evidence)}</article>`).join("") || empty("没有记录范围发现")}</section>
     <section class="panel section-gap"><div class="panel-head"><h2>代码差异</h2><div class="trace-tools"><button class="button secondary" data-load-patch>加载代码差异</button><label class="patch-upload button secondary">选择 diff.patch<input id="audit-patch" type="file" accept=".patch,.diff,text/plain" aria-label="选择审计补丁"></label></div></div><div id="audit-diff" class="panel-body"></div></section>
@@ -945,7 +1125,27 @@ async function locateFinding(index) {
 
 function renderRelease(context) {
   const payload = context.payload;
-  return `${detailHeader(context)}<section class="panel"><div class="panel-head"><h2>发布验证阶段</h2><span class="muted">硬门禁失败后停止后续阶段</span></div><div class="table-wrap"><table><thead><tr><th>阶段</th><th>结果</th><th>用例</th><th>硬失败</th><th>查看</th></tr></thead><tbody>${array(payload.stages).map((stage, index) => `<tr><td>${escape(stage.suite)}</td><td>${badge(stage.status)}</td><td>${integer(stage.case_count)}</td><td>${integer(stage.hard_failures)}</td><td><button class="link-button" data-stage="${index}">运行明细 →</button></td></tr>`).join("")}</tbody></table></div></section>`;
+  const view = AssayModel.releaseView(payload);
+  const stages = view.stages;
+  const stageItems = stages.map((stage) => ({
+    label: stage.suite,
+    value: stage.passRate,
+    color: stage.passRate === null ? "var(--silver)" : stage.passRate >= 0.9 ? "var(--chart-good)"
+      : stage.passRate >= 0.7 ? "var(--chart-warning)" : "var(--chart-bad)"
+  }));
+  const stageGroups = stages.map((stage) => ({
+    label: stage.suite,
+    values: [
+      { label: "通过", value: stage.passed, color: "var(--chart-good)" },
+      { label: "硬失败", value: stage.hardFailures, color: "var(--chart-bad)" }
+    ]
+  }));
+  return `${detailHeader(context)}
+    <div class="chart-grid">
+      <section class="panel"><div class="panel-head"><h2>阶段通过率</h2><span class="muted">硬门禁 · 按用例加权</span></div><div class="panel-body">${AssayCharts.barChart({ items: stageItems, max: 1, format: "percent", label: "发布验证阶段通过率", empty: "没有阶段数据。" })}<p class="mini-note">未运行或没有用例的阶段不参与通过率统计，详情见下表。</p></div></section>
+      <section class="panel"><div class="panel-head"><h2>阶段通过 / 硬失败</h2><span class="muted">按用例数</span></div><div class="panel-body">${AssayCharts.groupedBar({ groups: stageGroups, format: "number", label: "阶段通过 / 硬失败", legend: [{ label: "通过", color: "var(--chart-good)" }, { label: "硬失败", color: "var(--chart-bad)" }], empty: "没有阶段数据。" })}</div></section>
+    </div>
+    <section class="panel"><div class="panel-head"><h2>发布验证阶段</h2><span class="muted">硬门禁失败后停止后续阶段</span></div><div class="table-wrap"><table><thead><tr><th>阶段</th><th>结果</th><th>用例</th><th>硬失败</th><th>查看</th></tr></thead><tbody>${stages.map((stage) => `<tr><td>${escape(stage.suite)}</td><td>${badge(stage.status)}</td><td>${integer(stage.caseCount)}</td><td>${integer(stage.hardFailures)}</td><td><button class="link-button" data-stage="${stage.index}">运行明细 →</button></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
 function enterPage(sectionChanged) {
@@ -984,7 +1184,7 @@ function render(pushLocation = false) {
 }
 
 function resetCaseView(payload) {
-  state.tab = "cases"; state.caseFilter = "all"; state.caseQuery = ""; state.casePage = 0; state.traceFilter = "all";
+  state.tab = "overview"; state.caseFilter = "all"; state.caseQuery = ""; state.casePage = 0; state.traceFilter = "all";
   const firstFailure = array(payload.results).findIndex((result) => result.hard_pass !== true);
   state.caseIndex = firstFailure >= 0 ? firstFailure : 0;
   state.casePage = Math.floor(state.caseIndex / 50);
@@ -1065,6 +1265,23 @@ document.addEventListener("click", async (event) => {
   } else if (target.dataset.setupCopy) {
     try { await navigator.clipboard.writeText(AssayUI.setupCommands(setup)[target.dataset.setupCopy]); toast("命令已复制。"); }
     catch { toast("复制失败，请在命令框中手动选择并复制。"); }
+  } else if (target.hasAttribute("data-setup-submit-http")) {
+    const generated = AssayUI.httpConfig(setup);
+    if (generated.errors.length) { toast("请先修正 HTTP 配置。"); return; }
+    try {
+      await request("/api/setup/jobs", { method: "POST", headers: { "Content-Type": "application/json", "X-Assay-Request": "1" }, body: JSON.stringify({
+        config: generated.config, cases: setup.casesText || AssayUI.httpCases, suite: setup.suite, output: setup.output
+      }) });
+      toast("任务已提交到队列。");
+      state.section = "queue"; state.stack = []; render(true); await refreshQueue();
+    } catch (error) { toast(`提交失败：${error.message}`); }
+  } else if (target.hasAttribute("data-setup-run-example")) {
+    state.section = "queue"; state.stack = []; render(true);
+    await submitQueue(true);
+  } else if (target.hasAttribute("data-setup-queue")) {
+    queueForm.adapter = setup.adapter; queueForm.suite = setup.suite; queueForm.cases = setup.cases; queueForm.output = setup.output;
+    state.section = "queue"; state.stack = []; render(true);
+    toast("已带入当前配置；确认后提交任务。");
   } else if (target.dataset.traceFilter) { state.traceFilter = target.dataset.traceFilter; renderTrace(); }
   else if (target.hasAttribute("data-jump-error")) {
     const first = document.querySelector(".trace-event.error");
@@ -1084,12 +1301,16 @@ document.addEventListener("click", async (event) => {
   else if (target.hasAttribute("data-queue-refresh")) await refreshQueue();
   else if (target.dataset.jobCancel) await cancelQueueJob(target.dataset.jobCancel);
   else if (target.dataset.ruleHistory) await loadRuleHistory(target.dataset.ruleHistory);
+  else if (target.dataset.metricHistory) await loadMetricHistory(target.dataset.metricHistory);
   else if (target.dataset.artifact) openArtifact(target.dataset.artifact);
   else if (target.hasAttribute("data-back")) {
     const closed = state.stack.pop(); if (current()) resetCaseView(current().payload); render(true);
     if (!restoreFocus(closed?.returnFocus)) view.querySelector("h1")?.focus({ preventScroll: true });
   } else if (target.dataset.tab) { state.tab = target.dataset.tab; render(); }
   else if (target.hasAttribute("data-toggle-trace")) { traceCollapsed = !traceCollapsed; savePreference("traceCollapsed", traceCollapsed); render(); }
+  else if (target.dataset.caseJump !== undefined) {
+    state.tab = "cases"; state.caseIndex = Number(target.dataset.caseJump); state.casePage = Math.floor(state.caseIndex / 50); render(); syncLocation();
+  }
   else if (target.dataset.case !== undefined) {
     state.caseIndex = Number(target.dataset.case); renderCaseRows(); syncLocation(); focusCase();
   } else if (target.dataset.casePage) { state.casePage += Number(target.dataset.casePage); renderCaseRows(); syncLocation(); }
@@ -1132,8 +1353,10 @@ document.addEventListener("change", async (event) => {
     setup.mode = event.target.value; setup.adapterClass = "";
     setup.adapter = setup.mode === "example" ? "io.assay.examples.EchoAdapter" : setup.mode === "http" ? "my-agent.http.json" : "";
     setup.cases = setup.mode === "example" ? "examples/cases.example.jsonl" : setup.mode === "http" ? "http-cases.jsonl" : "";
-    setup.validation = setup.mode === "example" ? AssayUI.validateCases(AssayUI.exampleCases) : null;
-    setup.filename = "内置示例"; render();
+    setup.casesText = setup.mode === "http" ? AssayUI.httpCases : setup.mode === "example" ? AssayUI.exampleCases : "";
+    setup.validation = setup.casesText ? AssayUI.validateCases(setup.casesText) : null;
+    setup.filename = setup.mode === "http" ? "HTTP 模板" : setup.mode === "example" ? "内置示例" : "自定义";
+    render();
   } else if (event.target.id === "setup-cases") {
     const file = event.target.files[0], requestId = ++setup.fileRequest;
     if (!file) return;
@@ -1141,6 +1364,7 @@ document.addEventListener("change", async (event) => {
       if (file.size > 16 * 1024 * 1024) throw new Error("引导页检查上限为 16 MiB；较大测试集请直接使用 CLI。");
       const text = await file.text();
       if (requestId !== setup.fileRequest) return;
+      setup.casesText = text;
       setup.validation = AssayUI.validateCases(text); setup.filename = file.name;
       setup.cases = file.name;
       if (state.section === "setup") { document.querySelector('[data-setup="cases"]').value = setup.cases; updateSetup(); }

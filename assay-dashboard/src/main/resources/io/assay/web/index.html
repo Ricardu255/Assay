@@ -8,7 +8,10 @@
   <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/paper.css">
+  <link rel="stylesheet" href="/charts.css">
   <script src="/dashboard-core.js" defer></script>
+  <script src="/charts.js" defer></script>
+  <script src="/dashboard-model.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -43,8 +46,9 @@
         <div class="top-actions">
           <label class="theme-picker">主题<select id="theme-select" aria-label="界面主题"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
           <label class="search"><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="搜索记录或文件路径" aria-label="搜索记录或文件路径"></label>
+          <button class="button primary" data-section="setup">开始评测</button>
           <button class="button secondary" id="import-button">导入 JSON</button>
-          <button class="button primary" id="refresh-button">刷新结果</button>
+          <button class="button secondary" id="refresh-button">刷新结果</button>
           <input id="file-input" type="file" accept=".json,application/json" multiple hidden>
         </div>
       </header>

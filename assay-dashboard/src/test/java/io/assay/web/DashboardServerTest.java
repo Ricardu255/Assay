@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.json.Json;
+import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.store.file.FileJobStore;
 import org.junit.jupiter.api.Test;
@@ -47,10 +48,13 @@ class DashboardServerTest {
             assertTrue(page.headers().firstValue("Content-Security-Policy").orElse("").contains("object-src 'none'"));
             assertEquals(200, get(base.resolve("app.js")).statusCode());
             assertEquals(200, get(base.resolve("dashboard-core.js")).statusCode());
+            assertEquals(200, get(base.resolve("dashboard-model.js")).statusCode());
+            assertEquals(200, get(base.resolve("charts.js")).statusCode());
             assertEquals(200, get(base.resolve("theme.js")).statusCode());
             assertEquals(200, get(base.resolve("theme.css")).statusCode());
             assertEquals(200, get(base.resolve("style.css")).statusCode());
             assertEquals(200, get(base.resolve("paper.css")).statusCode());
+            assertEquals(200, get(base.resolve("charts.css")).statusCode());
 
             Map<String, Object> catalog = Json.parseObject(get(base.resolve("api/catalog")).body());
             List<?> items = (List<?>) catalog.get("items");
@@ -77,6 +81,8 @@ class DashboardServerTest {
         try (FileJobStore jobs = new FileJobStore(storePath);
                 DashboardServer server = new DashboardServer(root.resolve("runs"), 0, jobs, storePath.toString())) {
             URI base = server.uri();
+            Map<String, Object> queue = Json.parseObject(get(base.resolve("api/queue")).body());
+            assertEquals(true, queue.get("enabled"));
             Map<String, Object> empty = Json.parseObject(get(base.resolve("api/jobs")).body());
             assertEquals(0, ((List<?>) empty.get("jobs")).size());
 
@@ -104,8 +110,56 @@ class DashboardServerTest {
     }
 
     @Test
+    void setupApiWritesInlineHttpConfigAndCasesAndQueuesJob(@TempDir Path root) throws Exception {
+        Path storePath = root.resolve("store");
+        try (FileJobStore jobs = new FileJobStore(storePath);
+                DashboardServer server = new DashboardServer(root.resolve("runs"), 0, jobs, storePath.toString())) {
+            Map<String, Object> config = Map.of(
+                    "type", "http",
+                    "name", "ui-agent",
+                    "endpoint", "http://127.0.0.1:9000/agent",
+                    "output_path", "data.answer",
+                    "hard_gates", List.of(Map.of("name", "answer", "actual", "final_output",
+                            "operator", "contains", "expected", "keyword")));
+            String cases = "{\"id\":\"C1\",\"input\":{\"message\":\"hi\"},\"expected\":{\"keyword\":\"hi\"}}\n";
+            HttpResponse<String> created = postSetup(server.uri(), config, cases, "ui-http");
+            assertEquals(201, created.statusCode(), created.body());
+            String jobId = String.valueOf(Json.parseObject(created.body()).get("job_id"));
+            Job job = jobs.find(jobId).orElseThrow();
+            assertEquals(JobStatus.QUEUED, job.status());
+            assertEquals("ui-http", job.payload().get("suite"));
+            Path adapter = Path.of(String.valueOf(job.payload().get("adapter")));
+            Path caseFile = Path.of(String.valueOf(job.payload().get("cases")));
+            assertTrue(Files.readString(adapter).contains("\"type\": \"http\""));
+            assertTrue(Files.readString(caseFile).contains("C1"));
+        }
+    }
+
+    @Test
+    void setupApiRejectsInvalidConfigAndCases(@TempDir Path root) throws Exception {
+        Path storePath = root.resolve("store");
+        try (FileJobStore jobs = new FileJobStore(storePath);
+                DashboardServer server = new DashboardServer(root.resolve("runs"), 0, jobs, storePath.toString())) {
+            Map<String, Object> noGates = Map.of(
+                    "type", "http",
+                    "endpoint", "http://127.0.0.1:9000/agent",
+                    "output_path", "output",
+                    "hard_gates", List.of());
+            assertEquals(400, postSetup(server.uri(), noGates, "{\"id\":\"C1\"}\n", "ui").statusCode());
+            Map<String, Object> config = Map.of(
+                    "type", "http",
+                    "endpoint", "http://127.0.0.1:9000/agent",
+                    "output_path", "output",
+                    "hard_gates", List.of(Map.of("name", "answer")));
+            assertEquals(400, postSetup(server.uri(), config, "not-json\n", "ui").statusCode());
+        }
+    }
+
+    @Test
     void queueApiIsDisabledWithoutAWorkerStore(@TempDir Path root) throws Exception {
         try (DashboardServer server = new DashboardServer(root, 0)) {
+            Map<String, Object> queue = Json.parseObject(get(server.uri().resolve("api/queue")).body());
+            assertEquals(false, queue.get("enabled"));
             assertEquals(503, get(server.uri().resolve("api/jobs")).statusCode());
         }
     }
@@ -191,6 +245,49 @@ class DashboardServerTest {
     }
 
     @Test
+    void metricHistoryReturnsLatestPointsForSuite(@TempDir Path root) throws Exception {
+        Path first = root.resolve("runs/run-1/results.json");
+        Path second = root.resolve("runs/run-2/results.json");
+        Path other = root.resolve("runs/other/results.json");
+        Files.createDirectories(first.getParent());
+        Files.createDirectories(second.getParent());
+        Files.createDirectories(other.getParent());
+        Files.writeString(first, Json.write(Map.of("run_id", "run-1", "suite", "smoke", "source", "online",
+                "case_count", 2, "metric_stats", Map.of("tool_permission", Map.of("level", "hard",
+                        "evaluated", 2, "passed", 1, "pass_rate", 0.5, "mean_score", 0.75,
+                        "skipped", 0, "errors", 0, "not_evaluated", 0, "cached", 1)))));
+        Files.writeString(second, Json.write(Map.of("run_id", "run-2", "suite", "smoke", "source", "online",
+                "case_count", 2, "metric_stats", Map.of("tool_permission", Map.of("level", "hard",
+                        "evaluated", 2, "passed", 2, "pass_rate", 1.0, "mean_score", 1.0,
+                        "skipped", 0, "errors", 0, "not_evaluated", 0, "cached", 0)))));
+        Files.writeString(other, Json.write(Map.of("run_id", "other", "suite", "regression", "source", "online",
+                "case_count", 2, "metric_stats", Map.of("tool_permission", Map.of("level", "hard",
+                        "evaluated", 2, "passed", 0, "pass_rate", 0.0)))));
+        Files.setLastModifiedTime(first, FileTime.fromMillis(1000));
+        Files.setLastModifiedTime(second, FileTime.fromMillis(2000));
+        Files.setLastModifiedTime(other, FileTime.fromMillis(3000));
+
+        try (DashboardServer server = new DashboardServer(root, 0)) {
+            URI base = server.uri();
+            Map<String, Object> history = Json.parseObject(
+                    get(base.resolve("api/metric-history?metric=tool_permission&suite=smoke&limit=20")).body());
+            List<?> points = (List<?>) history.get("points");
+            assertEquals(2, points.size());
+            assertEquals(2L, history.get("matched"));
+            assertEquals("run-1", ((Map<?, ?>) points.get(0)).get("run_id"));
+            assertEquals("run-2", ((Map<?, ?>) points.get(1)).get("run_id"));
+            assertEquals(1.0, ((Map<?, ?>) points.get(1)).get("pass_rate"));
+            assertEquals(1.0, ((Map<?, ?>) points.get(1)).get("mean_score"));
+            assertEquals(0,
+                    ((List<?>) Json.parseObject(
+                            get(base.resolve("api/metric-history?metric=missing&suite=smoke")).body())
+                            .get("points")).size());
+            assertEquals(400, get(base.resolve("api/metric-history")).statusCode());
+            assertEquals(400, get(base.resolve("api/metric-history?metric=tool_permission&limit=nope")).statusCode());
+        }
+    }
+
+    @Test
     void refusesTraversalAndUnsupportedFiles(@TempDir Path root) throws Exception {
         Path report = root.resolve("results.json");
         Files.writeString(report, "{}");
@@ -230,6 +327,18 @@ class DashboardServerTest {
             Files.writeString(root.resolve("diff.patch"), "tampered");
             assertEquals(400, get(uri).statusCode());
         }
+    }
+
+    private static HttpResponse<String> postSetup(
+            URI base, Map<String, Object> config, String cases, String suite)
+            throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(base.resolve("api/setup/jobs"))
+                .header("X-Assay-Request", "1")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(Json.write(Map.of(
+                        "config", config, "cases", cases, "suite", suite))))
+                .build();
+        return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static HttpResponse<String> get(URI uri) throws IOException, InterruptedException {

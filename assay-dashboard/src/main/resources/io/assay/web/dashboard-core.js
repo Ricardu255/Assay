@@ -421,7 +421,33 @@
     }).sort((left, right) => (left.passRate ?? 2) - (right.passRate ?? 2)
       || right.evaluated - left.evaluated || left.name.localeCompare(right.name));
   }
-  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats, sequenceSteps, sequenceMismatch };
+  function metricStats(payload) {
+    const raw = payload && payload.metric_stats;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const countOf = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+    const numberOrNull = (value) => (value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value));
+    return Object.entries(raw).map(([name, value]) => {
+      const row = value && typeof value === "object" ? value : {};
+      const evaluated = countOf(row.evaluated);
+      const passed = countOf(row.passed);
+      return {
+        name: String(name),
+        level: String(row.level || "unknown"),
+        evaluated,
+        passed,
+        passRate: numberOrNull(row.pass_rate),
+        meanScore: numberOrNull(row.mean_score),
+        skipped: countOf(row.skipped),
+        errors: countOf(row.errors),
+        notEvaluated: countOf(row.not_evaluated),
+        cached: countOf(row.cached)
+      };
+    }).sort((left, right) => (left.passRate ?? 2) - (right.passRate ?? 2)
+      || (left.meanScore ?? 2) - (right.meanScore ?? 2)
+      || right.evaluated - left.evaluated || left.name.localeCompare(right.name));
+  }
+
+  const api = { exampleCases, httpCases, httpConfig, validateCases, shellQuote, setupCommands, failedEvent, parseDiff, splitRatio, caseTransitions, regressions, failureClusters, divergenceText, reasonText, runTrend, suiteHealth, ruleStats, metricStats, sequenceSteps, sequenceMismatch };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.AssayUI = api;
 })(globalThis);
