@@ -17,7 +17,22 @@ public record RunSpec(
         String source,
         String runId,
         String runIdentity,
-        boolean resume) {
+        boolean resume,
+        String metricsPreset,
+        String metricsFile) {
+
+    /** Backward-compatible constructor for runs without metric configuration. */
+    public RunSpec(
+            String adapterRef,
+            String adapterClass,
+            String casesRef,
+            String suite,
+            String source,
+            String runId,
+            String runIdentity,
+            boolean resume) {
+        this(adapterRef, adapterClass, casesRef, suite, source, runId, runIdentity, resume, null, null);
+    }
 
     public RunSpec {
         adapterRef = requireText(adapterRef, "adapter");
@@ -25,6 +40,11 @@ public record RunSpec(
         suite = Names.safeName(suite == null || suite.isBlank() ? "smoke" : suite, "suite");
         source = Names.safeName(source == null || source.isBlank() ? "online" : source, "source");
         runId = runId == null || runId.isBlank() ? null : Names.safeName(runId, "run_id");
+        metricsPreset = metricsPreset == null || metricsPreset.isBlank() ? null : metricsPreset.trim();
+        metricsFile = metricsFile == null || metricsFile.isBlank() ? null : metricsFile.trim();
+        if (metricsPreset != null && metricsFile != null) {
+            throw new IllegalArgumentException("metrics preset and metrics file are mutually exclusive");
+        }
         if (resume && (runId == null || runIdentity == null || runIdentity.isBlank())) {
             throw new IllegalArgumentException("resume requires an explicit run_id and a stable run identity");
         }

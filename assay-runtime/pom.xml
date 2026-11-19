@@ -29,13 +29,18 @@
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
+    <!-- Runtime services depend on the store interfaces in core. Concrete stores are opened
+         by the composition layer (assay-bootstrap) and injected by CLI/server. Tests still use
+         file/JDBC fixtures directly. -->
     <dependency>
       <groupId>io.assay</groupId>
       <artifactId>assay-store-file</artifactId>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>io.assay</groupId>
       <artifactId>assay-store-jdbc</artifactId>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

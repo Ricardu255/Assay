@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.assay.evolve.PromptOptimizer;
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.EvalCase;
 import io.assay.model.EvolutionBudget;
@@ -20,6 +21,7 @@ import io.assay.report.Reporting;
 import io.assay.store.file.ResultStore;
 import io.assay.support.AtomicFiles;
 import io.assay.testing.Fixtures;
+import io.assay.testing.ScriptedJudge;
 import io.assay.workspace.TextArtifactWorkspace;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -146,6 +148,37 @@ class AutoEvolutionTest {
     }
 
     /** One accepted candidate is not enough while the improvement set still fails. */
+    @Test
+    void promptOptimizerCandidatesCompleteTheImprovementSet(@TempDir Path root) {
+        Path artifact = baseline(root);
+        ScriptedJudge judge = new ScriptedJudge(List.of(Map.of("candidates", List.of(
+                Map.of("focus", "add the password keyword", "content", "billing,password")))));
+        AutoEvolutionAdapter adapter =
+                new AutoEvolutionAdapter(
+                        "router-auto",
+                        artifact,
+                        "1",
+                        "skill",
+                        "router",
+                        summary -> new EvolutionDiagnosis("missing password route", "skill", "router"),
+                        PromptOptimizer.gepa(judge),
+                        AutoEvolutionTest::buildAdapter);
+
+        Map<String, Object> result;
+        try (ResultStore store = new ResultStore(root.resolve("store"))) {
+            result = new AutoEvolutionLoop(store, new TextArtifactWorkspace(root.resolve("workspaces")))
+                    .run(adapter, cases(), new EvolutionBudget(1, 1), "optimizer", "online", false);
+        }
+
+        assertEquals("completed", result.get("status"));
+        assertTrue(Fixtures.str(result.get("current_version")).startsWith("po-1-"));
+        Map<String, Object> candidate =
+                Fixtures.mapsOf(Fixtures.mapsOf(result.get("rounds")).get(0).get("candidates")).get(0);
+        assertEquals("accept",
+                Fixtures.str(Fixtures.asMap(candidate.get("evaluation")).get("decision")));
+        assertTrue(judge.prompts().get(0).contains("missing password route"));
+    }
+
     @Test
     void continuesAfterPartialAcceptanceUntilImprovementIsComplete(@TempDir Path root) {
         Path artifact = baseline(root);

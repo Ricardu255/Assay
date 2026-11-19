@@ -5,6 +5,12 @@ import io.assay.engine.CaseLoader;
 import io.assay.engine.CircuitBreaker;
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
+import io.assay.engine.EvaluationSettings;
+import io.assay.llm.OpenAiCompatibleJudge;
+import io.assay.metrics.LlmJudge;
+import io.assay.metrics.Metric;
+import io.assay.metrics.MetricConfig;
+import io.assay.metrics.MetricPresets;
 import io.assay.model.EvalCase;
 import io.assay.model.EvaluationBudget;
 import io.assay.model.ProjectAdapter;
@@ -50,23 +56,31 @@ public final class SuiteRunner {
         Objects.requireNonNull(store, "store");
         Objects.requireNonNull(outputDir, "outputDir");
         String runId = spec.runId() != null ? spec.runId() : RunIds.newRunId(spec.suite());
-        EvaluationEngine engine = new EvaluationEngine(
-                adapter,
-                store,
-                null,
-                options.workers(),
-                options.retries(),
-                options.timeoutSeconds(),
-                options.collectFewShot(),
-                spec.runIdentity(),
-                EvaluationListener.NOOP,
-                EvaluationBudget.disabled(),
-                RetryPolicy.defaults(),
-                CircuitBreaker.disabled(),
-                CircuitBreaker.disabled());
+        EvaluationSettings settings = EvaluationSettings.builder()
+                .workers(options.workers())
+                .retries(options.retries())
+                .timeoutSeconds(options.timeoutSeconds())
+                .collectFewShot(options.collectFewShot())
+                .runIdentity(spec.runIdentity())
+                .listener(EvaluationListener.NOOP)
+                .budget(EvaluationBudget.disabled())
+                .retryPolicy(RetryPolicy.defaults())
+                .adapterBreaker(CircuitBreaker.disabled())
+                .reviewerBreaker(CircuitBreaker.disabled())
+                .metrics(resolveMetrics(spec))
+                .build();
+        EvaluationEngine engine = new EvaluationEngine(adapter, store, null, settings);
         Map<String, Object> summary = engine.runSuite(cases, spec.suite(), spec.source(), runId, spec.resume());
         Path reportDir = outputDir.resolve(runId);
         Reporting.writeRunArtifacts(summary, reportDir);
         return new RunExecution(runId, Collections.unmodifiableMap(new LinkedHashMap<>(summary)), reportDir);
+    }
+
+    private static List<Metric> resolveMetrics(RunSpec spec) {
+        if (spec.metricsFile() != null) {
+            LlmJudge judge = OpenAiCompatibleJudge.fromEnvironment();
+            return MetricConfig.load(Path.of(spec.metricsFile()), judge);
+        }
+        return MetricPresets.resolve(spec.metricsPreset());
     }
 }

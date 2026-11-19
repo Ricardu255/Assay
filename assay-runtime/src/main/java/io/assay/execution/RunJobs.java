@@ -28,6 +28,8 @@ public final class RunJobs {
         putIfPresent(payload, "run_id", spec.runId());
         putIfPresent(payload, "run_identity", spec.runIdentity());
         payload.put("resume", spec.resume());
+        putIfPresent(payload, "metric_preset", spec.metricsPreset());
+        putIfPresent(payload, "metrics_file", spec.metricsFile());
         return payload;
     }
 
@@ -44,7 +46,9 @@ public final class RunJobs {
                 text(payload, "source"),
                 text(payload, "run_id"),
                 text(payload, "run_identity"),
-                Boolean.TRUE.equals(payload.get("resume")));
+                Boolean.TRUE.equals(payload.get("resume")),
+                text(payload, "metric_preset"),
+                text(payload, "metrics_file"));
     }
 
     /** Returns the run id recorded in a job payload, or null when the payload has none. */

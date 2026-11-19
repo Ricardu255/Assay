@@ -63,9 +63,48 @@ class SuiteRunnerTest {
     }
 
     @Test
+    void appliesAMetricPresetFromTheSpec() {
+        ResultStore store = new ResultStore(temp.resolve("store"));
+        RunSpec spec = new RunSpec(
+                "unused",
+                null,
+                temp.resolve("cases.jsonl").toString(),
+                "smoke",
+                "online",
+                "metrics-1",
+                "metrics-1",
+                false,
+                "agent-safety",
+                null);
+        ProjectAdapter adapter = new ProjectAdapter(
+                "tool-agent",
+                (evalCase, context) -> "handle",
+                (handle, evalCase) -> new NormalizedTrace(
+                        "trace-1",
+                        "done",
+                        List.of(new TraceEvent("tool", "call_start", "ok", 0, null,
+                                Map.of("tool_call_name", "lookup"))),
+                        Map.of("total_tokens", 0)),
+                List.of(),
+                List.of());
+
+        RunExecution execution = new SuiteRunner().run(
+                adapter, cases(), spec, RunOptions.defaults(), store, temp.resolve("runs"));
+
+        List<?> results = (List<?>) execution.summary().get("results");
+        List<?> metrics = (List<?>) asMap(results.get(0)).get("metrics");
+        assertEquals(2, metrics.size());
+    }
+
+    @Test
     void rejectsResumeWithoutAnExplicitRunId() {
         assertThrows(IllegalArgumentException.class,
                 () -> new RunSpec("adapter", null, "cases.jsonl", "smoke", "online", null, null, true));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map ? (Map<String, Object>) value : Map.of();
     }
 
     private RunSpec spec(String runId, String identity, boolean resume) {
