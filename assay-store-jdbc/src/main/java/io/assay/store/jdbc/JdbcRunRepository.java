@@ -272,6 +272,7 @@ final class JdbcRunRepository {
     private static Map<String, Object> withoutCaseCount(Map<String, Object> metadata) {
         Map<String, Object> result = new LinkedHashMap<>(metadata);
         result.remove("case_count");
+        result.remove("dataset_hash");
         return result;
     }
 }

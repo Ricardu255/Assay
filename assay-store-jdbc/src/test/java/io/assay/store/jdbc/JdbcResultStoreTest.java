@@ -149,6 +149,9 @@ class JdbcResultStoreTest {
         List<Map<String, Object>> reviewed = store.listReviewedResults("accepted");
         assertEquals(1, reviewed.size());
         assertEquals("looks good", reviewed.get(0).get("human_final_conclusion"));
+        List<Map<String, Object>> all = store.listReviewedResults(null);
+        assertEquals(1, all.size());
+        assertEquals("accepted", all.get(0).get("human_decision"));
 
         store.saveEvolution("experiment-1", "candidate-1", "accept", Map.of("decision", "accept", "reason", "ok"));
         assertEquals("accept", store.getEvolution("experiment-1").get("decision"));

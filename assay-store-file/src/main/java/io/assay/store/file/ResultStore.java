@@ -385,7 +385,7 @@ public final class ResultStore implements Results {
             }
             List<Map<String, Object>> selected = new ArrayList<>();
             for (Map<String, Object> review : latest.values()) {
-                if (Objects.equals(review.get("decision"), decision)) {
+                if (decision == null || Objects.equals(review.get("decision"), decision)) {
                     selected.add(review);
                 }
             }
@@ -401,6 +401,7 @@ public final class ResultStore implements Results {
                     continue;
                 }
                 Map<String, Object> copy = new LinkedHashMap<>(record);
+                copy.put("human_decision", review.get("decision"));
                 copy.put("human_final_conclusion", review.get("final_conclusion"));
                 results.add(copy);
             }
@@ -530,6 +531,9 @@ public final class ResultStore implements Results {
     private static Map<String, Object> withoutCaseCount(Map<String, Object> metadata) {
         Map<String, Object> result = new LinkedHashMap<>(metadata);
         result.remove("case_count");
+        // The dataset hash changes when append-only resume adds cases; the per-case manifest is the
+        // authoritative check for changed content.
+        result.remove("dataset_hash");
         return result;
     }
 

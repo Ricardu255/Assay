@@ -73,7 +73,7 @@ final class JdbcReviewRepository {
         }
         List<Map<String, Object>> selected = new ArrayList<>();
         for (Map<String, Object> review : latest.values()) {
-            if (Objects.equals(review.get("decision"), decision)) {
+            if (decision == null || Objects.equals(review.get("decision"), decision)) {
                 selected.add(review);
             }
         }
@@ -89,6 +89,7 @@ final class JdbcReviewRepository {
                 continue;
             }
             Map<String, Object> copy = new LinkedHashMap<>(record);
+            copy.put("human_decision", review.get("decision"));
             copy.put("human_final_conclusion", review.get("final_conclusion"));
             results.add(copy);
         }
