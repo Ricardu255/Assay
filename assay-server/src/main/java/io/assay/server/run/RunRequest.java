@@ -10,5 +10,7 @@ public record RunRequest(
         String suite,
         String source,
         @JsonProperty("run_id") String runId,
-        Boolean resume) {
+        Boolean resume,
+        @JsonProperty("metrics_preset") String metricsPreset,
+        @JsonProperty("metrics_file") String metricsFile) {
 }

@@ -58,6 +58,25 @@ class RunApiTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void appliesMetricsPresetFromTheRequest() throws Exception {
+        Map<String, Object> request = echoRequest();
+        request.put("metrics_preset", "agent-safety");
+        HttpResponse<String> created = send("POST", "/api/runs", Json.write(request));
+        assertEquals(202, created.statusCode(), created.body());
+        String runId = String.valueOf(Json.parseObject(created.body()).get("run_id"));
+
+        Map<String, Object> finished = awaitStatus(runId, "passed");
+
+        Map<String, Object> stats = (Map<String, Object>) finished.get("metric_stats");
+        assertTrue(stats != null, String.valueOf(finished));
+        Map<String, Object> permission = (Map<String, Object>) stats.get("tool_permission");
+        Map<String, Object> loop = (Map<String, Object>) stats.get("loop_detection");
+        assertEquals(1, ((Number) permission.get("skipped")).intValue());
+        assertEquals(1, ((Number) loop.get("skipped")).intValue());
+    }
+
+    @Test
     void listsRunsPersistedByTheStore() throws Exception {
         String runId = "persisted-" + UUID.randomUUID();
         ResultStore store = new ResultStore(Path.of("target/server-api-test/store"));

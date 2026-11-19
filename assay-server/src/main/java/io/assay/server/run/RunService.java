@@ -1,11 +1,11 @@
 package io.assay.server.run;
 
+import io.assay.bootstrap.Stores;
 import io.assay.execution.JobRunQueue;
 import io.assay.execution.RunIds;
 import io.assay.execution.RunJobs;
 import io.assay.execution.RunOptions;
 import io.assay.execution.RunSpec;
-import io.assay.execution.Stores;
 import io.assay.execution.SuiteRunner;
 import io.assay.json.Json;
 import io.assay.runner.Job;
@@ -53,7 +53,8 @@ public class RunService {
             "soft_warnings",
             "budget",
             "retry_policy",
-            "circuit_breaker");
+            "circuit_breaker",
+            "metric_stats");
 
     private final String storePath;
     private final String outputDir;
@@ -116,7 +117,21 @@ public class RunService {
             throw new IllegalArgumentException("resume requires a run_id");
         }
         String runId = requestedRunId != null ? requestedRunId : RunIds.newRunId(suite);
-        return new RunSpec(adapterRef, request.adapterClass(), casesRef, suite, source, runId, requestedRunId, resume);
+        String metricsFile = request.metricsFile();
+        if (metricsFile != null && !metricsFile.isBlank()) {
+            metricsFile = Path.of(metricsFile).toAbsolutePath().normalize().toString();
+        }
+        return new RunSpec(
+                adapterRef,
+                request.adapterClass(),
+                casesRef,
+                suite,
+                source,
+                runId,
+                requestedRunId,
+                resume,
+                request.metricsPreset(),
+                metricsFile);
     }
 
     /** Persisted runs plus still-queued or running jobs, newest first. */
