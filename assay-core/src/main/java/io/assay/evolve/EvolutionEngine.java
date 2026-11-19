@@ -77,6 +77,10 @@ public final class EvolutionEngine {
         }
 
         String effectiveId = experimentId != null ? experimentId : "evolution-" + EvolutionSupport.shortId();
+        List<String> policyProblems = SyntheticPolicy.validate(datasets, policy);
+        if (!policyProblems.isEmpty()) {
+            return policyRollback(effectiveId, change, policyProblems);
+        }
         Map<String, Object> baselineRuns = new LinkedHashMap<>();
         Map<String, Object> candidateRuns = new LinkedHashMap<>();
         Map<String, Object> comparisons = new LinkedHashMap<>();
@@ -134,6 +138,11 @@ public final class EvolutionEngine {
                     MetricStats.compareRuleStats(
                             EvolutionSupport.asMap(baselineMetrics.get("rule_stats")),
                             EvolutionSupport.asMap(candidateMetrics.get("rule_stats"))));
+            comparison.put(
+                    "metric_deltas",
+                    MetricStats.compareMetricStats(
+                            EvolutionSupport.asMap(baselineMetrics.get("metric_stats")),
+                            EvolutionSupport.asMap(candidateMetrics.get("metric_stats"))));
             comparisons.put(role, comparison);
         }
 
@@ -150,6 +159,21 @@ public final class EvolutionEngine {
         result.put("baseline_runs", baselineRuns);
         result.put("candidate_runs", candidateRuns);
         baseline.store().saveEvolution(effectiveId, change.candidateId(), decision.decision(), result);
+        return result;
+    }
+
+    private Map<String, Object> policyRollback(
+            String experimentId, EvolutionCandidate change, List<String> problems) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("experiment_id", experimentId);
+        result.put("candidate", change.toJson());
+        result.put("policy", policy.toJson());
+        result.put("decision", "rollback");
+        result.put("reasons", problems);
+        result.put("comparisons", Map.of());
+        result.put("baseline_runs", Map.of());
+        result.put("candidate_runs", Map.of());
+        baseline.store().saveEvolution(experimentId, change.candidateId(), "rollback", result);
         return result;
     }
 

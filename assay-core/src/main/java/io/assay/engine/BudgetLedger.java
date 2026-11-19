@@ -28,6 +28,8 @@ public final class BudgetLedger {
     private int unreportedTokenCalls;
     private int unreportedCostCalls;
     private int seededCases;
+    private int metricCalls;
+    private int metricUnreportedCostCalls;
     private boolean exhausted;
     private boolean overrun;
 
@@ -128,6 +130,33 @@ public final class BudgetLedger {
         updateOverrun();
     }
 
+    /**
+     * Charges usage already incurred by a metric (for example an LLM judge call).
+     *
+     * <p>Unlike adapter calls, metric calls cannot be reserved before they happen: the prompt is
+     * assembled inside the metric. The charge is therefore applied after the fact; when it reaches
+     * the cap the ledger is marked exhausted so no new case is admitted.
+     *
+     * @param costUsd provider-reported cost, or null when the provider did not report one
+     */
+    public synchronized void chargeMetrics(long inputTokens, long outputTokens, Double costUsd) {
+        if (!enabled()) {
+            return;
+        }
+        long tokens = saturatingAdd(Math.max(0, inputTokens), Math.max(0, outputTokens));
+        if (tokens > 0) {
+            spentTokens = saturatingAdd(spentTokens, tokens);
+        }
+        if (costUsd != null) {
+            spentCostUsd += Math.max(0, costUsd);
+        } else if (budget.maxCostUsd() != null && tokens > 0) {
+            metricUnreportedCostCalls++;
+        }
+        metricCalls++;
+        updateOverrun();
+        markExhaustedWhenSpentOut();
+    }
+
     public synchronized boolean exhausted() {
         return exhausted;
     }
@@ -166,6 +195,8 @@ public final class BudgetLedger {
         result.put("unreported_token_calls", unreportedTokenCalls);
         result.put("unreported_cost_calls", unreportedCostCalls);
         result.put("seeded_cases", seededCases);
+        result.put("metric_calls", metricCalls);
+        result.put("metric_unreported_cost_calls", metricUnreportedCostCalls);
         result.put("exhausted", exhausted);
         result.put("overrun", overrun);
         return result;
@@ -191,6 +222,15 @@ public final class BudgetLedger {
         }
         if (budget.maxCostUsd() != null && spentCostUsd > budget.maxCostUsd() + 1e-12) {
             overrun = true;
+        }
+    }
+
+    private void markExhaustedWhenSpentOut() {
+        if (budget.maxTotalTokens() != null && spentTokens >= budget.maxTotalTokens()) {
+            exhausted = true;
+        }
+        if (budget.maxCostUsd() != null && spentCostUsd >= budget.maxCostUsd() - 1e-12) {
+            exhausted = true;
         }
     }
 

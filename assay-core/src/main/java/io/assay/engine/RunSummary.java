@@ -30,6 +30,28 @@ final class RunSummary {
             double timeoutSeconds,
             boolean collectFewShot,
             String runIdentity) {
+        return metadata(
+                caseCount,
+                workers,
+                requestedWorkers,
+                maxInFlight,
+                retries,
+                timeoutSeconds,
+                timeoutSeconds,
+                collectFewShot,
+                runIdentity);
+    }
+
+    static Map<String, Object> metadata(
+            int caseCount,
+            int workers,
+            int requestedWorkers,
+            int maxInFlight,
+            int retries,
+            double timeoutSeconds,
+            double timeoutBudgetSeconds,
+            boolean collectFewShot,
+            String runIdentity) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("case_count", caseCount);
         metadata.put("workers", workers);
@@ -37,6 +59,7 @@ final class RunSummary {
         metadata.put("max_in_flight", maxInFlight);
         metadata.put("retries", retries);
         metadata.put("timeout_seconds", timeoutSeconds);
+        metadata.put("timeout_budget_seconds", timeoutBudgetSeconds);
         metadata.put("collect_few_shot", collectFewShot);
         metadata.put("run_identity", runIdentity);
         return metadata;

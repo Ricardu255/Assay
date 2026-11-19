@@ -1,6 +1,7 @@
 package io.assay.model;
 
 import io.assay.json.Jsonable;
+import io.assay.support.Immutable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +22,7 @@ public final class CaseResult implements Jsonable {
     private final EvalCase evalCase;
     private final NormalizedTrace trace;
     private final List<CheckResult> checks;
+    private List<MetricResult> metrics = List.of();
     private String error;
     private Map<String, Object> llmReview = Map.of();
     private Map<String, Object> fewShotCandidate = Map.of();
@@ -74,6 +76,14 @@ public final class CaseResult implements Jsonable {
 
     public List<CheckResult> checks() {
         return checks;
+    }
+
+    public List<MetricResult> metrics() {
+        return metrics;
+    }
+
+    public void setMetrics(List<MetricResult> metrics) {
+        this.metrics = Immutable.list(metrics);
     }
 
     public String error() {
@@ -135,6 +145,11 @@ public final class CaseResult implements Jsonable {
             checkRows.add(check.toJson());
         }
         result.put("checks", checkRows);
+        List<Object> metricRows = new ArrayList<>(metrics.size());
+        for (MetricResult metric : metrics) {
+            metricRows.add(metric.toJson());
+        }
+        result.put("metrics", metricRows);
         result.put("error", error);
         result.put("llm_review", llmReview);
         result.put("few_shot_candidate", fewShotCandidate);

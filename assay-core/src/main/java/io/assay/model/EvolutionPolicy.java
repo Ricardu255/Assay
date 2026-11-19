@@ -19,13 +19,18 @@ public record EvolutionPolicy(
         boolean requireImprovement,
         List<MetricObjective> objectives,
         List<ScenarioGate> scenarioGates,
-        List<QualityGate> qualityGates)
+        List<QualityGate> qualityGates,
+        Double syntheticRatioCap,
+        boolean requireProvenance)
         implements Jsonable {
 
     public EvolutionPolicy {
         Values.nonNegative("max_regression_soft_warning_increase", maxRegressionSoftWarningIncrease);
         Values.rate("max_holdout_hard_pass_drop", maxHoldoutHardPassDrop);
         Values.nonNegative("max_holdout_soft_warning_increase", maxHoldoutSoftWarningIncrease);
+        if (syntheticRatioCap != null) {
+            Values.rate("synthetic_ratio_cap", syntheticRatioCap);
+        }
         objectives = objectives == null ? List.of() : Immutable.list(objectives);
         scenarioGates = scenarioGates == null ? List.of() : Immutable.list(scenarioGates);
         qualityGates = qualityGates == null ? List.of() : Immutable.list(qualityGates);
@@ -35,6 +40,31 @@ public record EvolutionPolicy(
                 throw new IllegalArgumentException("duplicate objective name: " + objective.name());
             }
         }
+    }
+
+    /** Backward-compatible constructor for policies without synthetic-data rules. */
+    public EvolutionPolicy(
+            boolean requireRegressionPass,
+            boolean requireHoldoutPass,
+            int maxRegressionSoftWarningIncrease,
+            double maxHoldoutHardPassDrop,
+            int maxHoldoutSoftWarningIncrease,
+            boolean requireImprovement,
+            List<MetricObjective> objectives,
+            List<ScenarioGate> scenarioGates,
+            List<QualityGate> qualityGates) {
+        this(
+                requireRegressionPass,
+                requireHoldoutPass,
+                maxRegressionSoftWarningIncrease,
+                maxHoldoutHardPassDrop,
+                maxHoldoutSoftWarningIncrease,
+                requireImprovement,
+                objectives,
+                scenarioGates,
+                qualityGates,
+                null,
+                false);
     }
 
     public EvolutionPolicy(
@@ -108,7 +138,11 @@ public record EvolutionPolicy(
                 Values.booleanField(value, "require_improvement", true),
                 objectives,
                 gates,
-                qualityGates);
+                qualityGates,
+                value.get("synthetic_ratio_cap") == null
+                        ? null
+                        : Values.doubleField(value, "synthetic_ratio_cap", 0),
+                Values.booleanField(value, "require_provenance", false));
     }
 
     @Override
@@ -135,6 +169,8 @@ public record EvolutionPolicy(
             qualityRows.add(gate.toJson());
         }
         result.put("quality_gates", qualityRows);
+        result.put("synthetic_ratio_cap", syntheticRatioCap);
+        result.put("require_provenance", requireProvenance);
         return result;
     }
 }

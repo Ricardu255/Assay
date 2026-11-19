@@ -40,6 +40,39 @@ public record RetryPolicy(Duration baseDelay, Duration maxDelay, double jitter) 
     }
 
     /**
+     * Deterministic backoff total for {@code retries} retries, without jitter.
+     *
+     * <p>Used to derive the outer timeout budget for one case: every attempt can consume the full
+     * per-attempt timeout, and the waits between attempts are bounded by this sum.
+     */
+    public Duration expectedDelay(int retries) {
+        if (retries <= 0 || !enabled()) {
+            return Duration.ZERO;
+        }
+        long totalMillis = 0;
+        long delay = baseDelay.toMillis();
+        long maxMillis = maxDelay.toMillis();
+        int remaining = retries;
+        while (remaining > 0 && delay < maxMillis) {
+            totalMillis = saturatingAdd(totalMillis, delay);
+            delay = delay > maxMillis / 2 ? maxMillis : delay * 2;
+            remaining--;
+        }
+        if (remaining > 0) {
+            totalMillis = saturatingAdd(totalMillis, saturatingMultiply(maxMillis, remaining));
+        }
+        return Duration.ofMillis(totalMillis);
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        return right > 0 && left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static long saturatingMultiply(long value, int count) {
+        return value != 0 && count > Long.MAX_VALUE / value ? Long.MAX_VALUE : value * count;
+    }
+
+    /**
      * Delay after the given attempt count.
      *
      * <p>{@code attempt} is the number of attempts already consumed, so the first failure waits one

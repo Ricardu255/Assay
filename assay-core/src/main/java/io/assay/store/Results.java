@@ -65,6 +65,7 @@ public interface Results extends AutoCloseable {
 
     void saveReview(String runId, String caseId, String decision, String finalConclusion);
 
+    /** Joins reviews with their case results; a {@code null} decision returns every decision. */
     List<Map<String, Object>> listReviewedResults(String decision);
 
     void saveEvolution(String experimentId, String candidateId, String decision, Map<String, Object> result);

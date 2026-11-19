@@ -52,6 +52,7 @@ public interface EvaluationListener {
     enum Stage {
         ADAPTER,
         RULES,
+        METRICS,
         LLM,
         STORE
     }

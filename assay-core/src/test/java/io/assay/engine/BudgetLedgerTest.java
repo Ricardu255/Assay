@@ -120,6 +120,33 @@ class BudgetLedgerTest {
     }
 
     @Test
+    void metricUsageIsChargedAfterTheFactAndCanExhaustTheRun() {
+        BudgetLedger ledger = new BudgetLedger(new EvaluationBudget(100, null, 0, 0));
+
+        ledger.chargeMetrics(60, 40, null);
+
+        Map<String, Object> snapshot = ledger.snapshot();
+        assertEquals(100L, snapshot.get("spent_tokens"));
+        assertEquals(1, snapshot.get("metric_calls"));
+        assertEquals(0L, snapshot.get("remaining_tokens"));
+        assertTrue((Boolean) snapshot.get("exhausted"));
+    }
+
+    @Test
+    void unknownMetricCostIsCountedButNotCharged() {
+        BudgetLedger ledger = new BudgetLedger(new EvaluationBudget(null, 0.05, 0, 0));
+
+        ledger.chargeMetrics(10, 5, null);
+        ledger.chargeMetrics(10, 5, 0.02);
+
+        Map<String, Object> snapshot = ledger.snapshot();
+        assertEquals(0.02, (Double) snapshot.get("spent_cost_usd"), 1e-9);
+        assertEquals(2, snapshot.get("metric_calls"));
+        assertEquals(1, snapshot.get("metric_unreported_cost_calls"));
+        assertFalse((Boolean) snapshot.get("exhausted"));
+    }
+
+    @Test
     void resumeSeedsPreviousSpendIntoTheSameBudget() {
         BudgetLedger ledger = new BudgetLedger(new EvaluationBudget(10, null, 0, 0));
         ledger.seed(new BudgetUsage(7L, 0.01));

@@ -22,6 +22,18 @@ class RetryPolicyTest {
     }
 
     @Test
+    void expectedDelaySumsTheCappedBackoffWithoutJitter() {
+        RetryPolicy policy = new RetryPolicy(Duration.ofSeconds(1), Duration.ofSeconds(5), 0.5);
+
+        assertEquals(Duration.ZERO, policy.expectedDelay(0));
+        assertEquals(Duration.ofSeconds(1), policy.expectedDelay(1));
+        assertEquals(Duration.ofSeconds(7), policy.expectedDelay(3));
+        assertEquals(Duration.ofSeconds(12), policy.expectedDelay(4));
+        assertEquals(Duration.ofSeconds(32), policy.expectedDelay(8));
+        assertEquals(Duration.ZERO, RetryPolicy.none().expectedDelay(5));
+    }
+
+    @Test
     void noneRetriesImmediately() {
         assertEquals(Duration.ZERO, RetryPolicy.none().delayFor(1));
         assertEquals(Duration.ZERO, RetryPolicy.none().delayFor(5));

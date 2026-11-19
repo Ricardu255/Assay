@@ -21,7 +21,7 @@ class RunSummaryTest {
 
         assertEquals(
                 List.of("case_count", "workers", "requested_workers", "max_in_flight", "retries",
-                        "timeout_seconds", "collect_few_shot", "run_identity"),
+                        "timeout_seconds", "timeout_budget_seconds", "collect_few_shot", "run_identity"),
                 new ArrayList<>(metadata.keySet()));
         assertEquals(3, metadata.get("case_count"));
         assertEquals(2, metadata.get("workers"));
@@ -29,6 +29,7 @@ class RunSummaryTest {
         assertEquals(4, metadata.get("max_in_flight"));
         assertEquals(1, metadata.get("retries"));
         assertEquals(30.5, metadata.get("timeout_seconds"));
+        assertEquals(30.5, metadata.get("timeout_budget_seconds"));
         assertEquals(true, metadata.get("collect_few_shot"));
         assertEquals("runner-a", metadata.get("run_identity"));
     }

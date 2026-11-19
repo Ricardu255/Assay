@@ -1,7 +1,11 @@
 package io.assay.engine;
 
+import io.assay.metrics.Metric;
+import io.assay.metrics.MetricCache;
 import io.assay.model.EvaluationBudget;
 import io.assay.runner.RetryPolicy;
+import io.assay.support.Immutable;
+import java.util.List;
 
 /**
  * Immutable execution settings for one {@link EvaluationEngine} instance.
@@ -19,7 +23,9 @@ public record EvaluationSettings(
         EvaluationBudget budget,
         RetryPolicy retryPolicy,
         CircuitBreaker adapterBreaker,
-        CircuitBreaker reviewerBreaker) {
+        CircuitBreaker reviewerBreaker,
+        List<Metric> metrics,
+        MetricCache metricCache) {
 
     public EvaluationSettings {
         if (workers < 1 || workers > Integer.MAX_VALUE / 2 || retries < 0) {
@@ -33,6 +39,52 @@ public record EvaluationSettings(
         retryPolicy = retryPolicy == null ? RetryPolicy.none() : retryPolicy;
         adapterBreaker = adapterBreaker == null ? CircuitBreaker.disabled() : adapterBreaker;
         reviewerBreaker = reviewerBreaker == null ? CircuitBreaker.disabled() : reviewerBreaker;
+        metrics = Immutable.list(metrics);
+    }
+
+    /** Backward-compatible constructor for callers that configure metrics but no cache. */
+    public EvaluationSettings(
+            int workers,
+            int retries,
+            double timeoutSeconds,
+            boolean collectFewShot,
+            String runIdentity,
+            EvaluationListener listener,
+            EvaluationBudget budget,
+            RetryPolicy retryPolicy,
+            CircuitBreaker adapterBreaker,
+            CircuitBreaker reviewerBreaker,
+            List<Metric> metrics) {
+        this(workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener, budget, retryPolicy,
+                adapterBreaker, reviewerBreaker, metrics, null);
+    }
+
+    /** Backward-compatible constructor for callers that configure neither metrics nor a cache. */
+    public EvaluationSettings(
+            int workers,
+            int retries,
+            double timeoutSeconds,
+            boolean collectFewShot,
+            String runIdentity,
+            EvaluationListener listener,
+            EvaluationBudget budget,
+            RetryPolicy retryPolicy,
+            CircuitBreaker adapterBreaker,
+            CircuitBreaker reviewerBreaker) {
+        this(workers, retries, timeoutSeconds, collectFewShot, runIdentity, listener, budget, retryPolicy,
+                adapterBreaker, reviewerBreaker, List.of(), null);
+    }
+
+    /**
+     * Upper bound for one case including retries and their expected backoff.
+     *
+     * <p>This is the outer deadline a caller should allow before declaring the case hung; the per-attempt
+     * timeout alone would understate the worst case when retries are enabled.
+     */
+    public double timeoutBudgetSeconds() {
+        double attempts = timeoutSeconds * (retries + 1L);
+        double backoff = retryPolicy.expectedDelay(retries).toMillis() / 1000.0;
+        return attempts + backoff;
     }
 
     /** Starts a fluent builder; omitted collaborators fall back to the disabled defaults. */
@@ -53,6 +105,8 @@ public record EvaluationSettings(
         private RetryPolicy retryPolicy;
         private CircuitBreaker adapterBreaker;
         private CircuitBreaker reviewerBreaker;
+        private List<Metric> metrics = List.of();
+        private MetricCache metricCache;
 
         private Builder() {
         }
@@ -107,6 +161,16 @@ public record EvaluationSettings(
             return this;
         }
 
+        public Builder metrics(List<Metric> metrics) {
+            this.metrics = metrics;
+            return this;
+        }
+
+        public Builder metricCache(MetricCache metricCache) {
+            this.metricCache = metricCache;
+            return this;
+        }
+
         public EvaluationSettings build() {
             return new EvaluationSettings(
                     workers,
@@ -118,7 +182,9 @@ public record EvaluationSettings(
                     budget,
                     retryPolicy,
                     adapterBreaker,
-                    reviewerBreaker);
+                    reviewerBreaker,
+                    metrics,
+                    metricCache);
         }
     }
 

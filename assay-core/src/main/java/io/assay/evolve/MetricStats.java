@@ -1,6 +1,7 @@
 package io.assay.evolve;
 
 import io.assay.model.MetricObjective;
+import io.assay.report.MetricSummary;
 import io.assay.report.RuleStats;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -79,6 +80,7 @@ public final class MetricStats {
         metrics.put("efficiency", efficiency);
         metrics.put("objectives", objectiveValues);
         metrics.put("rule_stats", ruleStats);
+        metrics.put("metric_stats", MetricSummary.fromResults(results));
         metrics.put("metric_coverage", coverage);
         metrics.put("objective_coverage", objectiveCoverage);
         return metrics;
@@ -243,6 +245,9 @@ public final class MetricStats {
             }
             Object value = builtins.get(objective.metric());
             if (value == null) {
+                value = metricScore(result, objective.metric());
+            }
+            if (value == null) {
                 value = io.assay.rules.ValueOps.readPath(result, objective.metric());
                 if (value == io.assay.rules.ValueOps.MISSING) {
                     value = null;
@@ -253,6 +258,57 @@ public final class MetricStats {
             }
         }
         return values;
+    }
+
+    /**
+     * Reads a scored metric from one result. {@code metric:<name>} is the explicit form; a bare name
+     * also works when it does not collide with a built-in objective.
+     */
+    private static Double metricScore(Map<String, Object> result, String objectiveMetric) {
+        String wanted = objectiveMetric.startsWith("metric:")
+                ? objectiveMetric.substring("metric:".length())
+                : objectiveMetric;
+        for (Object raw : EvolutionSupport.asList(result.get("metrics"))) {
+            Map<String, Object> metric = EvolutionSupport.asMap(raw);
+            if (!wanted.equals(String.valueOf(metric.get("name")))) {
+                continue;
+            }
+            String status = String.valueOf(metric.getOrDefault("status", ""));
+            if (!"pass".equalsIgnoreCase(status) && !"fail".equalsIgnoreCase(status)) {
+                return null;
+            }
+            Object score = metric.get("score");
+            return score instanceof Number number && Double.isFinite(number.doubleValue())
+                    ? number.doubleValue()
+                    : null;
+        }
+        return null;
+    }
+
+    /** Per-metric pass-rate and mean-score deltas, mirroring the rule delta shape. */
+    public static Map<String, Object> compareMetricStats(
+            Map<String, Object> baseline, Map<String, Object> candidate) {
+        Set<String> names = new TreeSet<>(baseline.keySet());
+        names.addAll(candidate.keySet());
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String name : names) {
+            Map<String, Object> left = EvolutionSupport.asMap(baseline.get(name));
+            Map<String, Object> right = EvolutionSupport.asMap(candidate.get(name));
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("baseline", left.isEmpty() ? null : left);
+            row.put("candidate", right.isEmpty() ? null : right);
+            row.put("pass_rate_delta", delta(left.get("pass_rate"), right.get("pass_rate")));
+            row.put("mean_score_delta", delta(left.get("mean_score"), right.get("mean_score")));
+            result.put(name, row);
+        }
+        return result;
+    }
+
+    private static Double delta(Object baseline, Object candidate) {
+        if (baseline instanceof Number left && candidate instanceof Number right) {
+            return right.doubleValue() - left.doubleValue();
+        }
+        return null;
     }
 
     static Double aggregate(List<Double> values, String aggregation) {

@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.assay.metrics.Metric;
+import io.assay.metrics.ToolPermissionMetric;
 import org.junit.jupiter.api.Test;
+import java.util.List;
+import java.util.Set;
 
 /** Settings own the constructor contract that used to live in the engine's 13-argument constructor. */
 class EvaluationSettingsTest {
@@ -59,6 +63,27 @@ class EvaluationSettingsTest {
         assertEquals("adapter-v2", settings.runIdentity());
         assertSame(EvaluationListener.NOOP, settings.listener());
         assertFalse(settings.budget().enabled());
+    }
+
+    @Test
+    void derivesTheOuterTimeoutFromAttemptsAndBackoff() {
+        EvaluationSettings settings = EvaluationSettings.builder()
+                .retries(2)
+                .timeoutSeconds(10)
+                .retryPolicy(io.assay.runner.RetryPolicy.defaults())
+                .build();
+
+        assertEquals(33.0, settings.timeoutBudgetSeconds(), 1e-9);
+        assertEquals(10.0, EvaluationSettings.defaults(1, 0, 10, false, null).timeoutBudgetSeconds(), 1e-9);
+    }
+
+    @Test
+    void carriesConfiguredMetricsAndDefaultsToNone() {
+        Metric metric = new ToolPermissionMetric(Set.of("lookup"), Set.of("shell"));
+        EvaluationSettings settings = EvaluationSettings.builder().metrics(List.of(metric)).build();
+
+        assertEquals(List.of(metric), settings.metrics());
+        assertEquals(List.of(), EvaluationSettings.defaults(1, 0, 30, false, null).metrics());
     }
 
     @Test
