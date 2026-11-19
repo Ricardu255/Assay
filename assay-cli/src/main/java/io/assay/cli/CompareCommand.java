@@ -1,7 +1,7 @@
 package io.assay.cli;
 
+import io.assay.bootstrap.Stores;
 import io.assay.compare.CompareGate;
-import io.assay.execution.Stores;
 import io.assay.json.Json;
 import io.assay.model.Values;
 import io.assay.release.CompareEngine;

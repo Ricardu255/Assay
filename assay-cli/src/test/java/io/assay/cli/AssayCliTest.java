@@ -4,11 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.assay.json.Json;
+import io.assay.model.CaseResult;
 import io.assay.runner.Job;
 import io.assay.runner.JobStatus;
 import io.assay.runner.JobStore;
+import io.assay.store.file.ResultStore;
 import io.assay.store.jdbc.JdbcJobStore;
 import io.assay.support.AtomicFiles;
+import io.assay.testing.Fixtures;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.Proxy;
@@ -95,6 +98,136 @@ class AssayCliTest {
             assertTrue(Files.isRegularFile(root.resolve("runs").resolve(finished.payload().get("run_id").toString())
                     .resolve("results.json")));
         }
+    }
+
+    @Test
+    void runWithPresetWritesMetricStatistics(@TempDir Path root) {
+        Path cases = writeCases(root, "metric.jsonl", List.of(echoCase("M1", "hello", "ECHO", "hello")));
+        int code = AssayCli.run(new String[] {
+            "run",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "smoke",
+            "--cases", cases.toString(),
+            "--store", root.resolve("store").toString(),
+            "--output", root.resolve("runs").toString(),
+            "--run-id", "metric-preset",
+            "--preset", "agent-safety"
+        });
+
+        assertEquals(0, code);
+        Map<String, Object> results =
+                Json.parseObject(AtomicFiles.readText(root.resolve("runs/metric-preset/results.json")));
+        Map<String, Object> stats = Json.parseObject(Json.write(results.get("metric_stats")));
+        Map<String, Object> permission = asMap(stats.get("tool_permission"));
+        assertEquals(1, ((Number) permission.get("skipped")).intValue());
+        assertTrue(AtomicFiles.readText(root.resolve("runs/metric-preset/report.md"))
+                .contains("## Metric scores"));
+    }
+
+    @Test
+    void runRejectsPresetAndMetricsFileTogether(@TempDir Path root) {
+        Path cases = writeCases(root, "metric.jsonl", List.of(echoCase("M1", "hello", "ECHO", "hello")));
+        int code = AssayCli.run(new String[] {
+            "run",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "smoke",
+            "--cases", cases.toString(),
+            "--preset", "agent-safety",
+            "--metrics", "metrics.json"
+        });
+
+        assertEquals(2, code);
+    }
+
+    @Test
+    void runWithMetricsFileWritesMetricStatistics(@TempDir Path root) {
+        Path cases = writeCases(root, "metric.jsonl", List.of(echoCase("M1", "hello", "ECHO", "hello")));
+        Path metrics = root.resolve("metrics.json");
+        AtomicFiles.writeText(metrics, "{\"metrics\":[{\"type\":\"tool_permission\",\"level\":\"soft\"}]}");
+        int code = AssayCli.run(new String[] {
+            "run",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "smoke",
+            "--cases", cases.toString(),
+            "--store", root.resolve("store").toString(),
+            "--output", root.resolve("runs").toString(),
+            "--run-id", "metric-file",
+            "--metrics", metrics.toString(),
+            "--metric-cache", root.resolve("metric-cache").toString()
+        });
+
+        assertEquals(0, code);
+        Map<String, Object> results =
+                Json.parseObject(AtomicFiles.readText(root.resolve("runs/metric-file/results.json")));
+        Map<String, Object> stats = Json.parseObject(Json.write(results.get("metric_stats")));
+        assertEquals(1, ((Number) asMap(stats.get("tool_permission")).get("skipped")).intValue());
+    }
+
+    @Test
+    void runRejectsAnUnknownPreset(@TempDir Path root) {
+        Path cases = writeCases(root, "metric.jsonl", List.of(echoCase("M1", "hello", "ECHO", "hello")));
+        int code = AssayCli.run(new String[] {
+            "run",
+            "--adapter", "io.assay.examples.EchoAdapter",
+            "--suite", "smoke",
+            "--cases", cases.toString(),
+            "--preset", "agent-magic"
+        });
+
+        assertEquals(2, code);
+    }
+
+    @Test
+    void runPrintsCaseDetailsWhenDisplayIsEnabled(@TempDir Path root) throws Exception {
+        Path cases = writeCases(root, "display.jsonl", List.of(echoCase("D1", "hello", "ECHO", "hello")));
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
+        try {
+            System.setOut(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(0, AssayCli.run(new String[] {
+                "run",
+                "--adapter", "io.assay.examples.EchoAdapter",
+                "--suite", "smoke",
+                "--cases", cases.toString(),
+                "--store", root.resolve("store").toString(),
+                "--output", root.resolve("runs").toString(),
+                "--run-id", "display-run",
+                "--display", "all"
+            }));
+        } finally {
+            System.setOut(original);
+        }
+
+        String output = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(output.contains("[PASS] D1"), output);
+    }
+
+    @Test
+    void calibrateReadsReviewsAndWritesTheMatrix(@TempDir Path root) {
+        Path storePath = root.resolve("store");
+        try (ResultStore store = new ResultStore(storePath)) {
+            store.startRun("run-cal", "adapter", "suite", "online", Map.of(), false, Map.of("C1", "hash"));
+            store.saveCases(List.of(new CaseResult(
+                    "run-cal",
+                    "suite",
+                    "online",
+                    Fixtures.evalCase("C1", Map.of(), Map.of(), "suite"),
+                    null,
+                    List.of())));
+            store.saveReview("run-cal", "C1", "confirmed_badcase", "bad answer");
+        }
+        Path output = root.resolve("calibration.md");
+
+        int code = AssayCli.run(new String[] {
+            "calibrate",
+            "--store", storePath.toString(),
+            "--output", output.toString()
+        });
+
+        assertEquals(0, code);
+        String markdown = AtomicFiles.readText(output);
+        assertTrue(markdown.contains("Evaluator Calibration"), markdown);
+        assertTrue(markdown.contains("| Auto: good | 1 | 0 |"), markdown);
     }
 
     @Test

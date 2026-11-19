@@ -2,10 +2,10 @@ package io.assay.cli;
 
 import io.assay.adapters.AdapterLoader;
 import io.assay.autoevolve.AutoEvolutionLoop;
+import io.assay.bootstrap.Stores;
 import io.assay.engine.CaseLoader;
 import io.assay.engine.EvaluationEngine;
 import io.assay.evolve.EvolutionEngine;
-import io.assay.execution.Stores;
 import io.assay.json.Json;
 import io.assay.model.AutoEvolutionAdapter;
 import io.assay.model.EvalCase;

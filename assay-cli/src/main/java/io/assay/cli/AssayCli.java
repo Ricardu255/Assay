@@ -1,23 +1,31 @@
 package io.assay.cli;
 
 import io.assay.adapters.AdapterLoader;
+import io.assay.bootstrap.Stores;
 import io.assay.engine.CaseLoader;
 import io.assay.engine.CircuitBreaker;
 import io.assay.engine.EvaluationEngine;
 import io.assay.engine.EvaluationListener;
+import io.assay.engine.EvaluationSettings;
 import io.assay.engine.LlmReviewer;
-import io.assay.execution.Stores;
 import io.assay.json.Json;
 import io.assay.llm.OpenAiCompatibleReviewer;
+import io.assay.metrics.LlmJudge;
+import io.assay.metrics.Metric;
+import io.assay.metrics.MetricCache;
+import io.assay.metrics.MetricConfig;
+import io.assay.metrics.MetricPresets;
 import io.assay.model.EvalCase;
 import io.assay.model.EvaluationBudget;
 import io.assay.model.ProjectAdapter;
 import io.assay.model.TestSelection;
 import io.assay.model.Values;
+import io.assay.report.ConsoleReport;
 import io.assay.report.Reporting;
 import io.assay.runner.RetryPolicy;
 import io.assay.selection.TestSelectionService;
 import io.assay.store.Results;
+import io.assay.store.file.FileMetricCache;
 import io.assay.support.AtomicFiles;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -131,6 +139,48 @@ public final class AssayCli {
                             .option("run-id", CommandLine.Kind.STRING, null)
                             .flag("resume"),
                     AssayCli::runSuite),
+            new Command(
+                    new CommandLine.Spec("synth", "generate synthetic cases from documents or traces")
+                            .option("from", CommandLine.Kind.STRING, "docs", "docs", "traces")
+                            .required("input", CommandLine.Kind.STRING)
+                            .required("out", CommandLine.Kind.STRING)
+                            .option("scenario", CommandLine.Kind.STRING, "synthetic")
+                            .option("expected-key", CommandLine.Kind.STRING, "answer")
+                            .option("contexts-per-document", CommandLine.Kind.INTEGER, "2")
+                            .option("per-context", CommandLine.Kind.INTEGER, "2")
+                            .option("evolutions", CommandLine.Kind.INTEGER, "1")
+                            .option("seed", CommandLine.Kind.INTEGER, "7")
+                            .option("max-cases", CommandLine.Kind.INTEGER, "50")
+                            .option("max-calls", CommandLine.Kind.INTEGER, "200")
+                            .option("max-tokens", CommandLine.Kind.INTEGER, "400000")
+                            .option("quality-threshold", CommandLine.Kind.DECIMAL, "7")
+                            .option("max-rewrite-retries", CommandLine.Kind.INTEGER, "2")
+                            .option("duplicate-threshold", CommandLine.Kind.DECIMAL, "0.9")
+                            .option("chunk-chars", CommandLine.Kind.INTEGER, "1200")
+                            .option("chunk-overlap", CommandLine.Kind.INTEGER, "150")
+                            .option("base-url", CommandLine.Kind.STRING, null)
+                            .option("model", CommandLine.Kind.STRING, null),
+                    SynthCommand::run),
+            new Command(
+                    new CommandLine.Spec("attack", "generate adversarial cases from existing cases")
+                            .required("input", CommandLine.Kind.STRING)
+                            .required("out", CommandLine.Kind.STRING)
+                            .option("categories", CommandLine.Kind.STRING, null)
+                            .option("scenario", CommandLine.Kind.STRING, "adversarial")
+                            .option("variants", CommandLine.Kind.INTEGER, "1")
+                            .option("max-cases", CommandLine.Kind.INTEGER, "100")
+                            .option("max-calls", CommandLine.Kind.INTEGER, "300")
+                            .option("max-tokens", CommandLine.Kind.INTEGER, "600000")
+                            .option("duplicate-threshold", CommandLine.Kind.DECIMAL, "0.9")
+                            .option("base-url", CommandLine.Kind.STRING, null)
+                            .option("model", CommandLine.Kind.STRING, null),
+                    AttackCommand::run),
+            new Command(
+                    new CommandLine.Spec("calibrate", "compare human review decisions with the automatic verdict")
+                            .option("store", CommandLine.Kind.STRING, ".assay/store")
+                            .option("output", CommandLine.Kind.STRING, ".assay/calibration.md")
+                            .option("metric", CommandLine.Kind.STRING, null),
+                    CalibrationCommand::run),
             new Command(
                     new CommandLine.Spec("select-tests", "recommend test suites from the current Git diff")
                             .option("repository", CommandLine.Kind.STRING, ".")
@@ -328,6 +378,13 @@ public final class AssayCli {
                 .option("retry-jitter", CommandLine.Kind.DECIMAL, "0.2")
                 .option("breaker-failures", CommandLine.Kind.INTEGER, "5")
                 .option("breaker-reset-seconds", CommandLine.Kind.DECIMAL, "30")
+                .option("preset", CommandLine.Kind.STRING, null)
+                .option("metrics", CommandLine.Kind.STRING, null)
+                .option("metric-cache", CommandLine.Kind.STRING, null)
+                .option("base-url", CommandLine.Kind.STRING, null)
+                .option("model", CommandLine.Kind.STRING, null)
+                .option("display", CommandLine.Kind.STRING, "none", "none", "failing", "passing", "all")
+                .option("max-display-cases", CommandLine.Kind.INTEGER, "20")
                 .flag("use-llm")
                 .flag("collect-few-shot")
                 .option("run-identity", CommandLine.Kind.STRING, null);
@@ -356,20 +413,42 @@ public final class AssayCli {
         CircuitBreaker adapterBreaker = breaker(args);
         LlmReviewer reviewer = reviewer(args.flag("use-llm"));
         CircuitBreaker reviewerBreaker = reviewer == null ? CircuitBreaker.disabled() : breaker(args);
-        return new EvaluationEngine(
-                adapter,
-                store,
-                reviewer,
-                args.integer("workers"),
-                args.integer("retries"),
-                args.decimal("timeout"),
-                args.flag("collect-few-shot"),
-                args.string("run-identity"),
-                EvaluationListener.NOOP,
-                budget,
-                retryPolicy,
-                adapterBreaker,
-                reviewerBreaker);
+        EvaluationSettings settings = EvaluationSettings.builder()
+                .workers(args.integer("workers"))
+                .retries(args.integer("retries"))
+                .timeoutSeconds(args.decimal("timeout"))
+                .collectFewShot(args.flag("collect-few-shot"))
+                .runIdentity(args.string("run-identity"))
+                .listener(EvaluationListener.NOOP)
+                .budget(budget)
+                .retryPolicy(retryPolicy)
+                .adapterBreaker(adapterBreaker)
+                .reviewerBreaker(reviewerBreaker)
+                .metrics(metrics(args))
+                .metricCache(metricCache(args))
+                .build();
+        return new EvaluationEngine(adapter, store, reviewer, settings);
+    }
+
+    private static List<Metric> metrics(CommandLine.Namespace args) {
+        String file = args.string("metrics");
+        String preset = args.string("preset");
+        boolean hasFile = file != null && !file.isBlank();
+        boolean hasPreset = preset != null && !preset.isBlank();
+        if (hasFile && hasPreset) {
+            throw new CommandLine.UsageException("--metrics and --preset are mutually exclusive", 2, true);
+        }
+        try {
+            LlmJudge judge = JudgeOptions.resolve(args);
+            return hasFile ? MetricConfig.load(args.path("metrics"), judge) : MetricPresets.resolve(preset);
+        } catch (IllegalArgumentException error) {
+            throw new CommandLine.UsageException(error.getMessage(), 2, false);
+        }
+    }
+
+    private static MetricCache metricCache(CommandLine.Namespace args) {
+        Path directory = args.path("metric-cache");
+        return directory == null ? null : new FileMetricCache(directory);
     }
 
     private static CircuitBreaker breaker(CommandLine.Namespace args) {
@@ -390,6 +469,7 @@ public final class AssayCli {
             Path output = args.path("output").resolve(String.valueOf(summary.get("run_id")));
             Reporting.writeRunArtifacts(summary, output);
             printSummary(summary);
+            ConsoleReport.print(summary, args.string("display"), args.integer("max-display-cases"));
             System.out.println("report: " + output.resolve("report.md"));
             return Values.numberAsInt(summary.get("hard_failures")) > 0
                             || "budget_exhausted".equals(summary.get("status"))
